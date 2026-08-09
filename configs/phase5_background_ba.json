@@ -4,6 +4,8 @@
   "historical_tool_sha256": "1f01256e336474fae5c79434323b7c092b618c3b94e171077c80897f95a53feb",
   "migrated_tool_sha256": "689cd0997213df5b5896af6ec6e2a34b4cbfca8a4738583947aae325ec48601f",
   "migration_change_scope": "public project naming, dataset-root injection, output/input overlap guard only",
+  "phase5_1_recovery_tool_sha256": "7245b7207f50bb867d0f687f16b97c884065f86f33273ee581c88db405ec1410",
+  "phase5_1_change_scope": "pushup_0003 Stage 2 max_nfev override and optimizer trace verbosity only; frozen default remains 300",
   "historical_configuration_sha256": "df640077fd89f462eec6001f13465e808be47f991d6637175dfbfa24b7d2764a",
   "algorithm_changed_during_phase5": false,
   "configuration": {

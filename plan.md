@@ -7,9 +7,10 @@
 
 - Phase 0–4: `DONE`
 - Phase 5 dataset-wide 실행: `DONE`
-- Phase 5 downstream camera freeze gate: `REVIEW`
-- 사유: 26 sequence 중 `pushup_0003` 1건이 Stage 2 `max_nfev=300`에서 미수렴
-- Phase 6: `TODO`, Phase 5 FAIL 사용 정책이 확정될 때까지 전체 실행 보류
+- Phase 5.1 `pushup_0003` recovery: `DONE` (`RECOVERED_REVIEW`)
+- Phase 5 downstream camera freeze gate: `DONE` (REVIEW uncertainty 전파 조건)
+- 최종 camera status: PASS 11 / REVIEW 15 / FAIL 0, Stage 1/2 26/26 수렴
+- Phase 6: `TODO`, camera quality metadata를 입력으로 pilot 시작 가능
 
 ## Phase 0 — Dataset Inventory / Integrity
 
@@ -88,18 +89,32 @@
 
 ## Phase 5 — Full Dataset Fixed-Camera Background BA
 
-- 상태: `REVIEW` (계산 완료, downstream gate 미통과)
+- 상태: `DONE` (Phase 5.1 recovery 반영)
 - 목적: Phase 4 승인 알고리즘을 변경하지 않고 전체 sequence의 최종 camera geometry 후보 생성
 - 입력: Phase 2/3/4 산출물과 frozen default
 - 출력: 26 sequence의 camera/track/point/residual/metrics/validation 및 dataset summary
 - 방법: [configs/phase5_background_ba.json](configs/phase5_background_ba.json)의 default 그대로 실행
 - Acceptance: 26/26 파일 완결, Stage 1/2 수렴, SE(3) consistency, source/VGGT payload 불변,
   PASS/REVIEW/FAIL과 uncertainty/gauge/scale provenance 보존
-- 결과: PASS 11 / REVIEW 14 / FAIL 1; Stage 1 26/26, Stage 2 25/26; final points 1,100,
-  observations 11,046; accepted residual median 3.630→2.582 px
-- FAIL: `pushup_0003`, Stage 2 max function evaluation 도달. 결과를 자동 fallback하지 않음
-- 다음 gate: FAIL camera를 제외할지, pilot initialization으로 fallback할지, 별도 승인된 재최적화를
-  할지 명시적으로 결정한 뒤 camera geometry freeze
+- 결과: Phase 5.1 반영 후 PASS 11 / REVIEW 15 / FAIL 0; Stage 1/2 26/26;
+  final points 1,100, observations 11,046; accepted residual median 3.630→2.584 px
+- Recovery: `pushup_0003`은 Stage 2 budget만 600으로 확장해 322 nfev에서 수렴,
+  sparse support 때문에 `RECOVERED_REVIEW`; fallback 없음
+- 다음 gate: camera geometry freeze 승인. REVIEW uncertainty를 Phase 6/7에 전달
+
+## Phase 5.1 — pushup_0003 Camera Recovery
+
+- 상태: `DONE`
+- 목적: Phase 5의 유일한 FAIL이 알고리즘 변경 없이 optimization budget만으로 회복 가능한지 검증
+- 입력: Phase 5 baseline, 동일 설정의 300-control, Stage 2 `max_nfev=600` recovery run
+- 출력: recovered camera/points/residual/validation, optimizer trace, recovery analysis와 갱신된 dataset summary
+- 주요 방법: Stage 1 budget 300 유지, Stage 2 budget만 600; objective, loss, observation,
+  track/filter/gate, initialization, K, gauge와 scale gauge 동일
+- Acceptance: formal convergence, finite SE(3), residual 비악화, visual geometry 정상,
+  300-control 재현과 input/init equality
+- 결과: 322 nfev에서 `xtol` 수렴, median 4.954→2.559 px, p90 8.037→5.054 px,
+  `RECOVERED_REVIEW`, fallback 미사용
+- 다음 gate: FAIL 0으로 camera geometry dataset freeze 승인; REVIEW metadata 보존
 
 ## Phase 6 — High-Quality 2D Pose Observation
 

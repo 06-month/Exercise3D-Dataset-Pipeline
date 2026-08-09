@@ -58,12 +58,14 @@ camera calibration을 구분합니다.
 | 3. VGGT-Ω Initialization | DONE | 26/26 sequence, 78/78 camera, 624 sampled frames, 실패 0 |
 | 3G. Open3D Visual Gate | DONE | 전역 mirror/180° flip/exploding cloud 없음, 1 PASS + 3 REVIEW 대표 검사 |
 | 4. Fixed-Camera Background BA Pilot | DONE | 4 sequences, PASS 2 / REVIEW 2 / FAIL 0, Stage 1/2 모두 수렴 |
-| 5. Full Dataset Background BA | REVIEW | 26 sequences 실행 완료, PASS 11 / REVIEW 14 / FAIL 1, Stage 1 26/26·Stage 2 25/26 |
-| 6–13 | TODO | Phase 5 FAIL 처리 정책과 camera freeze gate 이후 진행 |
+| 5. Full Dataset Background BA | DONE | 26 sequences 실행 완료, Phase 5.1 후 PASS 11 / REVIEW 15 / FAIL 0, Stage 1/2 26/26 |
+| 5.1. `pushup_0003` Camera Recovery | DONE | 동일 objective에서 Stage 2 budget만 확장, 322 nfev에서 수렴, `RECOVERED_REVIEW` |
+| 6–13 | TODO | camera geometry freeze 승인; REVIEW uncertainty를 보존해 다음 gate 진행 가능 |
 
-Phase 5의 계산 자체는 완료됐지만 `pushup_0003` Stage 2가 `max_nfev=300`에서 수렴하지
-않아 downstream camera freeze gate는 REVIEW 상태입니다. 이 결과를 임의로 PASS로 바꾸거나
-Phase 4에서 승인한 알고리즘을 조용히 변경하지 않습니다.
+`pushup_0003`은 Phase 5.1에서 observation, initialization, objective와 gate를 그대로 두고
+Stage 2 budget만 300에서 600으로 확장했습니다. 실제 322 evaluations에서 `xtol`로 수렴했고,
+제한된 sparse support 때문에 `RECOVERED_REVIEW`로 유지합니다. Dataset-level FAIL은 0이며
+camera geometry freeze는 REVIEW uncertainty 전파 조건으로 승인되었습니다.
 
 세부 상태와 acceptance gate는 [plan.md](plan.md), 시간순 실행 기록은
 [process.md](process.md)를 기준으로 합니다.
@@ -186,6 +188,7 @@ Phase 5에서 실제 사용한 수치 default는
 | `tools/visualize_vggt.py` | Open3D geometry QA | optional debug output만 생성 |
 | `tools/background_bundle_adjust.py` | shared physical-camera Background BA | 새 output에만 생성 |
 | `tools/finalize_background_ba_dataset.py` | dataset-level BA validation/report | BA output metadata 생성 |
+| `tools/analyze_background_ba_recovery.py` | Stage 2 budget-only recovery 재현·동일성 검증 | BA output metadata 생성 |
 | `tools/check_publication_safety.py` | staged/tracked 공개 안전 검사 | 없음 |
 
 ## 저장소 구조

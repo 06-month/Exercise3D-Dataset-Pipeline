@@ -285,3 +285,52 @@ Phase 6 전체 실행은 보류한다.
 
 이후 dataset-construction 변경의 canonical source는 이 public repository다. 각 Phase는
 acceptance gate 후 문서화, 안전 검사, commit/push까지 완료해야 한다.
+
+## 2026-08-09 — Phase 5.1 pushup_0003 Camera Recovery 완료
+
+### 원인 분석과 동일성 control
+
+- Phase 5 Stage 1은 cost 10,498.589521에서 정식 수렴했다.
+- Stage 2는 cost를 1,672.515861까지 낮췄지만 `max_nfev=300`에서 종료됐다.
+- 300-control은 Phase 5의 initial camera, 모든 track/observation array,
+  `points_initial`/`points_stage1`, Stage 1 result와 Stage 2 cost를 exact 재현했다.
+- 24 sample 모두 GOOD이고 특정 sample reject는 없었다. cam2 residual이 가장 높지만 camera
+  explosion 없이 tail step이 작아져, 원인은 발산이 아닌 evaluation budget 부족으로 판단했다.
+
+### 실행
+
+```bash
+python tools/background_bundle_adjust.py \
+  --dataset-root <PRIVATE_DATASET_ROOT> \
+  --vggt-root <PRIVATE_VGGT_ROOT> \
+  --output-root outputs/local/background_ba/recovery_runs/nfev_600 \
+  --sequence pushup_0003 \
+  --max-nfev 300 \
+  --stage2-max-nfev 600 \
+  --optimizer-verbose 2
+```
+
+Stage 1은 기존 300 budget을 유지했고 Stage 2 budget만 600으로 확장했다. 새로운 matcher,
+threshold, heuristic, loss, weighting 또는 observation 변경은 없다.
+
+### 결과와 Visual QA
+
+- Stage 2 `xtol` 수렴: actual nfev 322, final cost 1,657.953684
+- median 4.954229→2.558895 px, p90 8.037446→5.053964 px,
+  p95 9.295044→7.055627 px
+- final 21 tracks / 183 observations, sample GOOD 24 / DOWNWEIGHT 0 / REJECT 0
+- cam2/cam3 robust-init rotation change 2.538° / 1.859°,
+  center scene fraction 0.003830 / 0.003494
+- Open3D top/side 검사: plausible rig/orientation, mirror·180° flip·explosion 없음
+- sparse support 때문에 `RECOVERED_REVIEW`; VGGT fallback 미사용
+
+### Dataset gate와 무결성
+
+- 최종 PASS 11 / REVIEW 15 / FAIL 0
+- Stage 1/2 26/26 수렴, per-sequence validation 26/26 PASS
+- camera geometry freeze 승인; REVIEW uncertainty는 downstream에 전달
+- 외부 private workspace의 raw 78, synchronized 130-file tree, working JPEG 65,595,
+  VGGT 689-file numeric tree와 Background BA 1,057-file tree fingerprint가 전/후 동일
+- Sapiens2, triangulation, SAM-Body4D, SMPL/human fitting, pseudo-label 수행 없음
+- viewer relative debug path가 external dataset root로 해석될 수 있던 경로를 canonical project
+  root로 수정했고, 진단 중 생성된 두 debug file은 식별 후 제거하여 external tree를 원상 복구했다.

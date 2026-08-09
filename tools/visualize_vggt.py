@@ -563,7 +563,7 @@ def main(argv: list[str] | None = None) -> int:
         debug_root = (
             args.debug_root.resolve()
             if args.debug_root.is_absolute()
-            else (args.root / args.debug_root).resolve()
+            else (PROJECT_ROOT / args.debug_root).resolve()
         )
         immutable_roots = [
             (args.root / name).resolve()
