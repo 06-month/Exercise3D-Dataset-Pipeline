@@ -7,3 +7,5 @@ Pillow>=10
 # Open3D viewer는 GUI/driver 환경 차이가 커서 별도 설치한다.
 #   pip install open3d
 # VGGT-Ω의 torch 및 모델 의존성은 공식 구현 환경을 사용한다.
+# Sapiens2 Pose 5B는 Python>=3.12, torch>=2.7 별도 환경을 사용한다.
+# 정확한 검증 버전은 configs/sapiens2_pose_5b_environment.json을 참고한다.

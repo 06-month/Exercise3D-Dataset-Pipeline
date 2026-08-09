@@ -334,3 +334,64 @@ threshold, heuristic, loss, weighting 또는 observation 변경은 없다.
 - Sapiens2, triangulation, SAM-Body4D, SMPL/human fitting, pseudo-label 수행 없음
 - viewer relative debug path가 external dataset root로 해석될 수 있던 경로를 canonical project
   root로 수정했고, 진단 중 생성된 두 debug file은 식별 후 제거하여 external tree를 원상 복구했다.
+
+## 2026-08-09 — Phase 6-0 Sapiens2-5B Pose Environment 완료
+
+### 공식 구현과 detector 결정
+
+- official `facebookresearch/sapiens2` commit
+  `7e5bae88456ac418ff0e58e74106c9fe192055d4`를 별도 external source로 clone했다.
+- official checkpoint `facebook/sapiens2-pose-5b`의
+  `sapiens2_5b_pose.safetensors`만 primary pose weight로 사용했다.
+- model card의 RTMDet 문구와 달리 현재 official `docs/POSE.md`, demo shell과
+  `vis_pose.py`는 `facebook/detr-resnet-101-dc5`를 사용한다. 실제 실행 code를 우선했다.
+- top-down crop 1024×768, Sociopticon 308 points, UDP heatmap decode와 flip-test를 확인했다.
+
+### 환경과 checkpoint
+
+```bash
+conda create -y -n sapiens2 python=3.12 pip
+conda run -n sapiens2 python -m pip install \
+  torch==2.7.1 torchvision==0.22.1 \
+  --index-url https://download.pytorch.org/whl/cu118
+conda run -n sapiens2 python -m pip install -e <SAPIENS2_REPO>
+```
+
+- Python 3.12.13, PyTorch 2.7.1+cu118, torchvision 0.22.1+cu118
+- transformers 5.14.1, safetensors 0.8.0, OpenCV 5.0.0.93
+- A100-SXM4-80GB, driver 535.183.06, compute capability 8.0, BF16 지원 확인
+- pose checkpoint 20,480,899,148 bytes; SHA-256
+  `b4848da8691c72e14d3ff71319f077363107129bf4128019eb39d072129b2a52`
+- detector snapshot revision `96317ca979e231bd960cb3cac31328e0165a3e94`
+
+### Smoke 실행과 결과
+
+```bash
+conda run -n sapiens2 python tools/sapiens2_pose_smoke.py \
+  --image <PRIVATE_REPRESENTATIVE_FRAME> \
+  --sapiens2-root <SAPIENS2_REPO> \
+  --checkpoint-root <CHECKPOINT_ROOT> \
+  --warmup 1 --repeats 3 \
+  --output-json outputs/local/sapiens2/smoke.json
+```
+
+- representative barbell-row frame에서 person 1명 detection 성공
+- pose model GPU load 성공, FP32 model load 약 58.46 s
+- 308 keypoint coordinates와 308 confidence 출력, 모두 finite
+- confidence ≥0.3 point 100%가 원본 frame 내부, original pixel `(x,y)` 복원 정상
+- official 308 flip mapping involution과 body left/right name pair 정상
+- end-to-end detector + two-pass flip-test latency median 4.517 s/image
+- peak CUDA allocated 19.986 GiB, reserved 20.961 GiB
+- visual skeleton의 body/hand/foot 배치와 좌우 ordering plausible
+
+첫 smoke checker는 구형 COCO ankle index pair를 가정해 계산 후 FAIL을 표시했다. 모델 출력 문제가
+아니었으며 official 308 metainfo의 name 기반 pair 검사로 수정한 뒤 동일 inference가 PASS했다.
+Detector safetensors load의 네 BatchNorm counter warning은 detection이 정상이라 compatibility note로
+유지한다.
+
+### 결정
+
+5B는 OOM/instability 없이 동작하므로 primary offline teacher로 확정했다. 1B comparison은 수행하지
+않았다. 단일 job 단순 외삽 약 82.3 GPU-hours는 offline 목적에서 허용 가능하며, Phase 6-1에서
+official 2 jobs/GPU의 실제 throughput과 multi-exercise robustness를 먼저 측정한다. 전체 26 sequence
+inference, triangulation, SAM-Body4D, MHR, SMPL과 pseudo-label generation은 수행하지 않았다.

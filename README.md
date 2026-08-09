@@ -60,7 +60,9 @@ camera calibration을 구분합니다.
 | 4. Fixed-Camera Background BA Pilot | DONE | 4 sequences, PASS 2 / REVIEW 2 / FAIL 0, Stage 1/2 모두 수렴 |
 | 5. Full Dataset Background BA | DONE | 26 sequences 실행 완료, Phase 5.1 후 PASS 11 / REVIEW 15 / FAIL 0, Stage 1/2 26/26 |
 | 5.1. `pushup_0003` Camera Recovery | DONE | 동일 objective에서 Stage 2 budget만 확장, 322 nfev에서 수렴, `RECOVERED_REVIEW` |
-| 6–13 | TODO | camera geometry freeze 승인; REVIEW uncertainty를 보존해 다음 gate 진행 가능 |
+| 6-0. Sapiens2-5B Environment | DONE | A100 80GB smoke PASS, 308 keypoints, peak 19.986 GiB, 4.517 s/image |
+| 6-1. Sapiens2 Pose Pilot | TODO | 5B primary teacher의 소규모 multi-exercise throughput/output QA |
+| 7–13 | TODO | Phase 6-1 observation gate 이후 triangulation/body pipeline 진행 |
 
 `pushup_0003`은 Phase 5.1에서 observation, initialization, objective와 gate를 그대로 두고
 Stage 2 budget만 300에서 600으로 확장했습니다. 실제 322 evaluations에서 `xtol`로 수렴했고,
@@ -100,6 +102,11 @@ pip install open3d
 VGGT-Ω는 공식 구현과 사용 권한이 있는 local checkpoint를 별도로 준비해야 합니다.
 이 저장소는 checkpoint를 다운로드하거나 재배포하지 않습니다. PyTorch/CUDA dependency도
 공식 VGGT-Ω 환경을 우선합니다.
+
+Sapiens2 Pose 5B는 Python 3.12/PyTorch 2.7 이상을 요구하므로 Phase 0–5 환경과 분리합니다.
+검증된 dependency와 checkpoint hash는
+[configs/sapiens2_pose_5b_environment.json](configs/sapiens2_pose_5b_environment.json),
+설치·smoke 절차는 [Phase 6 문서](docs/phases/phase_6_sapiens2.md)에 기록했습니다.
 
 ## 외부 private dataset 연결
 
@@ -175,6 +182,16 @@ python tools/background_bundle_adjust.py \
 Phase 5에서 실제 사용한 수치 default는
 [configs/phase5_background_ba.json](configs/phase5_background_ba.json)에 freeze했습니다.
 
+Sapiens2 Pose 5B single-image smoke:
+
+```bash
+"$EXERCISE3D_SAPIENS2_PYTHON" tools/sapiens2_pose_smoke.py \
+  --image <PRIVATE_REPRESENTATIVE_FRAME> \
+  --sapiens2-root "$SAPIENS2_ROOT" \
+  --checkpoint-root "$EXERCISE3D_CHECKPOINT_ROOT" \
+  --output-json outputs/local/sapiens2/smoke.json
+```
+
 ## 도구
 
 | 파일 | 역할 | source mutation |
@@ -189,6 +206,7 @@ Phase 5에서 실제 사용한 수치 default는
 | `tools/background_bundle_adjust.py` | shared physical-camera Background BA | 새 output에만 생성 |
 | `tools/finalize_background_ba_dataset.py` | dataset-level BA validation/report | BA output metadata 생성 |
 | `tools/analyze_background_ba_recovery.py` | Stage 2 budget-only recovery 재현·동일성 검증 | BA output metadata 생성 |
+| `tools/sapiens2_pose_smoke.py` | 공식 Sapiens2 5B + DETR single-image smoke/VRAM/latency | optional ignored output만 생성 |
 | `tools/check_publication_safety.py` | staged/tracked 공개 안전 검사 | 없음 |
 
 ## 저장소 구조
@@ -244,7 +262,7 @@ git diff --cached
 ## Pretrained model dependency
 
 - VGGT-Ω: camera/depth/point-map initialization 전용, 최종 camera로 직접 사용하지 않음
-- Sapiens2: Phase 6 primary offline 2D teacher 후보
+- Sapiens2 Pose 5B: Phase 6 primary offline 2D teacher로 확정; official DETR person detector 사용
 - SAM 3D Body / SAM-Body4D: Phase 8 pretrained temporal body prior 후보
 - Fit3D: Phase 12 정량 validation dataset 후보
 

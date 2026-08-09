@@ -10,7 +10,8 @@
 - Phase 5.1 `pushup_0003` recovery: `DONE` (`RECOVERED_REVIEW`)
 - Phase 5 downstream camera freeze gate: `DONE` (REVIEW uncertainty 전파 조건)
 - 최종 camera status: PASS 11 / REVIEW 15 / FAIL 0, Stage 1/2 26/26 수렴
-- Phase 6: `TODO`, camera quality metadata를 입력으로 pilot 시작 가능
+- Phase 6-0 Sapiens2-5B environment/smoke: `DONE`
+- Phase 6-1 multi-exercise pose pilot: `TODO`, 5B primary teacher로 진행 가능
 
 ## Phase 0 — Dataset Inventory / Integrity
 
@@ -116,13 +117,29 @@
   `RECOVERED_REVIEW`, fallback 미사용
 - 다음 gate: FAIL 0으로 camera geometry dataset freeze 승인; REVIEW metadata 보존
 
+## Phase 6-0 — Sapiens2-5B Pose Environment Preparation
+
+- 상태: `DONE`
+- 목적: A100 80GB에서 정확도 우선 offline teacher인 Sapiens2 Pose 5B의 공식 환경과 checkpoint 검증
+- 입력: official Meta Sapiens2 repository, `facebook/sapiens2-pose-5b`, representative private frame 1장
+- 출력: 별도 Python 3.12/PyTorch 2.7 environment, pose/detector checkpoint, smoke JSON/visualization,
+  public dependency/hash manifest와 재현 CLI
+- 주요 방법: 공식 1024×768 top-down pipeline, official DETR ResNet-101 DC5 person detector,
+  UDP heatmap decode, flip test와 원본 pixel 좌표 복원
+- Acceptance: detection/model GPU load, 308 coordinates/confidence, finite/left-right/coordinate sanity,
+  peak VRAM·latency 측정, checkpoint/private output 비공개
+- 결과: PASS. peak allocated 19.986 GiB, reserved 20.961 GiB, end-to-end median 4.517 s/image;
+  5B primary teacher 확정, 1B downgrade/comparison 미수행
+- 다음 gate: Phase 6-1에서 소규모 multi-exercise detector/pose/output schema와 throughput 검증
+
 ## Phase 6 — High-Quality 2D Pose Observation
 
 - 상태: `TODO`
 - 목적: 모든 camera/frame의 canonical 2D joint와 confidence 생성
 - 입력: synchronized frame reference, Phase 5 camera status
 - 출력: teacher-native keypoints, canonical mapping, confidence, optional teacher disagreement
-- 주요 방법: Sapiens2 1B/5B를 A100 80GB에서 pilot 비교; RTMPose를 primary offline teacher로 강제하지 않음
+- 주요 방법: Sapiens2 Pose 5B primary teacher; 1B는 OOM/비현실적 throughput/instability 또는
+  pilot accuracy 동등성 근거가 있을 때만 비교. RTMPose를 primary offline teacher로 강제하지 않음
 - Acceptance: mapping/visibility 정의, coverage, left-right sanity, temporal outlier 및 second-teacher uncertainty 검증
 - 다음 gate: camera PASS/REVIEW 정책과 2D observation quality 확정 후 triangulation
 
