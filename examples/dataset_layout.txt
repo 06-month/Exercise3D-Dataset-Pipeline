@@ -1,0 +1,12 @@
+<PRIVATE_DATASET_ROOT>/
+├── origin/<exercise>/*.MOV
+├── synced_video/<exercise>/<sequence_id>/
+│   ├── cam1.mp4
+│   ├── cam2.mp4
+│   ├── cam3.mp4
+│   └── sync.json
+├── final_frame/<exercise>/<sequence_id>/cam{1,2,3}/
+├── reports/
+└── outputs/
+
+이 파일은 구조 예시일 뿐이며 실제 영상, 경로, 피험자 정보는 포함하지 않는다.

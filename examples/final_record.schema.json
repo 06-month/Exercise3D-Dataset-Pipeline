@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Exercise3D final pseudo-label record",
+  "type": "object",
+  "required": ["sequence_id", "subject_id", "exercise_id", "timestamp", "camera", "quality"],
+  "properties": {
+    "sequence_id": {"type": "string"},
+    "subject_id": {"type": "string", "description": "공개 시 비식별 ID"},
+    "exercise_id": {"type": "string"},
+    "timestamp": {"type": "number", "description": "seconds, PTS provenance"},
+    "camera": {
+      "type": "object",
+      "required": ["K", "R", "t", "camera_quality"],
+      "properties": {
+        "K": {"type": "array"},
+        "R": {"type": "array"},
+        "t": {"type": "array"},
+        "camera_quality": {"type": "object"}
+      }
+    },
+    "image_references": {"type": "object"},
+    "keypoints_2d": {"type": "object"},
+    "keypoints_3d": {"type": "object"},
+    "body": {"type": "object"},
+    "quality": {
+      "type": "object",
+      "properties": {
+        "reprojection": {"type": "number"},
+        "triangulation": {"type": "number"},
+        "temporal": {"type": "number"},
+        "teacher": {"type": "number"},
+        "camera": {"type": "number"},
+        "overall": {"type": "number"}
+      }
+    },
+    "metadata": {"type": "object"}
+  }
+}

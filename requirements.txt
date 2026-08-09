@@ -1,0 +1,9 @@
+# Phase 0-5 audit / geometry baseline
+numpy>=2.0,<2.3
+scipy>=1.11
+opencv-python-headless==4.12.0.88
+Pillow>=10
+
+# Open3D viewer는 GUI/driver 환경 차이가 커서 별도 설치한다.
+#   pip install open3d
+# VGGT-Ω의 torch 및 모델 의존성은 공식 구현 환경을 사용한다.

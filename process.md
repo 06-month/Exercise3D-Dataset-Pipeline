@@ -1,0 +1,287 @@
+# Exercise3D Chronological Engineering / Research Log
+
+이 문서는 실제 수행 순서와 의사결정을 누적한다. 공개본에는 원본 절대 경로, 피험자
+개인정보, media screenshot 및 대용량 numeric payload를 기록하지 않는다. 명령의 private
+경로는 `<PRIVATE_DATASET_ROOT>`처럼 치환한다.
+
+## 2026-08-09 — 초기 synchronization / derivative 구축 기록 이관
+
+### 수행
+
+- clap onset과 waveform cross-correlation으로 triple-view 영상의 공통 구간을 결정했다.
+- 서로 다른 native 30/30/60 fps를 보존한 raw에서 synchronized derivative와 30 fps working
+  frames를 생성했다.
+- output frame이 어떤 source frame에서 왔는지 pixel matching과 PTS로 별도 검사했다.
+- source 파일 교체가 필요한 camera filename mapping 오류 1건은 provenance를 보존한 상태로
+  수정했고, 이후 inventory에서는 replaced source를 active count에서 제외했다.
+
+### 대표 명령
+
+```bash
+python scripts/build_dataset.py \
+  --source-root <PRIVATE_DATASET_ROOT>/origin \
+  --dataset-root <PRIVATE_DATASET_ROOT> \
+  --stage all
+python scripts/verify_dataset.py --dataset-root <PRIVATE_DATASET_ROOT>
+```
+
+### 결정
+
+- sync와 working frame은 derivative이며 raw native frame rate는 유지한다.
+- sync residual과 실제 frame-grid offset을 구분한다.
+- 실제 data payload는 공개 Git 저장소로 이관하지 않는다.
+
+## 2026-08-09T12:20:46Z — Phase 0 Dataset Inventory / Integrity 완료
+
+### 실행
+
+```bash
+python tools/dataset_inventory.py \
+  --dataset-root <PRIVATE_DATASET_ROOT> \
+  --output-dir <PRIVATE_OUTPUT_ROOT>/inventory
+```
+
+### 결과
+
+- 피험자 3명, triple-view 26 sequences
+- raw videos 78, synchronized videos 78
+- working JPEG 65,595장
+- camera source: iPhone 16 / 16 Pro / 17, native 30/30/60 fps
+- raw/sync inventory PASS, source/derivative provenance 유지
+- source modification 0건
+
+### 결정
+
+모든 후속 report는 frame index만이 아니라 가능한 경우 packet/frame PTS를 함께 저장한다.
+
+## 2026-08-09T12:33:26Z — Phase 1 EIS/OIS / Camera Stability Audit 완료
+
+### 실행
+
+```bash
+python tools/eis_background_audit.py \
+  --dataset-root <PRIVATE_DATASET_ROOT> \
+  --output-dir <PRIVATE_OUTPUT_ROOT>/eis_audit
+```
+
+### 방법
+
+temporal background와 foreground component mask를 구성하고, static 영역의 LK feature track에
+homography/affine model을 fit했다. native-adjacent와 longer-baseline pair의 global motion,
+spatial residual, 반복성을 함께 평가했다.
+
+### 결과
+
+- 78/78 `FIXED_CAMERA_OK`
+- native-adjacent fit 8,087/8,087 성공
+- 반복 global/spatial warp evidence 없음
+- foreground-induced false positive 1건을 mask logic 수정 후 재검증
+- source data modification 0건
+
+### 결정
+
+physical camera는 tripod-fixed로 간주한다. downstream final camera에 timestamp별 독립 pose를
+두지 않는다.
+
+## 2026-08-09T13:18:24Z — Phase 2 Temporal Synchronization QA 완료
+
+### 실행
+
+```bash
+python tools/temporal_sync_audit.py \
+  --dataset-root <PRIVATE_DATASET_ROOT> \
+  --output-dir <PRIVATE_OUTPUT_ROOT>/temporal_alignment
+```
+
+### 방법
+
+- PTS를 frame index보다 우선했다.
+- beginning/middle/end를 포함한 여러 window에서 3 camera pair를 검사했다.
+- actual-frame mapping, audio waveform/clap, visual motion energy를 함께 사용했다.
+- RGB frame은 자르거나 보간하거나 재생성하지 않았다.
+
+### 결과
+
+- 26 sequences, 78 camera pairs
+- actual-frame PTS observation 546건
+- absolute offset median 11.99 ms, p95 25.28 ms, max 31.38 ms
+- 30 fps 1 frame인 33.33 ms 이내 546/546
+- `TEMPORALLY_STABLE` 8, `SMALL_CONSTANT_OFFSET` 16,
+  `CLOCK_DRIFT_DETECTED` 2, `INSUFFICIENT_EVIDENCE` 0
+- drift review: `pushup_0000`, `squat_0001`
+
+### 결정
+
+dataset synchronization은 사용 가능하다. offset/drift는 downstream frame pairing metadata로만
+반영하고 video 자체를 보정하지 않는다.
+
+## 2026-08-09T15:52:57Z — Phase 3 VGGT-Ω Geometry Initialization 완료
+
+### 공식 구현 확인
+
+- input preprocessing와 512-class resolution behavior
+- joint sequence inference와 output tensor shape
+- OpenCV world→camera `[R|t]`
+- canvas pixel-unit K, positive camera-Z depth
+- arbitrary sequence-local scale/gauge
+- probability가 아닌 ranking confidence
+
+### 실행
+
+```bash
+python tools/vggt_geometry_init.py \
+  --dataset-root <PRIVATE_DATASET_ROOT> \
+  --vggt-repo <LOCAL_VGGT_REPO> \
+  --checkpoint <LOCAL_CHECKPOINT> \
+  --output-dir <PRIVATE_OUTPUT_ROOT>/vggt
+```
+
+### 결과
+
+- sequence당 8 representative PTS × 3 cameras = 24 images joint inference
+- 26/26 sequence SUCCESS, 78/78 camera geometry, 624 sampled camera frames
+- 실패·필수 payload 누락 0
+- camera quality PASS 77 / REVIEW 1
+- REVIEW: `squat_0001/cam2`, rotation dispersion outlier
+
+### 결정
+
+VGGT-Ω 결과는 최종 camera가 아니다. background BA의 initialization/prior로만 사용하며
+depth/point-map scale을 metric으로 해석하지 않는다.
+
+## 2026-08-09 — Phase 3 Open3D Visual Inspection Gate 완료
+
+### 구현
+
+`tools/visualize_vggt.py`에 percentile confidence filtering, RGB mapping, world axis, camera
+frustum, voxel/max-point sampling, screenshot/PLY debug export와 BA overlay를 구현했다.
+
+### 좌표 검증
+
+world→camera에서 camera center를 `C_world = -R.T @ t`로 계산했다. OpenCV +x right,
++y down, +z forward convention을 raw output에 유지하고 display 변환을 metadata로 분리했다.
+
+### 대표 결과
+
+- `barbellrow_0000`: PASS
+- `squat_0001`: REVIEW
+- `pushup_0001`: REVIEW
+- `benchpress_0003`: REVIEW
+- 전역 mirror, 180° flip, exploding point cloud 없음
+- distant wall/floor/rack이 thin sheet로 분리되고 일부 camera pose jitter 존재
+
+### `squat_0001/cam2`
+
+특정 sample의 pose가 cluster에서 이탈했지만 전체 scene이 동시에 폭발하지 않아 camera token
+pose instability가 중심이고 dynamic foreground/point-map noise가 일부 기여하는 것으로 판단했다.
+
+## 2026-08-09 — Phase 4 Fixed-Camera Background BA Pilot 완료
+
+### 범위
+
+`barbellrow_0000`, `squat_0001`, `pushup_0001`, `benchpress_0003` 네 sequence만 pilot으로 실행했다.
+
+### 방법
+
+- VGGT timestamp pose를 robust SO(3)/translation aggregation해 physical-camera init 생성
+- cam1 identity gauge, cam2/cam3 shared extrinsic만 optimization
+- temporal median/MAD, confidence, border, persistent SIFT로 static background 추출
+- SIFT ratio, USAC_MAGSAC, epipolar/point-map consistency로 cross-view track 구성
+- fixed intrinsics Mode A, Huber robust loss, weak pose/point prior, Stage 1/2 gate
+- Phase 2 corrected timestamp는 matching pair 선택에만 사용
+
+### 결과
+
+- PASS 2 / REVIEW 2 / FAIL 0
+- 모든 sequence Stage 1/2 finite convergence
+- `squat_0001/cam2` 6.4 s VGGT pose: aggregation weight 0.001, 자동 REJECT
+- 같은 timestamp의 유효 background observation은 shared-pose BA에서 유지
+- 수동 sequence/PTS hard-code 없음
+
+### 결정
+
+동일 알고리즘과 default를 변경하지 않는 조건으로 26-sequence 확장을 승인했다.
+
+## 2026-08-09 — Phase 5 Full Dataset Background BA 실행 완료
+
+### Configuration freeze
+
+- historical tool SHA-256: `1f01256e336474fae5c79434323b7c092b618c3b94e171077c80897f95a53feb`
+- normalized configuration SHA-256: `df640077fd89f462eec6001f13465e808be47f991d6637175dfbfa24b7d2764a`
+- fixed intrinsics, Huber scale 5, max tracks 800, min length 3, max nfev 300
+- 새로운 matcher/threshold/heuristic/weighting 추가 없음
+
+### 실행 형태
+
+```bash
+python tools/background_bundle_adjust.py \
+  --dataset-root <PRIVATE_DATASET_ROOT> \
+  --vggt-root <PRIVATE_OUTPUT_ROOT>/vggt \
+  --output-root <PRIVATE_OUTPUT_ROOT>/background_ba \
+  --sequence <SEQUENCE_ID>
+python tools/finalize_background_ba_dataset.py \
+  --dataset-root <PRIVATE_DATASET_ROOT> \
+  --vggt-root <PRIVATE_OUTPUT_ROOT>/vggt \
+  --output-root <PRIVATE_OUTPUT_ROOT>/background_ba
+```
+
+### 결과
+
+- 26/26 sequence output과 78/78 camera summary 생성
+- PASS 11 / REVIEW 14 / FAIL 1
+- Stage 1 convergence 26/26, Stage 2 convergence 25/26
+- point 1,674 initial → 1,100 final
+- observation 16,835 extracted → 11,046 final
+- 동일 accepted observation의 residual:
+  - mean 4.113 → 3.361 px
+  - median 3.630 → 2.582 px
+  - p90 8.205 → 7.425 px
+  - p95 9.850 → 9.953 px
+- cam2 rotation change median/p95/max 0.457°/2.247°/2.501°
+- cam3 rotation change median/p95/max 0.376°/3.074°/3.207°
+- cam1은 exact gauge reference로 변화 0
+
+### REVIEW / FAIL
+
+REVIEW는 low track support, p95 tail, no direct three-camera track 등의 기존 gate 이유를
+그대로 보존했다. FAIL은 `pushup_0003` 1건으로 Stage 2가 `max_nfev=300`에 도달했다.
+알고리즘 freeze 원칙 때문에 threshold를 바꾸거나 자동 fallback하지 않았다.
+
+### 무결성
+
+- raw/synchronized/working frame 변경 없음
+- VGGT numeric payload 변경 없음
+- SE(3) inverse/rotation finite sanity 검사 통과
+- gauge: robust cam1 physical pose identity
+- scale: sequence-local arbitrary, initial cam1-cam2 baseline 보존
+
+### 결정
+
+dataset-level 계산은 완료됐다. 그러나 FAIL refined camera는 triangulation에 사용하지 않는다.
+제외, pilot initialization fallback 또는 별도 승인된 재최적화 중 정책을 확정하기 전까지
+Phase 6 전체 실행은 보류한다.
+
+## 2026-08-09 — 공개 전용 저장소 migration
+
+### 수행
+
+- 비어 있는 public repository를 clone하고 `main` 최초 bootstrap을 준비했다.
+- private workspace는 수정하지 않고 read-only inventory source로만 사용했다.
+- dataset-construction 관련 scripts/tools만 이관하고 public-facing legacy project 명칭을 제거했다.
+- `--dataset-root`와 `EXERCISE3D_DATASET_ROOT`를 추가하고 output path를 명시할 수 있게 했다.
+- 한국어 README/canonical plan/chronological log와 phase/design/QA 문서를 구성했다.
+- Phase 5 aggregate numeric CSV만 이관하고 exact K/R/t, media, NPZ와 debug render는 제외했다.
+- conservative `.gitignore`, publication safety checker, GitHub Actions check를 추가했다.
+
+### Migration smoke test 범위
+
+- 모든 Python source compile
+- 주요 CLI help
+- 외부 private dataset을 대상으로 BA `--dry-run`
+- staged/tracked file suffix, size, absolute path, credential pattern 검사
+- private workspace source tree hash/mtime mutation 없음 확인
+
+### 결정
+
+이후 dataset-construction 변경의 canonical source는 이 public repository다. 각 Phase는
+acceptance gate 후 문서화, 안전 검사, commit/push까지 완료해야 한다.
