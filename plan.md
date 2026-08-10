@@ -11,7 +11,8 @@
 - Phase 5 downstream camera freeze gate: `DONE` (REVIEW uncertainty 전파 조건)
 - 최종 camera status: PASS 11 / REVIEW 15 / FAIL 0, Stage 1/2 26/26 수렴
 - Phase 6-0 Sapiens2-5B environment/smoke: `DONE`
-- Phase 6-1 multi-exercise pose pilot: `TODO`, 5B primary teacher로 진행 가능
+- Phase 6-1 multi-exercise pose pilot: `IN_PROGRESS`, all-person 결과는 baseline으로 보존
+- Phase 6-1A primary target selection: `IN_PROGRESS`, full dataset inference 전 필수 gate
 
 ## Phase 0 — Dataset Inventory / Integrity
 
@@ -142,6 +143,25 @@
   pilot accuracy 동등성 근거가 있을 때만 비교. RTMPose를 primary offline teacher로 강제하지 않음
 - Acceptance: mapping/visibility 정의, coverage, left-right sanity, temporal outlier 및 second-teacher uncertainty 검증
 - 다음 gate: camera PASS/REVIEW 정책과 2D observation quality 확정 후 triangulation
+
+### Phase 6-1/6-1A — Batch pilot와 primary target identity
+
+- 상태: `IN_PROGRESS`
+- pilot: `barbellrow_0000`, `squat_0001`, `pushup_0001`, `benchpress_0003`의 3-view
+- baseline: official DETR의 모든 person crop에 5B를 실행한 기존 결과를
+  `ALL_DETECTIONS_BASELINE`으로 보존
+- target-only: all DETR candidate는 private metadata에 유지하되, forward/backward temporal
+  tracking이 합의한 primary target 1명에게만 Sapiens2-5B를 실행
+- abstention: no detection은 `NO_TARGET`, 양방향 불일치/낮은 association margin은
+  `TARGET_AMBIGUOUS`; 다른 사람을 강제 대체하지 않음
+- evidence: multi-frame initialization, bbox IoU/center displacement/scale/aspect, detector score,
+  track persistence/duration; appearance model은 bbox-temporal evidence 부족 시에만 검토
+- cross-view: PTS와 Phase 5 refined camera geometry interface 및 visibility QA까지만 수행하고,
+  이 단계에서 triangulation은 하지 않음
+- Acceptance: obvious identity switch 0, ambiguity/background 오류 분석, target-only output 정상,
+  batch 1/2/4/8/(12/16) equivalence/throughput, 65,595-frame ETA 재계산
+- 최종 gate: `GO_FULL_DATASET`, `REVIEW_TARGET_SELECTION`, `NO_GO`
+- 안전 조건: gate 보고 전 full dataset inference를 시작하지 않음
 
 ## Phase 7 — Timestamp-Aware Multi-view Triangulation
 

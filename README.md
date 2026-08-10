@@ -61,7 +61,8 @@ camera calibration을 구분합니다.
 | 5. Full Dataset Background BA | DONE | 26 sequences 실행 완료, Phase 5.1 후 PASS 11 / REVIEW 15 / FAIL 0, Stage 1/2 26/26 |
 | 5.1. `pushup_0003` Camera Recovery | DONE | 동일 objective에서 Stage 2 budget만 확장, 322 nfev에서 수렴, `RECOVERED_REVIEW` |
 | 6-0. Sapiens2-5B Environment | DONE | A100 80GB smoke PASS, 308 keypoints, peak 19.986 GiB, 4.517 s/image |
-| 6-1. Sapiens2 Pose Pilot | TODO | 5B primary teacher의 소규모 multi-exercise throughput/output QA |
+| 6-1. Sapiens2 Pose Pilot | IN PROGRESS | all-person baseline 보존, 4-sequence throughput/output QA |
+| 6-1A. Primary Target Selection | IN PROGRESS | bidirectional temporal identity gate 후 target 1명만 5B 실행 |
 | 7–13 | TODO | Phase 6-1 observation gate 이후 triangulation/body pipeline 진행 |
 
 `pushup_0003`은 Phase 5.1에서 observation, initialization, objective와 gate를 그대로 두고
@@ -207,6 +208,11 @@ Sapiens2 Pose 5B single-image smoke:
 | `tools/finalize_background_ba_dataset.py` | dataset-level BA validation/report | BA output metadata 생성 |
 | `tools/analyze_background_ba_recovery.py` | Stage 2 budget-only recovery 재현·동일성 검증 | BA output metadata 생성 |
 | `tools/sapiens2_pose_smoke.py` | 공식 Sapiens2 5B + DETR single-image smoke/VRAM/latency | optional ignored output만 생성 |
+| `tools/sapiens2_pose_pipeline.py` | all-person 5B batch benchmark와 resumable baseline pilot | ignored output만 생성 |
+| `tools/detr_person_candidates.py` | explicit sequence allowlist의 official DETR detection-only pass | ignored private output만 생성 |
+| `tools/target_subject_selection.py` | all DETR candidate 보존 + bidirectional primary target tracking | ignored private output + aggregate report |
+| `tools/sapiens2_target_pipeline.py` | accepted target-only 5B batch benchmark/inference/verification | ignored output만 생성 |
+| `tools/summarize_phase6_1.py` | all-person/target-only 비교, ETA와 acceptance gate 집계 | redacted aggregate 생성 |
 | `tools/check_publication_safety.py` | staged/tracked 공개 안전 검사 | 없음 |
 
 ## 저장소 구조

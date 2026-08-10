@@ -125,3 +125,74 @@ throughput, detector fallback rate, crop 수 분포와 output schema를 Phase 6-
 
 Phase 6-1 진행 가능 상태다. 아직 전체 inference, triangulation, SAM-Body4D, MHR, SMPL 또는
 pseudo-label generation은 수행하지 않았다.
+
+## Phase 6-1A — Primary target subject gate
+
+Top-down pose 비용과 multi-view identity contamination을 막기 위해 dataset inference 전에
+sequence/camera별 primary subject를 먼저 확정한다. Pipeline 경계는 다음과 같다.
+
+```text
+frame
+  -> official DETR all-person candidates (private ragged metadata로 전부 보존)
+  -> sequence-level forward/backward temporal tracking
+  -> agreed primary target 0 또는 1 crop
+  -> official Sapiens2 Pose 5B + flip-test
+```
+
+Target 초기화/선택은 단일 frame의 largest bbox, 최고 detector score 또는 화면 중심만으로 결정하지
+않는다. Sequence 초반의 multi-frame coverage, 전체 track duration/span, detector score, bbox
+location/relative area, 연속 frame IoU, normalized center displacement, scale/aspect continuity를 함께
+사용한다. Forward와 backward tracker가 다른 candidate를 가리키거나 competing association margin이
+작으면 `TARGET_AMBIGUOUS`, real DETR person candidate가 없으면 `NO_TARGET`으로 기록하고 5B pose를
+강제로 실행하지 않는다. Appearance embedding은 pilot에서 bbox-temporal evidence가 부족하다고
+확인될 때만 추가한다.
+
+Private `target_selection.npz`는 최소 다음을 보존한다.
+
+- `num_person_candidates`, `candidate_offsets`, `all_person_detections_xyxy`, detector scores
+- `target_candidate_index`, forward/backward candidate index, selection confidence와 status
+- `background_person_count`, ragged background bbox, occlusion risk
+- detector duplicate / possible reflection evidence와 identity-switch risk
+- PTS timestamp, refined camera geometry interface, cross-view visibility QA
+
+실제 bbox coordinate, overlay와 frame name payload는 ignored `outputs/` 아래에만 둔다. Public
+`metadata/results/`에는 sequence/camera aggregate만 기록한다. Full triangulation은 이 gate에서 하지
+않으며 PTS와 Phase 5 `cameras_refined.json`을 후속 cross-view identity QA interface로만 연결한다.
+
+현재 pilot에서 모든 person crop을 처리한 결과는 버리지 않고 `ALL_DETECTIONS_BASELINE`으로
+분류한다. Selector 적용 뒤 동일 pilot의 `TARGET_ONLY` workload를 별도 output root에서 실행하고,
+batch 1/2/4/8/12/16의 numerical equivalence, GPU utilization, VRAM, power, image throughput와
+person-crops/s를 다시 측정한다. 전체 65,595-frame runtime은 target-only 결과로만 확정한다.
+
+```bash
+conda run -n sapiens2 python tools/detr_person_candidates.py \
+  --dataset-root <PRIVATE_DATASET_ROOT> \
+  --output-root outputs/detr_person_candidates \
+  --runtime-dir outputs/runtime/phase6_1_detr \
+  --sequences <EXPLICIT_SEQUENCE_ALLOWLIST>
+
+python tools/target_subject_selection.py \
+  --dataset-root <PRIVATE_DATASET_ROOT> \
+  --detections-root outputs/detr_person_candidates \
+  --output-root outputs/target_selection \
+  --runtime-dir outputs/runtime/phase6_1a
+
+conda run -n sapiens2 python tools/sapiens2_target_pipeline.py benchmark \
+  --dataset-root <PRIVATE_DATASET_ROOT> \
+  --selection-root outputs/target_selection \
+  --batch-sizes 1,2,4,8,12,16 \
+  --output-dir outputs/runtime/phase6_1_target_benchmark
+
+conda run -n sapiens2 python tools/sapiens2_target_pipeline.py infer \
+  --dataset-root <PRIVATE_DATASET_ROOT> \
+  --selection-root outputs/target_selection \
+  --output-root outputs/sapiens2_target_only \
+  --runtime-dir outputs/runtime/phase6_1_target \
+  --batch-size <ACCEPTED_BATCH>
+```
+
+Full dataset command는 이 pilot command들과 분리하며 acceptance report 전에 자동 호출하지 않는다.
+최종 gate는 `GO_FULL_DATASET`, `REVIEW_TARGET_SELECTION`, `NO_GO` 중 하나로 명시한다.
+현재 all-person pilot은 같은 official DETR candidate를 이미 lossless ragged array로 저장했으므로
+Phase 6-1A에서는 해당 cache를 재사용한다. 이후 dataset run은 `detr_person_candidates.py`로 pose 없는
+detection pass를 먼저 수행한다.
