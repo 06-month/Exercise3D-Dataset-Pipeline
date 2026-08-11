@@ -64,9 +64,10 @@ camera calibration을 구분합니다.
 | 6-1. Sapiens2 Pose Pilot | DONE | all-person baseline 보존, batch 1/2/4/8/12/16 완료 |
 | 6-1A. Primary Target Selection | DONE | 9,732 frame, identity switch 0, ambiguity 7, crop 50.37% 감소 |
 | 6-2. Target-only Runtime Gate | RUNNING | full selector `GO_FULL_DATASET`; 78 view/65,595 frame, target 65,430, identity/integrity failure 0; 5B batch 16 실행 중 |
-| 7. Timestamp-aware Triangulation | PILOT RECOVERY/REVIEW | 별도 observation-conditioned held-out recovery 후 NO_GO 0, REVIEW 4; 원 Phase 5 geometry 보존 |
-| 8. SAM Body Runtime Feasibility | PILOT DONE/REVIEW | 22.387 GiB integrity PASS, A/B/C 6-run 완료; Mode B full policy 동결 |
-| 9–13 | TODO | 완료 sequence 단위 fitting/QC/export로 진행 |
+| 7. Timestamp-aware Triangulation | RUNNING | pilot 4/4 final schema PASS; pose-complete sequence CPU streaming, NO_GO에만 held-out recovery |
+| 8. SAM Body Runtime Feasibility | PILOT DONE/REVIEW | 22.387 GiB integrity PASS, A/B/C 6-run 완료; Mode B full policy·numeric schema 동결 |
+| 9. Sequence Body Fitting | IMPLEMENTED/WAITING INPUT | geometry-dominant staged fit, MHR exact replay와 uncertainty schema 구현 |
+| 10–13 | IMPLEMENTED PARTIAL/WAITING INPUT | S0와 versioned private export/SHA 검증 구현; full input 후 QC/freeze gate 실행 |
 
 `pushup_0003`은 Phase 5.1에서 observation, initialization, objective와 gate를 그대로 두고
 Stage 2 budget만 300에서 600으로 확장했습니다. 실제 322 evaluations에서 `xtol`로 수렴했고,
@@ -89,6 +90,12 @@ SAM full-stage projection은 16.35/20.80/32.63시간, Sapiens2 target-only와 �
 content completion이 호출되지 않아 선택적 refiner 정책은 `REVIEW`로 유지합니다. full 기본은
 Mode B이며 Mode C는 evidence가 있는 frame/sequence만 selective escalation합니다. 상세 근거는
 [Phase 8 문서](docs/phases/phase_8_sam_body4d.md)에 있습니다.
+
+Full inference가 진행되는 동안 CPU에서는 세 view가 완결된 sequence부터 Phase 7을 자동 실행합니다.
+SAM compact prior는 MHR pose/shape/hand/expression/joint/model parameter와 source PTS를 보존하며,
+Phase 9는 triangulated geometry를 dominant observation으로 두는 staged fit만 허용합니다. 최종 private
+export는 source RGB를 포함하지 않고 stage payload의 byte equality와 SHA-256, PASS/REVIEW/FAIL/
+INCOMPLETE 상태를 versioned manifest에 기록합니다.
 
 세부 상태와 acceptance gate는 [plan.md](plan.md), 시간순 실행 기록은
 [process.md](process.md)를 기준으로 합니다.
@@ -236,9 +243,14 @@ Sapiens2 Pose 5B single-image smoke:
 | `tools/summarize_phase6_1.py` | all-person/target-only 비교, ETA와 acceptance gate 집계 | redacted aggregate 생성 |
 | `tools/triangulate_sapiens2.py` | PTS-aware weighted triangulation과 pose-camera consistency gate | ignored private output 생성 |
 | `tools/recover_cameras_from_pose_observations.py` | NO_GO camera의 별도 observation-conditioned/held-out recovery | ignored private output 생성 |
+| `tools/run_phase7_streaming.py` | pose-complete sequence의 triangulation/recovery 자동 streaming | ignored private output 생성 |
 | `tools/benchmark_sam_body4d.py` | SAM-Body4D checkpoint preflight와 refiner on/off runtime 측정 | ignored output만 생성 |
 | `tools/sam_body_primary_target_runner.py` | primary bbox 1개 adapter와 compact MHR parameter provenance 저장 | ignored private output만 생성 |
 | `tools/run_sam_body4d_full.py` | Mode B camera 단위 resume/completeness orchestration | ignored private output만 생성 |
+| `tools/consolidate_sam_body_prior.py` | frame/PTS/identity-aware MHR numeric prior 통합 | ignored private output 생성 |
+| `tools/verify_mhr_parameter_replay.py` | compact 204-d MHR parameter의 official model exact replay 검사 | ignored aggregate 생성 |
+| `tools/fit_sequence_body.py` | geometry-dominant staged sequence body fit과 S0 | ignored private output 생성 |
+| `tools/export_private_dataset.py` | versioned private dataset export와 byte/SHA/schema 검증 | ignored private output 생성 |
 | `tools/summarize_sam_body_runtime.py` | A/B/C ratio, occlusion 증가와 best/expected/worst runtime 집계 | redacted aggregate 생성 |
 | `tools/check_publication_safety.py` | staged/tracked 공개 안전 검사 | 없음 |
 

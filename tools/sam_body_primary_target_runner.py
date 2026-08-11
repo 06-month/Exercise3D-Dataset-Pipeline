@@ -84,7 +84,10 @@ def load_target_input(path: Path) -> dict[str, np.ndarray]:
             "target_bboxes_xyxy",
             "target_valid",
             "target_selection_confidence",
+            "target_ambiguous",
+            "no_target",
             "occlusion_risk",
+            "timestamp_pts_seconds",
         }
         missing = required - set(archive.files)
         if missing:

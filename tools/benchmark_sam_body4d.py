@@ -130,6 +130,7 @@ def prepare_target_input(
             "target_ambiguous",
             "no_target",
             "occlusion_risk",
+            "timestamp_pts_seconds",
         }
         missing = required - set(archive.files)
         if missing:
@@ -142,6 +143,7 @@ def prepare_target_input(
         ambiguous = archive["target_ambiguous"].astype(np.bool_)
         no_target = archive["no_target"].astype(np.bool_)
         occlusion = archive["occlusion_risk"].astype(np.bool_)
+        timestamps = archive["timestamp_pts_seconds"].astype(np.float64)
 
     if len(frame_names) != len(source_images):
         raise RuntimeError("selection and source frame counts differ")
@@ -180,7 +182,10 @@ def prepare_target_input(
         target_bboxes_xyxy=boxes,
         target_valid=valid,
         target_selection_confidence=confidence[indices],
+        target_ambiguous=ambiguous[indices],
+        no_target=no_target[indices],
         occlusion_risk=occlusion[indices],
+        timestamp_pts_seconds=timestamps[indices],
     )
     return {
         "frames_available": len(source_images),

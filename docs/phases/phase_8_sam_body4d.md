@@ -155,3 +155,14 @@ body fitting을 수행하지 않도록 upstream PLY 저장 직전에 MHR pose/sh
 별도 compact NPZ로 보존한다. Target source frame index와 selector uncertainty도 함께 남기며,
 frame/mesh/numeric/provenance count가 모두 일치해야 camera resume PASS다. 이 payload는 private
 output이며 public Git에는 포함하지 않는다.
+
+Compact schema는 source PTS, ambiguity/NO_TARGET/occlusion과 MHR body/hand pose, shape, scale,
+expression, 127 joint coordinate/global rotation, 204-d model parameter를 포함한다.
+[`tools/consolidate_sam_body_prior.py`](../../tools/consolidate_sam_body_prior.py)는 이 payload를
+camera 단위로 통합하되 ambiguous/no-target frame의 model output이 존재하더라도 learned evidence로
+보존만 하고 `accepted_prior=false`로 둔다.
+
+Official MHR replay smoke에서는 저장된 204-d parameter와 shape/expression을 JIT model에 다시 넣고
+checkpoint의 308-landmark mapping을 적용했을 때 keypoint 최대 차이 `2.68e-7 m`, mesh 최대 차이
+`7.15e-7 m`를 확인했다. 따라서 compact parameter는 PLY와 분리된 재현 가능한 body representation으로
+사용할 수 있지만, 여전히 monocular learned prior이며 GT가 아니다.

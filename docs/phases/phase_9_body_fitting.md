@@ -1,0 +1,49 @@
+# Phase 9 — Sequence-level Body Fitting
+
+## 상태와 역할
+
+상태는 `IMPLEMENTED_WAITING_FULL_INPUT`이다. 구현과 synthetic test는 완료했지만 full SAM Mode B
+prior가 아직 생성되지 않았으므로 실제 sequence acceptance를 선행해 선언하지 않는다.
+
+Phase 9의 목표는 SAM 출력을 복사해 GT로 부르는 것이 아니다. timestamp-aware 3-view geometry를
+가장 강한 observation으로 유지하면서 MHR body/pose와 시간 연속성을 약한 prior로 결합한다.
+Sapiens2와 SAM 계열은 correlated learned error를 가질 수 있으므로 두 model의 agreement를 독립적인
+두 GT의 agreement로 해석하지 않는다.
+
+## Staged fit
+
+[`tools/fit_sequence_body.py`](../../tools/fit_sequence_body.py)는 다음 순서를 고정한다.
+
+1. Phase 7 canonical 3D joint와 quality를 sequence-local arbitrary-scale geometry anchor로 사용
+2. 각 camera/frame의 accepted MHR70 canonical prior를 최소 8개 core joint로 robust similarity alignment
+3. geometry weight를 MHR view당 weight보다 크게 유지한 weak prior fusion
+4. weighted second-difference temporal fit
+5. sequence median shape/scale parameter와 scale-invariant `S0` 산출
+
+Triangulated joint가 없는 경우 한 view의 prior만으로 채우지 않는다. timestamp gate 안에서 최소 두
+view의 aligned prior가 존재할 때만 `ALIGNED_SAM_PRIOR_ONLY_AT_LEAST_TWO_VIEWS`로 생성하며 confidence
+상한을 낮게 둔다. 최종 joint에는 geometry-only, geometry+prior, prior-only, missing evidence code와
+observation/prior/temporal residual이 함께 저장된다.
+
+## Representation과 재현성
+
+MHR70→Exercise3D canonical mapping은
+[`configs/mhr70_canonical_joints.json`](../../configs/mhr70_canonical_joints.json)에 index/name으로
+명시했다. [`tools/verify_mhr_parameter_replay.py`](../../tools/verify_mhr_parameter_replay.py)로 측정한
+MHR 204-d model parameter replay의 keypoint/mesh numerical difference는 각각 최대
+`2.68e-7 m`, `7.15e-7 m`였다. 이는 parameter serialization의 재현성을 검증할 뿐 model accuracy나
+GT 정확도를 검증하는 수치는 아니다.
+
+`S0`의 reference는 sequence median left/right femur length의 평균이다. femur/tibia/torso/shoulder/
+hip/arm length를 이 reference로 나누며 MHR beta/shape parameter와 별도 의미로 저장한다.
+
+## Acceptance
+
+- valid point finite, invalid point NaN contract
+- frame/PTS와 canonical joint convention exact match
+- Phase 7 `eligible_for_body_fitting=true`
+- alignment success/normalized residual과 geometry displacement 분포
+- prior-only/missing joint 수와 temporal/bone-length consistency
+- camera가 REVIEW 또는 observation-conditioned이면 body fit도 REVIEW 유지
+
+Full input이 생기면 sequence 단위로 위 gate를 실행하고 FAIL을 숨기지 않는다.

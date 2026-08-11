@@ -7,7 +7,7 @@
 
 - primary objective: correctness·provenance·identity consistency를 유지하면서 deadline까지
   end-to-end로 완결되고 freeze 가능한 sequence 수를 최대화
-- 2026-08-11 17:31 KST 기준 remaining wall-clock 67.48 h
+- 2026-08-11 19:12 KST 기준 remaining wall-clock 65.79 h
 - 최신 target-only Sapiens2 projection 79.09 GPUh와 SAM Mode B 16.35 h는 한 A100에서
   deadline 전 전량 순차 완료가 불가능하므로, sequence-complete streaming으로 변경
 - 이미 완료된 4개 pilot sequence output은 검증 후 재사용하고 재추론하지 않음
@@ -191,7 +191,7 @@
 
 ## Phase 7 — Timestamp-Aware Multi-view Triangulation
 
-- 상태: `PILOT_RECOVERY_COMPLETE_REVIEW`; full pose 완료 sequence 단위 실행 대기
+- 상태: `IN_PROGRESS`; full pose 완료 sequence를 자동 감지하는 CPU streaming 실행 중
 - 목적: Phase 2 timing correction과 Phase 5 camera를 사용한 robust 3D joints
 - 입력: refined camera, temporal metadata, Phase 6 joints
 - 출력: 3D joints, reprojection/ray uncertainty, 2-view fallback provenance
@@ -205,11 +205,13 @@
 - recovery: 별도 observation-conditioned root와 20% held-out gate에서 squat/pushup 모두
   NO_GO 해제. all-frame canonical median/p90 5.71/18.93, 8.11/96.04 px
 - provenance: 독립 calibration/GT가 아니므로 둘 다 REVIEW 유지, 원 Phase 5 output 보존
+- full streaming 현재: 기존 pilot 4/4 final schema PASS, body-fitting eligible 4/4, 나머지 22 대기
 - 다음 gate: full pose 완료 sequence의 원 camera consistency 검사 후 NO_GO에만 동일 recovery 적용
 
 ## Phase 8 — SAM 3D Body / SAM-Body4D Human Prior
 
-- 상태: `PILOT_COMPLETE_REVIEW`; Mode B full policy와 camera-resume runner 동결, GPU scheduling 대기
+- 상태: `PILOT_COMPLETE_REVIEW`; Mode B full policy, exact-resume runner와 numeric prior schema 동결,
+  GPU scheduling 대기
 - 목적: pretrained model로 temporal MHR/body prior 생성
 - 입력: RGB reference와 Phase 6/7 evidence
 - 출력: temporal body prior, uncertainty, modal/amodal 구분
@@ -230,19 +232,24 @@
   한 GPU 순차 합계 95.43/99.88/111.71 h
 - deadline gate: 2026-08-14 13:00 KST까지 Sapiens2와 순차 전량은 불가능하므로
   sequence-complete output 최대화 및 미완료 provenance 보존
-- full output contract: mesh뿐 아니라 MHR pose/shape/scale/joint numeric prior와 target source-index,
-  ambiguity/occlusion provenance를 frame별로 저장하고 camera 단위 exact completeness를 검사
+- full output contract: mesh뿐 아니라 MHR pose/shape/scale/hand/expression/joint coordinate와 rotation,
+  204-d model parameter numeric prior, target source-index/PTS/ambiguity/occlusion을 frame별로 저장하고
+  camera 단위 exact completeness를 검사
 - 다음 gate: Mode B를 full 기본 후보로 유지하고 실제 completion trigger case에서 Mode C 효용 검증;
   Mode C는 selective escalation evidence가 있을 때만 사용
 
 ## Phase 9 — Sequence-Level Body Fitting
 
-- 상태: `TODO`
+- 상태: `IMPLEMENTED_WAITING_FULL_INPUT`
 - 목적: multi-view geometry, time, body constraint를 결합한 최종 body parameter
 - 입력: 2D/3D joints, human prior, silhouettes, contacts
 - 출력: subject shape, frame pose, global orientation/translation, optional global scale와 residual
-- 주요 방법: pretrained prediction 복사 금지; temporal/contact/pose prior와 robust observation objective
+- 주요 방법: triangulated geometry를 dominant anchor로 유지하고, view별 MHR canonical prior를
+  sequence-local gauge에 robust similarity alignment한 뒤 weak correlated-prior term과 weighted
+  second-difference temporal term을 단계적으로 적용. prior-only joint는 최소 2-view MHR evidence 요구
 - Acceptance: reprojection/3D/body/temporal/contact residual, failure mode, uncertainty 저장
+- 구현: `tools/fit_sequence_body.py`; MHR parameter→official model replay 최대 keypoint delta
+  `2.68e-7 m`, mesh delta `7.15e-7 m`로 numeric contract 검증
 - 다음 gate: subject-level shape consistency
 
 ## Phase 10 — Subject-Level Shape / Anthropometric Descriptor
@@ -277,12 +284,14 @@
 
 ## Phase 13 — Final Dataset Freeze
 
-- 상태: `TODO`
+- 상태: `EXPORT_IMPLEMENTED_WAITING_FULL_INPUT`
 - 목적: immutable final schema, split, provenance와 release policy 확정
 - 입력: Phase 5–12 승인 결과
 - 출력: camera/image references/keypoints/body/quality/metadata schema와 dataset card
 - 주요 방법: PTS 기반 record, 비식별 ID, payload checksum, versioned schema
 - Acceptance: schema validation, no private payload in Git, documented access/license/citation, reproducible build ID
+- 구현: versioned private build, byte-exact copy/SHA-256, PASS/REVIEW/FAIL/INCOMPLETE 보존과
+  source inventory/frame/PTS/camera/temporal/identity/2D/3D/body provenance 검증
 - 다음 gate: downstream 연구 사용 승인
 
 ## Phase별 Git Definition of Done

@@ -104,6 +104,7 @@ completion:
                 target_ambiguous=np.asarray([False, False, True]),
                 no_target=np.asarray([False, False, False]),
                 occlusion_risk=np.asarray([False, True, True]),
+                timestamp_pts_seconds=np.asarray([0.0, 1.0 / 30.0, 2.0 / 30.0]),
             )
             clip = root / "clip"
             target_input = root / "target_input.npz"
@@ -121,6 +122,11 @@ completion:
                 np.asarray([[10, 20, 110, 220], [11, 21, 111, 221]], dtype=np.float32),
             )
             np.testing.assert_array_equal(loaded["target_valid"], [True, True, False])
+            np.testing.assert_array_equal(loaded["target_ambiguous"], [False, False, True])
+            np.testing.assert_array_equal(loaded["no_target"], [False, False, False])
+            np.testing.assert_allclose(
+                loaded["timestamp_pts_seconds"], [0.0, 1.0 / 30.0, 2.0 / 30.0]
+            )
             self.assertTrue(np.isnan(loaded["target_bboxes_xyxy"][2]).all())
             self.assertEqual(len(list(clip.glob("*.jpg"))), 3)
 
@@ -143,6 +149,7 @@ completion:
                 target_ambiguous=np.asarray([True]),
                 no_target=np.asarray([False]),
                 occlusion_risk=np.asarray([True]),
+                timestamp_pts_seconds=np.asarray([0.0]),
             )
 
             with self.assertRaisesRegex(RuntimeError, "accepted primary target"):

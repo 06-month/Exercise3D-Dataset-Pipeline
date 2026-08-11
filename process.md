@@ -131,6 +131,43 @@ resume validation을 준비했다.
 
 Mode C는 여전히 selective evidence가 없는 전체 기본값으로 사용하지 않는다.
 
+### First full camera 실측과 Phase 7 streaming 시작
+
+- 첫 신규 대상 `barbellrow_0001/cam1` 481/481 target crop을 약 36분에 완료했다.
+- 두 atomic chunk와 consolidated `poses_2d.npz`, bbox/frame/metadata가 모두 생성됐고
+  308-keypoint selected payload finite, ambiguity/NO_TARGET 강제 pose 0, camera QA PASS다.
+- 첫 camera 기준 serialization 포함 실측은 약 0.22 crop/s이며 A100 utilization 100%, VRAM 약
+  36.4 GiB, power 약 300–380 W 범위였다. 2026-08-11 19:12 KST remaining은 65.79 h로
+  Sapiens 완료 ETA와 거의 같아 GPU는 계속 5B 전용으로 유지한다.
+- `tools/run_phase7_streaming.py`를 별도 CPU process로 시작했다. 각 sequence의 세 camera
+  Sapiens schema/수량을 전수 확인한 뒤 Phase 5 geometry를 먼저 triangulate하며,
+  `NO_GO_TRIANGULATION`일 때만 disjoint held-out gate를 통과한 observation-conditioned recovery를
+  별도 root에서 선택한다. 원 Phase 5 output은 수정하지 않는다.
+- 첫 streaming 결과 `barbellrow_0000`은 canonical median/p90 7.06/30.62 px,
+  schema PASS, `REVIEW_POSE_CAMERA_CONSISTENCY`, body fitting eligible을 재현했다.
+- 기존 pilot 4개를 final root에 모두 materialize했다. schema PASS/body-fitting eligible 4/4,
+  원 Phase 5 camera 사용 2, held-out 승인 recovery 사용 2이며 최종 NO_GO는 0이다. Watcher는
+  나머지 22 sequence의 세 view pose가 완결될 때까지 30초 간격으로 대기한다.
+
+### SAM numeric provenance와 Phase 9/13 구현 준비
+
+- SAM target provenance에 selector의 `TARGET_AMBIGUOUS`, `NO_TARGET`, source PTS를 추가했다.
+- full Mode B compact payload는 bbox/focal/keypoint/camera translation뿐 아니라 MHR global/body/hand
+  pose, scale/shape/expression, 127 joint coordinates/global rotations와 204-d model parameter를 보존한다.
+- 기존 Mode A private numeric sample의 shape 45, expression 72, model parameter 204를 official MHR
+  JIT와 checkpoint의 `308 x 18,566` landmark mapping에 다시 넣었다. 저장 keypoint 최대 차이는
+  `2.6822e-7 m`, 평균 `5.1895e-8 m`, mesh 최대 차이는 `7.1526e-7 m`로 exact replay를 확인했다.
+- `tools/consolidate_sam_body_prior.py`는 camera별 compact prior를 frame/PTS/identity uncertainty와
+  함께 원자적으로 통합하되 ambiguous output은 보존하고 accepted prior로 사용하지 않는다.
+- `tools/fit_sequence_body.py`는 triangulated geometry dominant anchor, per-view MHR robust similarity
+  alignment, weak correlated-prior fusion, temporal second-difference의 staged fit을 구현했다.
+  geometry가 없는 prior-only joint는 최소 두 view가 합의할 때만 low-confidence로 생성한다.
+- `tools/export_private_dataset.py`는 source RGB를 복사하지 않고 frame name/index/PTS 및 immutable
+  inventory를 보존하며, versioned private payload를 byte-exact copy/SHA-256 검증한다. FAIL과
+  INCOMPLETE는 freeze-eligible로 승격하지 않는다.
+- 이 단계는 implementation readiness이며 아직 full SAM/body input이 없으므로 실제 Phase 9/13
+  acceptance 결과로 간주하지 않는다. 관련 신규/회귀 unit test 18개와 전체 31개 test가 PASS했다.
+
 ## 2026-08-09 — 초기 synchronization / derivative 구축 기록 이관
 
 ### 수행

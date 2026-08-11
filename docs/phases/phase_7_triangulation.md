@@ -2,7 +2,8 @@
 
 ## 목적과 현재 상태
 
-상태는 `PILOT_RECOVERY_COMPLETE_REVIEW`다. 이 단계는 Sapiens2-5B의 view별
+상태는 `IN_PROGRESS`다. pilot/recovery gate 이후 full pose가 완결된 sequence부터 CPU streaming을
+시작했다. 이 단계는 Sapiens2-5B의 view별
 2D 출력을 곧바로 3D ground truth로 승격하지 않는다. Phase 2의 PTS offset/drift,
 Phase 5의 fixed-camera geometry, view별 confidence와 실제 ray conditioning을 결합해
 3D observation proposal과 불확실성을 생성한다.
@@ -76,3 +77,12 @@ fixed K, sequence-local arbitrary scale은 유지한다.
 camera 정확도 검증이나 GT가 아니다. 따라서 NO_GO만 해제하되 `REVIEW_OBSERVATION_CONDITIONED`와
 원 camera uncertainty를 계속 전파한다. `pushup_0001` p90은 NO_GO 100 px 경계에 가깝기 때문에
 fitting/QC에서 특히 보수적으로 취급한다.
+
+## Full streaming contract
+
+[`tools/run_phase7_streaming.py`](../../tools/run_phase7_streaming.py)는 세 camera의 pose metadata와
+`poses_2d.npz`가 source frame 수, 308-point shape, finite/schema gate를 모두 통과할 때만 sequence를
+시작한다. Phase 5 camera로 initial triangulation을 항상 먼저 수행하며, `NO_GO_TRIANGULATION`일 때만
+recovery candidate를 생성하거나 기존 held-out 승인 candidate를 재사용한다. Final metadata에는
+`PHASE5_BACKGROUND_BA` 또는 `REVIEW_OBSERVATION_CONDITIONED` source가 남는다. 이 CPU process는
+다음 Sapiens2 GPU chunk와 겹치며 원 camera/pose output을 덮어쓰지 않는다.
