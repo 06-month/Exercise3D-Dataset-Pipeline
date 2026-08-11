@@ -14,7 +14,8 @@
 - Phase 6-1 multi-exercise pose pilot: `DONE`, all-person 결과는 baseline으로 보존
 - Phase 6-1A primary target selection: `DONE`, `GO_FULL_DATASET` 조건 충족
 - Phase 6-2 target-only runtime gate: `DONE/HOLD`, 사용자 승인 전 full inference 금지
-- Phase 8 runtime feasibility pilot: `WAITING_CHECKPOINT_APPROVAL`, 24.963 GiB download 미실행
+- Phase 8 runtime feasibility pilot: `WAITING_CHECKPOINT_APPROVAL`, target adapter/preflight 완료,
+  22.387 GiB download 미실행
 
 ## Phase 0 — Dataset Inventory / Integrity
 
@@ -192,7 +193,9 @@
 - Acceptance: amodal completion을 image GT가 아닌 prior로 표시, model failure/disagreement 기록
 - runtime gate: control과 severe-occlusion clip에서 (A) SAM 3D Body base, (B) SAM-Body4D
   completion off, (C) completion on을 비교하고 target selector의 primary bbox 1개만 seed
-- 현재 blocker: 공식 pretrained payload 7개 묶음 24.963 GiB가 local에 없고 SAM 3/SAM 3D Body는
+- adapter: upstream의 모든 initial human 자동 선택 대신 accepted primary bbox 1개만 전달하며,
+  사용하지 않는 ViTDet checkpoint는 요구하지 않음
+- 현재 blocker: 공식 pretrained payload 6개 묶음 22.387 GiB가 local에 없고 SAM 3/SAM 3D Body는
   gated access 승인이 필요하다. 명시적 사용자 승인 전 다운로드하지 않음
 - 다음 gate: sequence-level optimization의 weak/noisy prior로만 사용
 

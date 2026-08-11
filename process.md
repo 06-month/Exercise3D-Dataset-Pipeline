@@ -444,7 +444,21 @@ Target-selection gate는 `GO_FULL_DATASET`이다. 그러나 사용자에게 결�
 
 ### Checkpoint gate와 결정
 
-필요한 7개 payload set은 local에 없고 총 26,803,630,365 bytes(24.963 GiB)다. SAM 3와
-SAM 3D Body는 gated access가 필요하다. 사용자 조건에 따라 download/model/path/license를 먼저
-보고하며 명시적 승인 전 checkpoint 다운로드와 SAM inference를 수행하지 않는다. Provisional
-deadline verdict는 `DEADLINE_AT_RISK`; local A/B/C 실측 전 final verdict는 보류한다.
+Primary-target adapter 기준 필요한 6개 payload set은 local에 없고 총 24,037,682,088 bytes
+(22.387 GiB)다. SAM 3와 SAM 3D Body는 gated access가 필요하다. 사용자 조건에 따라
+download/model/path/license를 먼저 보고하며 명시적 승인 전 checkpoint 다운로드와 SAM inference를
+수행하지 않는다. Provisional deadline verdict는 `DEADLINE_AT_RISK`; local A/B/C 실측 전 final
+verdict는 보류한다.
+
+### Primary-target adapter와 6-run preflight
+
+- Mode A는 official SAM 3D Body `bboxes=` API에 frame당 accepted bbox 0/1개를 전달
+- Mode B/C는 official SAM-Body4D class를 사용하되 SAM 3 initial object를 accepted bbox 1개로 seed
+- upstream all-human initialization용 ViTDet는 호출하지 않아 checkpoint 2.576 GiB도 불필요
+- ambiguous first frame, multiple bbox slot, invalid bbox를 강제 실행하지 않는 schema/gate 추가
+- control 1,267 frame × A/B/C와 severe 1,136 frame × A/B/C preflight 모두 target seed 1 확인
+- control target-valid 1,267/1,267, severe 1,136/1,136; severe occlusion-risk 959 보존
+- model 실행은 여섯 경우 모두 승인 전 의도한 `BLOCKED_CHECKPOINT`; download 0 bytes
+- SAM adapter/selector synthetic test 11개, Python compile, CLI smoke PASS
+- 여섯 mode CSV를 요구하는 runtime summarizer 추가; refiner C/B ratio, control/severe 증가,
+  best/expected/worst를 분리하고 expected prevalence 입력이 없으면 숫자 산출 금지

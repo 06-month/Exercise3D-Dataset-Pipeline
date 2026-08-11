@@ -65,7 +65,7 @@ camera calibration을 구분합니다.
 | 6-1A. Primary Target Selection | DONE | 9,732 frame, identity switch 0, ambiguity 7, crop 50.37% 감소 |
 | 6-2. Target-only Runtime Gate | DONE/HOLD | batch 4 권장, 전체 65,595-frame ETA 79.09 h; 사용자 승인 전 실행 보류 |
 | 7. Timestamp-aware Triangulation | TODO | Phase 6 full observation 이후 진행 |
-| 8. SAM Body Runtime Feasibility | WAITING APPROVAL | 공식 checkpoint 24.963 GiB 부재; 다운로드 승인 전 정지 |
+| 8. SAM Body Runtime Feasibility | WAITING APPROVAL | primary-target adapter/preflight PASS; 공식 checkpoint 22.387 GiB 승인 대기 |
 | 9–13 | TODO | runtime feasibility와 사용자 승인 이후 body/quality pipeline 진행 |
 
 `pushup_0003`은 Phase 5.1에서 observation, initialization, objective와 gate를 그대로 두고
@@ -217,6 +217,8 @@ Sapiens2 Pose 5B single-image smoke:
 | `tools/sapiens2_target_pipeline.py` | accepted target-only 5B batch benchmark/inference/verification | ignored output만 생성 |
 | `tools/summarize_phase6_1.py` | all-person/target-only 비교, ETA와 acceptance gate 집계 | redacted aggregate 생성 |
 | `tools/benchmark_sam_body4d.py` | SAM-Body4D checkpoint preflight와 refiner on/off runtime 측정 | ignored output만 생성 |
+| `tools/sam_body_primary_target_runner.py` | SAM base/4D에 accepted primary bbox 1개만 전달하는 adapter | ignored private output만 생성 |
+| `tools/summarize_sam_body_runtime.py` | A/B/C ratio, occlusion 증가와 best/expected/worst runtime 집계 | redacted aggregate 생성 |
 | `tools/check_publication_safety.py` | staged/tracked 공개 안전 검사 | 없음 |
 
 ## 저장소 구조

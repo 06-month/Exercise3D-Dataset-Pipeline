@@ -14,8 +14,10 @@
 - [Diffusion-VAS](https://github.com/Kaihua-Chen/diffusion-vas), official implementation
 
 SAM-Body4D official offline script는 initial frame의 모든 human detection을 자동 target으로 삼는다.
-이 dataset에서는 그대로 사용하지 않는다. Phase 6 selector의 accepted primary bbox 하나만 SAM 3에
-seed하는 adapter를 두고, background candidate는 metadata/ambiguity evidence로만 유지해야 한다.
+이 dataset에서는 그대로 사용하지 않는다. `sam_body_primary_target_runner.py`가 Phase 6 selector의
+accepted primary bbox 하나만 SAM 3에 seed하고, background candidate는 metadata/ambiguity evidence로만
+유지한다. 이 adapter는 upstream에 존재하지 않는 CLI option을 가장하지 않고 official class/API를
+호출한다. Mode A도 official estimator의 `bboxes=` API로 frame당 accepted bbox 0/1개만 전달한다.
 
 ## 비교할 mode
 
@@ -35,17 +37,52 @@ scheduler로 구현·검증해야 한다. Amodal output은 image ground truth가
 
 ## Checkpoint preflight
 
-Local `<CHECKPOINT_ROOT>/sam_body4d`에는 필요한 payload가 없다. 공식 inventory 기준 다운로드는
-총 26,803,630,365 bytes(24.963 GiB)이며 weights는 Git에 포함하거나 재배포하지 않는다.
+Local `<CHECKPOINT_ROOT>/sam_body4d`에는 필요한 payload가 없다. Primary-target adapter 기준 필요한
+공식 inventory는 총 24,037,682,088 bytes(22.387 GiB)이며 weights는 Git에 포함하거나 재배포하지
+않는다.
 
-- Mode A 최소: SAM 3D Body package + MoGe-2 + ViTDet, 약 6.422 GiB
-- Mode B 누적: Mode A + SAM 3, 약 9.635 GiB
-- Mode C 누적: Mode B + Diffusion-VAS 2개 + Depth Anything V2, 24.963 GiB
+- Mode A 최소: SAM 3D Body package + MoGe-2, 3.845 GiB
+- Mode B 누적: Mode A + SAM 3, 7.059 GiB
+- Mode C 누적: Mode B + Diffusion-VAS 2개 + Depth Anything V2, 22.387 GiB
+- upstream all-human initialization용 ViTDet 2.576 GiB는 target adapter가 detector를 호출하지 않아 제외
 - SAM 3와 SAM 3D Body는 Hugging Face에서 사전 access acceptance와 인증이 필요
 
 상세 파일/용량/라이선스 출처는
 [`sam_body4d_checkpoint_manifest.csv`](../../metadata/results/sam_body4d_checkpoint_manifest.csv)에
 기록했다. Credential은 문서, 로그, Git에 기록하지 않는다. 사용자 승인 전 다운로드하지 않는다.
+
+## Primary-target preflight 결과
+
+Checkpoint 없이도 input/selection/repository/config 경계까지 검증했다.
+
+| Pilot | Frames | Mode A | Mode B | Mode C | Target seed |
+|---|---:|---|---|---|---:|
+| `squat_0001/cam1` control | 1,267 | BLOCKED_CHECKPOINT | BLOCKED_CHECKPOINT | BLOCKED_CHECKPOINT | 1 |
+| `latpulldown_0002/cam2` severe | 1,136 | BLOCKED_CHECKPOINT | BLOCKED_CHECKPOINT | BLOCKED_CHECKPOINT | 1 |
+
+두 clip 모두 target-valid frame은 전부였고 severe clip의 `OCCLUSION_RISK` 959 frame도 보존했다.
+각 mode가 정확히 한 bbox slot/seed만 허용하고 ambiguous first frame을 강제 선택하지 않는 synthetic
+test를 포함해 SAM/selector test 11개가 PASS했다. `BLOCKED_CHECKPOINT`는 model execution 실패가 아니라
+승인 전 의도된 preflight 종료다.
+
+```bash
+python tools/benchmark_sam_body4d.py \
+  --mode <A_OR_B_OR_C> \
+  --sam-3d-body-root <OFFICIAL_SAM_3D_BODY_REPO> \
+  --sam-body4d-root <OFFICIAL_SAM_BODY4D_REPO> \
+  --checkpoint-root <CHECKPOINT_ROOT>/sam_body4d \
+  --input-frames <PRIVATE_CLIP_FRAME_DIR> \
+  --target-selection <PRIVATE_TARGET_SELECTION_NPZ> \
+  --frame-count <30_TO_60_SECOND_FRAME_COUNT> \
+  --output-dir outputs/runtime/phase8_sam/<CLIP>/<MODE>
+```
+
+Mode A에는 `--sam-3d-body-root`, Mode B/C에는 `--sam-body4d-root`만 필요하다. 실제 pilot은 사용자
+승인 뒤 `--run`을 추가한다.
+
+`summarize_sam_body_runtime.py`는 여섯 PASS row가 모두 존재해야 Mode C/B ratio와 occlusion runtime
+증가를 계산한다. `EXPECTED_CASE`에는 measured severe-frame fraction과 selective-refinement fraction을
+명시적으로 요구하며, 이 값이 없으면 낙관적인 숫자를 만들지 않고 중단한다.
 
 ## Upstream 참고 수치와 local gate
 
