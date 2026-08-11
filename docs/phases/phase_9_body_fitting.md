@@ -47,3 +47,11 @@ hip/arm length를 이 reference로 나누며 MHR beta/shape parameter와 별도 
 - camera가 REVIEW 또는 observation-conditioned이면 body fit도 REVIEW 유지
 
 Full input이 생기면 sequence 단위로 위 gate를 실행하고 FAIL을 숨기지 않는다.
+
+## 사전 동결 quality gate
+
+Full Mode B 결과를 보기 전에 [`configs/phase9_body_fit.json`](../../configs/phase9_body_fit.json)에
+threshold를 고정했다. Final joint coverage 95%, SAM alignment success 90%, normalized geometry
+displacement p95 0.05, prior-only fraction 2%, median bone-length CV 0.10 밖은 REVIEW다. Coverage 80%
+미만, displacement p95 0.20 초과, anthropometric reference invalid 또는 finite/NaN schema 실패는
+FAIL이다. Camera status가 PASS가 아니면 다른 지표가 좋아도 REVIEW를 유지한다.

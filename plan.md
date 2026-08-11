@@ -260,6 +260,8 @@
 - Acceptance: reprojection/3D/body/temporal/contact residual, failure mode, uncertainty 저장
 - 구현: `tools/fit_sequence_body.py`; MHR parameter→official model replay 최대 keypoint delta
   `2.68e-7 m`, mesh delta `7.15e-7 m`로 numeric contract 검증
+- 사전 동결 gate: coverage/alignment/geometry displacement/prior-only/bone CV를 scale-normalized
+  PASS/REVIEW/FAIL로 분리하고 camera REVIEW 전파
 - 다음 gate: subject-level shape consistency
 
 ## Phase 10 — Subject-Level Shape / Anthropometric Descriptor

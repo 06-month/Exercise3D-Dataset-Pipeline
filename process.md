@@ -207,6 +207,15 @@ Mode C는 여전히 selective evidence가 없는 전체 기본값으로 사용�
   throughput, camera/sequence 수, Sapiens ETA, SAM expected 20.8 h와 free storage를 30초마다 기록한다.
 - recent-camera ETA monitor 회귀 test를 포함한 전체 unit test 36개가 PASS했다.
 
+### Phase 9 body-fit quality gate 사전 동결
+
+- Full SAM/body 결과 확인 전에 `configs/phase9_body_fit.json`을 추가했다.
+- REVIEW: final joint coverage <95%, alignment success <90%, normalized geometry displacement p95 >0.05,
+  prior-only >2%, median bone-length CV >0.10 또는 camera status non-PASS.
+- FAIL: coverage <80%, normalized displacement p95 >0.20, anthropometric reference invalid,
+  valid finite/invalid NaN contract 실패.
+- Threshold는 실제 결과를 보고 완화하지 않는다. Gate unit test 포함 전체 37개 PASS다.
+
 ## 2026-08-09 — 초기 synchronization / derivative 구축 기록 이관
 
 ### 수행

@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from tools.fit_sequence_body import smooth_track, weighted_similarity
+from tools.fit_sequence_body import evaluate_fit_gate, smooth_track, weighted_similarity
 
 
 class SequenceBodyFitTest(unittest.TestCase):
@@ -31,6 +31,41 @@ class SequenceBodyFitTest(unittest.TestCase):
         after = np.linalg.norm(np.diff(fitted, n=2, axis=0), axis=1).mean()
         self.assertLess(after, before)
         self.assertLess(float(np.max(np.linalg.norm(fitted - noisy, axis=1))), 0.1)
+
+    def test_quality_gate_separates_review_and_fail(self) -> None:
+        config = {
+            "review_if_any": {
+                "final_valid_joint_fraction_below": 0.95,
+                "alignment_success_fraction_below": 0.9,
+                "observation_displacement_p95_normalized_above": 0.05,
+                "prior_only_joint_fraction_above": 0.02,
+                "median_bone_length_cv_above": 0.1,
+                "camera_status_not_pass": True,
+            },
+            "fail_if_any": {
+                "final_valid_joint_fraction_below": 0.8,
+                "observation_displacement_p95_normalized_above": 0.2,
+            },
+        }
+        qa = {
+            "final_valid_joint_fraction": 0.99,
+            "alignment_success_fraction": 0.95,
+            "prior_only_joint_fraction": 0.0,
+            "observation_displacement_p95_normalized": 0.01,
+            "median_bone_length_cv": 0.02,
+            "anthropometry": {"reference_length_sequence_gauge": 1.0},
+            "finite_valid_points": True,
+            "invalid_points_are_nan": True,
+            "triangulation_camera_status": "REVIEW_POSE_CAMERA_CONSISTENCY",
+        }
+        status, review, fail = evaluate_fit_gate(qa, config)
+        self.assertEqual(status, "REVIEW_BODY_FIT_QUALITY")
+        self.assertIn("CAMERA_UNCERTAINTY", review)
+        self.assertFalse(fail)
+        qa["final_valid_joint_fraction"] = 0.5
+        status, _, fail = evaluate_fit_gate(qa, config)
+        self.assertEqual(status, "FAIL_BODY_FIT_QUALITY")
+        self.assertIn("FINAL_VALID_JOINT_FRACTION", fail)
 
 
 if __name__ == "__main__":

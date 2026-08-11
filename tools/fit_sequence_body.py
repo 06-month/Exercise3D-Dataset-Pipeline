@@ -77,6 +77,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--geometry-weight", type=float, default=8.0)
     parser.add_argument("--sam-weight-per-view", type=float, default=0.25)
     parser.add_argument("--temporal-weight", type=float, default=0.25)
+    parser.add_argument(
+        "--gate-config",
+        type=Path,
+        default=Path(__file__).resolve().parents[1]
+        / "configs"
+        / "phase9_body_fit.json",
+    )
     return parser
 
 
@@ -109,6 +116,56 @@ def atomic_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 def percentile(values: np.ndarray, q: float) -> float | None:
     selected = values[np.isfinite(values)]
     return float(np.percentile(selected, q)) if len(selected) else None
+
+
+def evaluate_fit_gate(
+    qa: dict[str, Any], config: dict[str, Any]
+) -> tuple[str, list[str], list[str]]:
+    review = config["review_if_any"]
+    fail = config["fail_if_any"]
+    review_reasons: list[str] = []
+    fail_reasons: list[str] = []
+    final_fraction = float(qa["final_valid_joint_fraction"])
+    alignment_fraction = float(qa["alignment_success_fraction"])
+    prior_only_fraction = float(qa["prior_only_joint_fraction"])
+    displacement = qa["observation_displacement_p95_normalized"]
+    bone_cv = qa["median_bone_length_cv"]
+    reference = qa["anthropometry"]["reference_length_sequence_gauge"]
+    if not qa["finite_valid_points"] or not qa["invalid_points_are_nan"]:
+        fail_reasons.append("SCHEMA_OR_FINITE_CONTRACT")
+    if reference is None or not np.isfinite(reference) or reference <= 0:
+        fail_reasons.append("INVALID_ANTHROPOMETRIC_REFERENCE")
+    if final_fraction < float(fail["final_valid_joint_fraction_below"]):
+        fail_reasons.append("FINAL_VALID_JOINT_FRACTION")
+    if displacement is None or not np.isfinite(displacement):
+        fail_reasons.append("MISSING_OBSERVATION_DISPLACEMENT")
+    elif displacement > float(
+        fail["observation_displacement_p95_normalized_above"]
+    ):
+        fail_reasons.append("OBSERVATION_DISPLACEMENT_P95")
+    if fail_reasons:
+        return "FAIL_BODY_FIT_QUALITY", review_reasons, fail_reasons
+    if final_fraction < float(review["final_valid_joint_fraction_below"]):
+        review_reasons.append("FINAL_VALID_JOINT_FRACTION")
+    if alignment_fraction < float(review["alignment_success_fraction_below"]):
+        review_reasons.append("ALIGNMENT_SUCCESS_FRACTION")
+    if displacement > float(
+        review["observation_displacement_p95_normalized_above"]
+    ):
+        review_reasons.append("OBSERVATION_DISPLACEMENT_P95")
+    if prior_only_fraction > float(review["prior_only_joint_fraction_above"]):
+        review_reasons.append("PRIOR_ONLY_JOINT_FRACTION")
+    if bone_cv is None or not np.isfinite(bone_cv):
+        review_reasons.append("MISSING_BONE_LENGTH_CV")
+    elif bone_cv > float(review["median_bone_length_cv_above"]):
+        review_reasons.append("MEDIAN_BONE_LENGTH_CV")
+    if review.get("camera_status_not_pass") and qa["triangulation_camera_status"] != "PASS":
+        review_reasons.append("CAMERA_UNCERTAINTY")
+    return (
+        "REVIEW_BODY_FIT_QUALITY" if review_reasons else "PASS",
+        review_reasons,
+        fail_reasons,
+    )
 
 
 def weighted_similarity(
@@ -265,6 +322,7 @@ def load_sam_camera(path: Path, expected_names: list[str]) -> dict[str, np.ndarr
 
 
 def fit_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]:
+    gate_config = json.loads(args.gate_config.resolve().read_text(encoding="utf-8"))
     triangulation_dir = args.triangulation_root.resolve() / sequence
     with np.load(triangulation_dir / "canonical_3d.npz", allow_pickle=False) as payload:
         timestamps = payload["timestamp_pts_seconds"].astype(np.float64)
@@ -450,9 +508,11 @@ def fit_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]:
         "joint_count": joint_count,
         "triangulated_joint_fraction": float(triangulated_valid.mean()),
         "final_valid_joint_fraction": float(final_valid.mean()),
+        "alignment_success_fraction": float(aligned_valid.mean()),
         "geometry_plus_prior_count": int((evidence_type == 2).sum()),
         "geometry_only_count": int((evidence_type == 1).sum()),
         "prior_only_count": int(prior_only.sum()),
+        "prior_only_joint_fraction": float(prior_only.mean()),
         "missing_count": int((evidence_type == 0).sum()),
         "alignment_success_count": int(aligned_valid.sum()),
         "alignment_attempt_count": int(frame_count * len(CAMERAS)),
@@ -470,12 +530,18 @@ def fit_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]:
         "triangulation_camera_status": camera_status,
         "anthropometry": anthropometry,
     }
-    if not finite_valid or not invalid_nan:
-        qa["status"] = "FAIL_SCHEMA"
-    elif camera_status == "PASS":
-        qa["status"] = "PASS"
-    else:
-        qa["status"] = "REVIEW_CAMERA_UNCERTAINTY"
+    finite_bone_cv = np.asarray(
+        [value for value in anthropometry["bone_length_cv"].values() if np.isfinite(value)],
+        dtype=np.float64,
+    )
+    qa["median_bone_length_cv"] = (
+        float(np.median(finite_bone_cv)) if len(finite_bone_cv) else None
+    )
+    status, review_reasons, fail_reasons = evaluate_fit_gate(qa, gate_config)
+    qa["status"] = status
+    qa["review_reasons"] = review_reasons
+    qa["fail_reasons"] = fail_reasons
+    qa["quality_gate_config"] = gate_config
     metadata = {
         "schema_version": 1,
         "created_at_utc": utc_now(),
@@ -504,6 +570,7 @@ def fit_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]:
             "sam_weight_per_view": args.sam_weight_per_view,
             "temporal_weight": args.temporal_weight,
             "core_alignment_joints": CORE_ALIGNMENT_JOINTS,
+            "quality_gate_config": gate_config,
         },
         "source_triangulation_metadata": triangulation_metadata,
         "qa": qa,
