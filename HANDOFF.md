@@ -98,11 +98,12 @@ Public-safe Sapiens command 형태:
 ## Git state
 
 - branch: `agent/phase-5-1-pushup-0003-recovery`
-- latest pushed commit: `c50f72609092d54b008d9daf34e8a674daf89618`
+- latest commit: 현재 `HEAD` (handoff/streaming milestone `9684cd2` 이상);
+  exact hash는 `git rev-parse HEAD`와 local state의 `git_commit`으로 확인
 - Draft PR: #1 (`https://github.com/06-month/Exercise3D-Dataset-Pipeline/pull/1`)
-- unpushed: handoff/streaming supervisor 변경(현재 milestone commit 전)
-- dirty: `tools/run_autonomous_generation.py`, test, `HANDOFF.md`, `AGENTS.md`, `.gitignore`
+- pushed: handoff/streaming supervisor와 문서 milestone remote 동기화 완료
+- dirty: 정상 milestone 직후 없음; 이후 실행 중 checkpoint 문서 갱신 여부는 `git status`로 확인
 
 ## Last updated
 
-- 2026-08-11 20:35 KST
+- 2026-08-11 20:40 KST
