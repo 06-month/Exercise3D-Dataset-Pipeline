@@ -25,6 +25,7 @@ MODE_C = "C"
 
 COMMON_FILES = (
     "sam-3d-body-dinov3/model.ckpt",
+    "sam-3d-body-dinov3/model_config.yaml",
     "sam-3d-body-dinov3/assets/mhr_model.pt",
     "moge-2-vitl-normal/model.pt",
 )

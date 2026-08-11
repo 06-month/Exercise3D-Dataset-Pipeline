@@ -47,6 +47,7 @@ class SamBodyRuntimeTest(unittest.TestCase):
         files_c, dirs_c = required_checkpoint_components(MODE_C)
 
         self.assertNotIn("sam3/sam3.pt", files_a)
+        self.assertIn("sam-3d-body-dinov3/model_config.yaml", files_a)
         self.assertIn("sam3/sam3.pt", files_b)
         self.assertIn("sam3/sam3.pt", files_c)
         self.assertFalse(dirs_a)

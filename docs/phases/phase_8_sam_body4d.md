@@ -38,7 +38,7 @@ scheduler로 구현·검증해야 한다. Amodal output은 image ground truth가
 ## Checkpoint preflight
 
 Local `<CHECKPOINT_ROOT>/sam_body4d`에는 필요한 payload가 없다. Primary-target adapter 기준 필요한
-공식 inventory는 총 24,037,682,088 bytes(22.387 GiB)이며 weights는 Git에 포함하거나 재배포하지
+공식 inventory는 총 24,037,668,123 bytes(22.387 GiB)이며 weights는 Git에 포함하거나 재배포하지
 않는다.
 
 - Mode A 최소: SAM 3D Body package + MoGe-2, 3.845 GiB
@@ -46,6 +46,12 @@ Local `<CHECKPOINT_ROOT>/sam_body4d`에는 필요한 payload가 없다. Primary-
 - Mode C 누적: Mode B + Diffusion-VAS 2개 + Depth Anything V2, 22.387 GiB
 - upstream all-human initialization용 ViTDet 2.576 GiB는 target adapter가 detector를 호출하지 않아 제외
 - SAM 3와 SAM 3D Body는 Hugging Face에서 사전 access acceptance와 인증이 필요
+
+2026-08-11 `hf download --dry-run` 결과 local 인증은 유효하지만 SAM 3와 SAM 3D Body 두 gated
+repository의 access approval은 아직 없다. MoGe-2, Depth Anything V2와 official setup script가 지정한
+`kaihuac/diffusion-vas-amodal-segmentation`, `kaihuac/diffusion-vas-content-completion`은 dry-run 접근에
+성공했다. Dry-run은 metadata/용량만 조회했으며 checkpoint download는 0 bytes다. SAM 3D Body load가
+인접 `model_config.yaml`을 실제 참조하므로 이를 required path에 포함했다.
 
 상세 파일/용량/라이선스 출처는
 [`sam_body4d_checkpoint_manifest.csv`](../../metadata/results/sam_body4d_checkpoint_manifest.csv)에

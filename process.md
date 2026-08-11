@@ -444,7 +444,7 @@ Target-selection gate는 `GO_FULL_DATASET`이다. 그러나 사용자에게 결�
 
 ### Checkpoint gate와 결정
 
-Primary-target adapter 기준 필요한 6개 payload set은 local에 없고 총 24,037,682,088 bytes
+Primary-target adapter 기준 필요한 6개 payload set은 local에 없고 총 24,037,668,123 bytes
 (22.387 GiB)다. SAM 3와 SAM 3D Body는 gated access가 필요하다. 사용자 조건에 따라
 download/model/path/license를 먼저 보고하며 명시적 승인 전 checkpoint 다운로드와 SAM inference를
 수행하지 않는다. Provisional deadline verdict는 `DEADLINE_AT_RISK`; local A/B/C 실측 전 final
@@ -462,3 +462,6 @@ verdict는 보류한다.
 - SAM adapter/selector synthetic test 11개, Python compile, CLI smoke PASS
 - 여섯 mode CSV를 요구하는 runtime summarizer 추가; refiner C/B ratio, control/severe 증가,
   best/expected/worst를 분리하고 expected prevalence 입력이 없으면 숫자 산출 금지
+- credential 값을 출력하지 않은 HF auth 확인은 PASS했지만 SAM 3/SAM 3D Body gated access는
+  `--dry-run`에서 denied; MoGe-2, Depth Anything V2, 두 official Diffusion-VAS repo는 dry-run PASS
+- official setup code 기준 Diffusion-VAS repo ID와 SAM 3D Body `model_config.yaml` requirement를 교정
