@@ -27,8 +27,11 @@
 - pre-concurrency steady throughput: 0.23323 crop/s; 병렬 steady throughput은 첫 full SAM camera 후 재계산
 - GPU: A100 80GB, cam1 합산 peak 61,821 MiB/100%; OOM 없음
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
-- handoff monitor PID 602046: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
+- handoff monitor PID 608232: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
   `updated_at_utc` 증가와 exact active/resume command/stage count 보존 확인 완료
+- deadline snapshot sentinel PID 607755: 2026-08-14 13:00 KST에 completed sequence와
+  `INCOMPLETE` 목록을 별도 versioned private build로 export; local state는
+  `.runtime/deadline_snapshot_state.json`, 현재 `WAITING_DEADLINE`
 
 Public-safe Sapiens command 형태:
 
@@ -73,6 +76,8 @@ Public-safe Sapiens command 형태:
 6. resume 후 `python -m unittest discover -s tests -p 'test_*.py'`와 마지막 completed camera completion gate를 확인한다.
 7. handoff monitor가 없으면 `python tools/checkpoint_handoff_state.py ... --poll-seconds 30`을
    동일 root/sequence 설정으로 재실행하고 `updated_at_utc`가 전진하는지 확인한다.
+8. `.runtime/deadline_snapshot_state.json`의 sentinel이 없으면 `HANDOFF.md`와 local resume
+   command로 복구한다. 기존 deadline build manifest가 있으면 duplicate export하지 않는다.
 
 ## Frozen decisions
 
@@ -111,4 +116,4 @@ Public-safe Sapiens command 형태:
 
 ## Last updated
 
-- 2026-08-11 20:52 KST
+- 2026-08-11 20:55 KST

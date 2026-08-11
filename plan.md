@@ -25,6 +25,8 @@
   completion metadata/schema PASS item만 skip하고 incomplete/corrupt item만 resume
 - expensive camera output별 atomic `run_provenance.json`: checkpoint/config/source/selection/tool/command
   identity를 보존하며 기존 PASS output에는 재추론 없이 sidecar만 materialize
+- deadline sentinel: 2026-08-14 13:00 KST에 별도 immutable build ID로 private snapshot/export를
+  실행하고 PASS/REVIEW/FAIL/INCOMPLETE를 고정한 뒤 generation은 중단 없이 계속
 
 ## 현재 Gate
 

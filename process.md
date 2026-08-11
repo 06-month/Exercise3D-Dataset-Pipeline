@@ -262,6 +262,9 @@ Mode C는 여전히 selective evidence가 없는 전체 기본값으로 사용�
   1,950.22초, 0.6051 frame/s이고 두 camera combined peak는 모두 61,821 MiB다.
 - pose/SAM inference provenance sidecar를 consolidated SAM prior와 final private export dependency로
   전파하도록 확장했다. Export는 sidecar 누락 sequence를 complete로 인정하지 않는다.
+- deadline 순간의 실제 완료 상태가 이후 generation으로 덮이지 않도록 CPU-only sentinel PID 607755를
+  시작했다. 2026-08-14 13:00 KST에 별도 build ID로 export하며 manifest가 이미 있으면 duplicate하지
+  않는다. Export exit 2도 expected incomplete snapshot이면 manifest/status를 보존하고 generation은 계속한다.
 
 ## 2026-08-09 — 초기 synchronization / derivative 구축 기록 이관
 

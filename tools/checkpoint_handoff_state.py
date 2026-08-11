@@ -29,6 +29,10 @@ PROCESS_MARKERS = (
     "run_sam_body4d_full.py",
     "benchmark_sam_body4d.py",
     "checkpoint_handoff_state.py",
+    "run_deadline_snapshot.py",
+)
+RESUMABLE_MARKERS = tuple(
+    marker for marker in PROCESS_MARKERS if marker != "checkpoint_handoff_state.py"
 )
 CAMERAS = ("cam1", "cam2", "cam3")
 
@@ -298,7 +302,7 @@ def build_state(args: argparse.Namespace) -> dict[str, Any]:
     in_progress = [
         process["command"]
         for process in processes
-        if any(marker in process["command"] for marker in PROCESS_MARKERS[:-1])
+        if any(marker in process["command"] for marker in RESUMABLE_MARKERS)
     ]
     remaining = [
         sequence for sequence in sequences if sequence not in pose["completed_sequences"]
@@ -363,7 +367,7 @@ def main() -> int:
         state = build_state(args)
         resume_commands = dict(previous.get("resume_commands", {}))
         for process in state["active_processes"]:
-            for marker in PROCESS_MARKERS[:-1]:
+            for marker in RESUMABLE_MARKERS:
                 if marker in process["command"]:
                     resume_commands[marker] = process["command"]
         state["resume_commands"] = resume_commands

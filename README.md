@@ -14,6 +14,8 @@ payload는 공개하지 않습니다. 저장소에는 재현 가능한 코드, �
 실행하지 않는 startup 순서는 [`AGENTS.md`](AGENTS.md)에 고정했습니다.
 완료된 expensive camera output에는 checkpoint/config/source/selection/tool/command identity를
 담은 `run_provenance.json`을 별도 atomic sidecar로 남깁니다.
+고정 deadline에는 별도 private snapshot build가 현재 PASS/REVIEW/FAIL/INCOMPLETE 상태를 보존하며,
+장기 generation 자체는 snapshot 이후에도 중단하지 않습니다.
 
 ## 프로젝트 목표
 
