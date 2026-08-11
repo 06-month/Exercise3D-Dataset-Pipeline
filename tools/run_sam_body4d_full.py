@@ -14,6 +14,11 @@ from typing import Any
 
 import numpy as np
 
+try:
+    from tools.consolidate_sam_body_prior import REQUIRED_PRIOR_FIELDS
+except ModuleNotFoundError:
+    from consolidate_sam_body_prior import REQUIRED_PRIOR_FIELDS
+
 
 CAMERAS = ("cam1", "cam2", "cam3")
 
@@ -71,12 +76,37 @@ def completion_status(output_dir: Path, expected_frames: int) -> dict[str, Any]:
         benchmark = read_single_csv(benchmark_path)
         profile = json.loads(profile_path.read_text(encoding="utf-8"))
         with np.load(provenance_path, allow_pickle=False) as payload:
+            required_provenance = {
+                "frame_names",
+                "source_frame_names",
+                "source_frame_indices",
+                "target_bboxes_xyxy",
+                "target_valid",
+                "target_selection_confidence",
+                "target_ambiguous",
+                "no_target",
+                "occlusion_risk",
+                "timestamp_pts_seconds",
+            }
+            provenance_schema = required_provenance <= set(payload.files)
             provenance_frames = len(payload["frame_names"])
             target_valid_frames = int(payload["target_valid"].sum())
     except (OSError, ValueError, KeyError, RuntimeError) as error:
         return {"status": "INCOMPLETE", "reason": str(error)}
     mesh_count = len(list((private / "mesh_4d_individual" / "1").glob("*.ply")))
     numeric_count = len(list((private / "mhr_numeric" / "1").glob("*.npz")))
+    numeric_paths = sorted((private / "mhr_numeric" / "1").glob("*.npz"))
+    numeric_schema_complete = len(numeric_paths) == expected_frames
+    if numeric_schema_complete:
+        for path in numeric_paths:
+            try:
+                with np.load(path, allow_pickle=False) as payload:
+                    if not set(REQUIRED_PRIOR_FIELDS) <= set(payload.files):
+                        numeric_schema_complete = False
+                        break
+            except (OSError, ValueError):
+                numeric_schema_complete = False
+                break
     temporary_count = len(list(private.rglob("*.tmp*")))
     checks = {
         "benchmark_pass": benchmark.get("status") == "PASS",
@@ -87,8 +117,10 @@ def completion_status(output_dir: Path, expected_frames: int) -> dict[str, Any]:
         "target_seed_one": int(profile.get("target_seed_count", 0)) == 1,
         "persons_one": int(profile.get("persons_processed", 0)) == 1,
         "provenance_frames": provenance_frames == expected_frames,
+        "provenance_schema": provenance_schema,
         "mesh_complete": mesh_count == expected_frames,
         "numeric_prior_complete": numeric_count == expected_frames,
+        "numeric_prior_schema_complete": numeric_schema_complete,
         "no_temporary_files": temporary_count == 0,
     }
     return {

@@ -225,6 +225,13 @@ Mode C는 여전히 selective evidence가 없는 전체 기본값으로 사용�
 - Dataset freeze 뒤 Fit3D access/convention을 확보하면 30 fps, 3-camera, timing/JPEG/camera
   perturbation을 단계적으로 적용한다.
 
+### SAM full resume schema 강화
+
+- Camera resume PASS가 mesh/numeric 개수만 검사하던 경로를 강화해 target provenance required field와
+  모든 compact NPZ의 MHR required field set을 전수 검사한다.
+- 오래된 mesh-only/부분 numeric output은 full runner에서 즉시 `INCOMPLETE`가 되어 retry 대상이며,
+  consolidation에서 뒤늦게 반복 실패하지 않는다. Schema mismatch 회귀 test 포함 전체 40개 PASS다.
+
 ## 2026-08-09 — 초기 synchronization / derivative 구축 기록 이관
 
 ### 수행

@@ -239,7 +239,7 @@
   sequence-complete output 최대화 및 미완료 provenance 보존
 - full output contract: mesh뿐 아니라 MHR pose/shape/scale/hand/expression/joint coordinate와 rotation,
   204-d model parameter numeric prior, target source-index/PTS/ambiguity/occlusion을 frame별로 저장하고
-  camera 단위 exact completeness를 검사
+  camera 단위 exact completeness와 모든 compact NPZ required-field schema를 전수 검사
 - 다음 gate: Mode B를 full 기본 후보로 유지하고 실제 completion trigger case에서 Mode C 효용 검증;
   Mode C는 selective escalation evidence가 있을 때만 사용
 - Mode C candidate: occlusion-risk와 함께 Mode B missing/nonfinite 또는 sequence median+5 MAD
