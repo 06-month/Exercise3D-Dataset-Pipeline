@@ -255,6 +255,9 @@ Mode C는 여전히 selective evidence가 없는 전체 기본값으로 사용�
   기존 PASS output에 inference 재실행 없이 sidecar를 생성했으며 model/checkpoint identity,
   batch/chunk/mode, source/selection digest, camera/timing version, tool commit/SHA와 exact resume
   command를 기록했다. Live monitor가 새 completion을 30초마다 추가 materialize한다.
+- partial chunk까지 포함하는 live throughput/ETA를 handoff state에 추가했다. 20:50 KST 기준
+  pose 11,424/65,430, recent-chunk 0.22583 crop/s, Sapiens ETA는 2026-08-14 15:14 KST다.
+  단독 projection보다 약 2.23시간 늦지만 Mode B end-to-end sequence를 deadline 전에 확보한다.
 
 ## 2026-08-09 — 초기 synchronization / derivative 구축 기록 이관
 

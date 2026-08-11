@@ -13,6 +13,8 @@
 - 이미 완료된 4개 pilot sequence output은 검증 후 재사용하고 재추론하지 않음
 - GPU scheduling: Sapiens2-5B는 계속 실행하고, pose-complete sequence의 Mode B를 겹쳐
   end-to-end 완결 sequence를 확보한다. 첫 full camera 병렬 peak 61,821 MiB와 completion PASS 확인
+- first partial-chunk projection: recent Sapiens 0.22583 crop/s, 전량 ETA 2026-08-14 15:14 KST;
+  약 -2.23 h deadline margin을 end-to-end complete sequence 확보와 명시적 INCOMPLETE provenance로 관리
 - SAM policy: Mode B default, Mode C는 실제 failure/occlusion escalation evidence가 있는 경우만 REVIEW
 - long-run supervision: current 5B 종료 감시, 불완전 camera selection-bound resume, Phase 7→Mode B→
   consolidation→body fit→versioned private export를 sequence별 자동 진행

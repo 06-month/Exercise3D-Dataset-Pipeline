@@ -23,11 +23,11 @@
 - Sapiens2 PID 373049, 시작 2026-08-11 18:35 KST, output `outputs/sapiens2_target_only_full`
 - autonomous supervisor PID 537033, 시작 2026-08-11 20:17 KST, output `outputs/runtime/autonomous_generation`
 - 현재 SAM child: `barbellrow_0000/cam2` Mode B full 준비/실행 중
-- Sapiens 완료: pilot 4 sequence + `barbellrow_0001`, 15/78 camera, target crop 11,168/65,430
+- Sapiens 완료 camera output 11,168 crop + current chunk 256 crop = 11,424/65,430
 - pre-concurrency steady throughput: 0.23323 crop/s; 병렬 steady throughput은 첫 full SAM camera 후 재계산
 - GPU: A100 80GB, cam1 합산 peak 61,821 MiB/100%; OOM 없음
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
-- handoff monitor PID 589008: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
+- handoff monitor PID 595302: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
   `updated_at_utc` 증가와 exact active/resume command/stage count 보존 확인 완료
 
 Public-safe Sapiens command 형태:
@@ -56,7 +56,7 @@ Public-safe Sapiens command 형태:
 
 ## Remaining work
 
-- Sapiens2: 63/78 camera, 54,262 target crops
+- Sapiens2: 63/78 camera, current partial 포함 54,006 target crops
 - Phase 7 이후: `barbellrow_0001` 및 이후 pose-complete sequence
 - SAM full: 1/78 camera PASS, `barbellrow_0000/cam2` RUNNING, full-complete sequence 0/26
 - critical path: pose-complete sequence → Phase 7 gate → Mode B → compact prior → body fit → Mode C candidate QA → export
@@ -93,7 +93,8 @@ Public-safe Sapiens command 형태:
 
 ## Runtime estimates
 
-- Sapiens pre-concurrency recent rate 0.23323 crop/s, 기존 단독 ETA 2026-08-14 12:58 KST
+- Sapiens current recent-chunk rate 0.22583 crop/s, streaming ETA 2026-08-14 15:14 KST
+- deadline margin: Sapiens 전량 기준 약 -2.23 h; 대신 Mode B complete sequence를 deadline 전에 확보
 - SAM Mode B standalone expected 20.80 h; Mode C는 약 1.99배라 full default 금지
 - live 병렬 ETA와 deadline margin은 `.runtime/handoff_state.json`에서 확인한다.
 
@@ -108,4 +109,4 @@ Public-safe Sapiens command 형태:
 
 ## Last updated
 
-- 2026-08-11 20:45 KST
+- 2026-08-11 20:50 KST

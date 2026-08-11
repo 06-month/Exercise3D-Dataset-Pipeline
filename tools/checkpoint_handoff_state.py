@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 try:
     from tools.materialize_inference_provenance import materialize_all
 except ModuleNotFoundError:
@@ -88,10 +90,12 @@ def pose_progress(pose_root: Path, sequences: list[str]) -> dict[str, Any]:
     completed_cameras: list[str] = []
     completed_sequences: list[str] = []
     crops = 0
+    chunk_events: list[tuple[datetime, int]] = []
     for sequence in sequences:
         sequence_ok = True
         for camera in CAMERAS:
             metadata = read_json(pose_root / sequence / camera / "metadata.json")
+            ok = False
             try:
                 ok = metadata is not None and metadata["qa"]["status"] == "PASS"
                 if ok:
@@ -101,8 +105,52 @@ def pose_progress(pose_root: Path, sequences: list[str]) -> dict[str, Any]:
                     sequence_ok = False
             except (KeyError, TypeError, ValueError):
                 sequence_ok = False
+            camera_dir = pose_root / sequence / camera
+            chunks = sorted((camera_dir / "chunks").glob("*.npz"))
+            for chunk in chunks:
+                try:
+                    with np.load(chunk, allow_pickle=False) as payload:
+                        chunk_crops = int(payload["target_present"].sum())
+                    chunk_events.append(
+                        (
+                            datetime.fromtimestamp(chunk.stat().st_mtime, tz=timezone.utc),
+                            chunk_crops,
+                        )
+                    )
+                    if not ok:
+                        crops += chunk_crops
+                except (OSError, KeyError, ValueError):
+                    continue
         if sequence_ok:
             completed_sequences.append(sequence)
+    monitor = (
+        pose_root.parent
+        / "runtime"
+        / "phase6_full_target_inference"
+        / "target_only_pilot_gpu_utilization.csv"
+    )
+    started: datetime | None = None
+    try:
+        with monitor.open(newline="", encoding="utf-8") as handle:
+            first = next(csv.DictReader(handle))
+        started = datetime.fromisoformat(first["timestamp_utc"])
+    except (OSError, StopIteration, KeyError, ValueError, csv.Error):
+        pass
+    if started is not None:
+        chunk_events = [event for event in chunk_events if event[0] >= started]
+    chunk_events.sort()
+    recent = chunk_events[-6:]
+    recent_rate = 0.0
+    if len(recent) >= 2:
+        seconds = (recent[-1][0] - recent[0][0]).total_seconds()
+        recent_rate = sum(event[1] for event in recent[1:]) / seconds if seconds > 0 else 0.0
+    effective_rate = 0.0
+    if started is not None:
+        elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+        effective_rate = max(0, crops - 9725) / elapsed if elapsed > 0 else 0.0
+    remaining = max(0, 65430 - crops)
+    projection_rate = recent_rate or effective_rate
+    eta_hours = remaining / projection_rate / 3600 if projection_rate > 0 else None
     return {
         "completed_cameras": completed_cameras,
         "completed_camera_count": len(completed_cameras),
@@ -110,7 +158,19 @@ def pose_progress(pose_root: Path, sequences: list[str]) -> dict[str, Any]:
         "completed_sequence_count": len(completed_sequences),
         "processed_target_crops": crops,
         "total_target_crops": 65430,
-        "remaining_target_crops": max(0, 65430 - crops),
+        "remaining_target_crops": remaining,
+        "effective_new_crops_per_second": effective_rate or None,
+        "recent_chunk_crops_per_second": recent_rate or None,
+        "eta_projection_crops_per_second": projection_rate or None,
+        "estimated_remaining_hours": eta_hours,
+        "estimated_completion_utc": (
+            datetime.fromtimestamp(
+                datetime.now(timezone.utc).timestamp() + eta_hours * 3600,
+                tz=timezone.utc,
+            ).isoformat()
+            if eta_hours is not None
+            else None
+        ),
     }
 
 
@@ -131,6 +191,7 @@ def sam_progress(root: Path, sequences: list[str]) -> dict[str, Any]:
     completed_cameras: list[str] = []
     completed_sequences: list[str] = []
     processed_frames = 0
+    elapsed_wall_seconds = 0.0
     for sequence in sequences:
         sequence_ok = True
         for camera in CAMERAS:
@@ -164,6 +225,7 @@ def sam_progress(root: Path, sequences: list[str]) -> dict[str, Any]:
                 continue
             completed_cameras.append(f"{sequence}/{camera}")
             processed_frames += expected
+            elapsed_wall_seconds += float(benchmark.get("elapsed_wall_seconds") or 0)
         if sequence_ok:
             completed_sequences.append(sequence)
     return {
@@ -173,6 +235,10 @@ def sam_progress(root: Path, sequences: list[str]) -> dict[str, Any]:
         "completed_sequence_count": len(completed_sequences),
         "processed_frames": processed_frames,
         "total_frames": 65595,
+        "measured_frames_per_second": (
+            processed_frames / elapsed_wall_seconds if elapsed_wall_seconds > 0 else None
+        ),
+        "summed_camera_wall_seconds": elapsed_wall_seconds,
     }
 
 
