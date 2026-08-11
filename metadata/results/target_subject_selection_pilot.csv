@@ -1,0 +1,13 @@
+sequence,camera,frame_count,total_person_candidates,target_only_sapiens_crops,target_ambiguous_count,no_target_count,detector_duplicate_candidate_count,target_fragmentation_risk_count,possible_reflection_candidate_count,occlusion_risk_count,identity_switch_count,status
+barbellrow_0000,cam1,590,710,590,0,0,0,0,0,120,0,PASS
+barbellrow_0000,cam2,590,656,590,0,0,0,0,0,66,0,PASS
+barbellrow_0000,cam3,590,1428,590,0,0,5,0,573,583,0,PASS
+squat_0001,cam1,1267,1945,1267,0,0,2,0,0,0,0,PASS
+squat_0001,cam2,1267,2671,1267,0,0,48,0,0,545,0,PASS
+squat_0001,cam3,1267,2469,1267,0,0,7,0,0,689,0,PASS
+pushup_0001,cam1,552,1142,545,7,0,26,6,0,62,0,REVIEW
+pushup_0001,cam2,552,1936,552,0,0,3,0,552,152,0,PASS
+pushup_0001,cam3,552,734,552,0,0,5,0,0,61,0,PASS
+benchpress_0003,cam1,835,3670,835,0,0,98,0,827,379,0,PASS
+benchpress_0003,cam2,835,835,835,0,0,0,0,0,0,0,PASS
+benchpress_0003,cam3,835,1400,835,0,0,0,0,453,0,0,PASS

@@ -395,3 +395,56 @@ Detector safetensors load의 네 BatchNorm counter warning은 detection이 정�
 않았다. 단일 job 단순 외삽 약 82.3 GPU-hours는 offline 목적에서 허용 가능하며, Phase 6-1에서
 official 2 jobs/GPU의 실제 throughput과 multi-exercise robustness를 먼저 측정한다. 전체 26 sequence
 inference, triangulation, SAM-Body4D, MHR, SMPL과 pseudo-label generation은 수행하지 않았다.
+
+## 2026-08-11 — Phase 6-1A Primary Target Selection Gate 완료
+
+### 구현과 회귀 검증
+
+- official DETR all-person candidate는 삭제하지 않고 private ragged metadata에 보존
+- multi-frame initialization, track duration, IoU, normalized center, scale/aspect, score를 결합
+- forward/backward tracking 합의와 cross-view target visibility QA 추가
+- detector가 prone target을 상·하체 complementary box로 분할하는 fragmentation을 감지해
+  `TARGET_AMBIGUOUS`로 abstain; frame 0이 마지막 frame과 wraparound 연결되던 boundary 수정
+- target selector unit test 5개와 Python compile PASS
+
+### 4-sequence pilot와 Visual QA
+
+- 12 camera, 9,732 frame, official DETR person candidate 19,596
+- target-only eligible crop 9,725, crop reduction 50.3725%
+- `TARGET_AMBIGUOUS` 7, `NO_TARGET` 0, obvious identity switch 0
+- ambiguity는 `pushup_0001/cam1` duplicate 1 + fragmentation 6이며 pose crop을 출력하지 않음
+- private overlay에서 background crossing/overlap, mirror 후보, lying/prone pose, bbox size reversal,
+  candidate order 변화 확인; background person systematic mis-selection 0
+- private coordinate/overlay/frame은 ignored `outputs/`에만 보존
+
+### Target-only Sapiens2 benchmark
+
+- batch 1/2/4/8/12/16 모두 PASS 및 batch 1/all-person target baseline equivalence PASS
+- raw fastest batch 16: 0.231951 crop/s, reserved 37.426 GiB
+- 99% plateau 최소 batch 4 권장: 0.230449 crop/s, reserved 23.801 GiB,
+  pose GPU utilization mean 97.309%, mean power 348.408 W
+- 65,595 frame target-only stage projection 79.09 GPU-hours, all-person 157.38 GPU-hours 대비
+  약 78.30 GPU-hours 감소
+
+### 결정
+
+Target-selection gate는 `GO_FULL_DATASET`이다. 그러나 사용자에게 결과를 보고하고 명시적 승인을
+받기 전까지 전체 65,595-frame inference는 시작하지 않는다.
+
+## 2026-08-11 — SAM Body Runtime Feasibility Preflight
+
+### Official interface와 pilot 선정
+
+- SAM-Body4D revision `21af1020979ef32ddf6be3597ef59a68bad2f1bf`
+- SAM 3D Body revision `b5c765a0d89d789985e186d396315e7590887b94`
+- mode A base, mode B completion off, mode C completion on 비교 계획 동결
+- control `squat_0001/cam1`, severe-occlusion `latpulldown_0002/cam2` 선정
+- severe clip 1,136 frame detection/selector preflight PASS: 평균 2.121 candidates/frame,
+  occlusion risk 959, identity switch/ambiguity 0; private representative overlay 확인
+
+### Checkpoint gate와 결정
+
+필요한 7개 payload set은 local에 없고 총 26,803,630,365 bytes(24.963 GiB)다. SAM 3와
+SAM 3D Body는 gated access가 필요하다. 사용자 조건에 따라 download/model/path/license를 먼저
+보고하며 명시적 승인 전 checkpoint 다운로드와 SAM inference를 수행하지 않는다. Provisional
+deadline verdict는 `DEADLINE_AT_RISK`; local A/B/C 실측 전 final verdict는 보류한다.

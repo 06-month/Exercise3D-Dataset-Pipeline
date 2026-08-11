@@ -61,9 +61,12 @@ camera calibration을 구분합니다.
 | 5. Full Dataset Background BA | DONE | 26 sequences 실행 완료, Phase 5.1 후 PASS 11 / REVIEW 15 / FAIL 0, Stage 1/2 26/26 |
 | 5.1. `pushup_0003` Camera Recovery | DONE | 동일 objective에서 Stage 2 budget만 확장, 322 nfev에서 수렴, `RECOVERED_REVIEW` |
 | 6-0. Sapiens2-5B Environment | DONE | A100 80GB smoke PASS, 308 keypoints, peak 19.986 GiB, 4.517 s/image |
-| 6-1. Sapiens2 Pose Pilot | IN PROGRESS | all-person baseline 보존, 4-sequence throughput/output QA |
-| 6-1A. Primary Target Selection | IN PROGRESS | bidirectional temporal identity gate 후 target 1명만 5B 실행 |
-| 7–13 | TODO | Phase 6-1 observation gate 이후 triangulation/body pipeline 진행 |
+| 6-1. Sapiens2 Pose Pilot | DONE | all-person baseline 보존, batch 1/2/4/8/12/16 완료 |
+| 6-1A. Primary Target Selection | DONE | 9,732 frame, identity switch 0, ambiguity 7, crop 50.37% 감소 |
+| 6-2. Target-only Runtime Gate | DONE/HOLD | batch 4 권장, 전체 65,595-frame ETA 79.09 h; 사용자 승인 전 실행 보류 |
+| 7. Timestamp-aware Triangulation | TODO | Phase 6 full observation 이후 진행 |
+| 8. SAM Body Runtime Feasibility | WAITING APPROVAL | 공식 checkpoint 24.963 GiB 부재; 다운로드 승인 전 정지 |
+| 9–13 | TODO | runtime feasibility와 사용자 승인 이후 body/quality pipeline 진행 |
 
 `pushup_0003`은 Phase 5.1에서 observation, initialization, objective와 gate를 그대로 두고
 Stage 2 budget만 300에서 600으로 확장했습니다. 실제 322 evaluations에서 `xtol`로 수렴했고,
@@ -213,6 +216,7 @@ Sapiens2 Pose 5B single-image smoke:
 | `tools/target_subject_selection.py` | all DETR candidate 보존 + bidirectional primary target tracking | ignored private output + aggregate report |
 | `tools/sapiens2_target_pipeline.py` | accepted target-only 5B batch benchmark/inference/verification | ignored output만 생성 |
 | `tools/summarize_phase6_1.py` | all-person/target-only 비교, ETA와 acceptance gate 집계 | redacted aggregate 생성 |
+| `tools/benchmark_sam_body4d.py` | SAM-Body4D checkpoint preflight와 refiner on/off runtime 측정 | ignored output만 생성 |
 | `tools/check_publication_safety.py` | staged/tracked 공개 안전 검사 | 없음 |
 
 ## 저장소 구조
@@ -269,7 +273,8 @@ git diff --cached
 
 - VGGT-Ω: camera/depth/point-map initialization 전용, 최종 camera로 직접 사용하지 않음
 - Sapiens2 Pose 5B: Phase 6 primary offline 2D teacher로 확정; official DETR person detector 사용
-- SAM 3D Body / SAM-Body4D: Phase 8 pretrained temporal body prior 후보
+- SAM 3D Body / SAM-Body4D: pretrained temporal body prior 후보; checkpoint 승인 대기 중이며
+  target-selector가 고른 1명만 입력하는 adapter가 필수
 - Fit3D: Phase 12 정량 validation dataset 후보
 
 각 모델의 라이선스, 배포 조건, checkpoint 사용 권한은 upstream 정책을 따릅니다.

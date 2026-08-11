@@ -1,0 +1,8 @@
+scenario_or_stage,frame_count,projected_person_crops,seconds,hours,basis
+TARGET_ONLY_DETR,65595,0,2646.7307,0.7352,recommended_batch4_measured_stage_timing
+TARGET_SELECTION,65595,0,67.0378,0.0186,four_sequence_selector_aggregate
+TARGET_ONLY_SAPIENS2,65595,65547.8191,281135.9171,78.0933,recommended_batch4_measured_pose_pre_post_timing
+SERIALIZATION_AND_OVERHEAD,65595,65547.8191,857.5129,0.2382,recommended_batch4_measured_residual_timing
+TARGET_ONLY_TOTAL,65595,65547.8191,284707.1984,79.0853,stage_sum
+ALL_DETECTIONS_BASELINE_TOTAL,65595,132079.6979,566571.2904,157.3809,four_sequence_crop_distribution_and_measured_baseline
+PROJECTED_SAVING,65595,66531.8788,281864.0920,78.2956,all_detections_minus_target_only

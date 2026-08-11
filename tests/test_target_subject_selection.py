@@ -3,8 +3,10 @@ import unittest
 import numpy as np
 
 from tools.target_subject_selection import (
+    apply_identity_switch_gate,
     minimum_cost_assignment,
     rank_tracks,
+    target_fragmentation_risk,
     track_candidates,
 )
 
@@ -94,6 +96,43 @@ class TargetSubjectSelectionTest(unittest.TestCase):
             )
         self.assertEqual(choices[0], expected)
         self.assertEqual(choices[1], expected)
+
+    def test_identity_switch_gate_does_not_wrap_last_frame_to_frame_zero(self) -> None:
+        boxes = [
+            np.asarray([[0.10, 0.10, 0.30, 0.80]], dtype=np.float32),
+            np.empty((0, 4), dtype=np.float32),
+            np.asarray([[0.70, 0.10, 0.90, 0.80]], dtype=np.float32),
+        ]
+        selected = np.asarray([0, -1, 0], dtype=np.int32)
+        ambiguous = np.zeros(3, dtype=np.bool_)
+        status = np.asarray(["TARGET", "NO_TARGET", "TARGET"], dtype="<U20")
+        confidence = np.ones(3, dtype=np.float32)
+
+        risk = apply_identity_switch_gate(
+            boxes, selected, ambiguous, status, confidence, 0.30
+        )
+
+        self.assertFalse(risk.any())
+        np.testing.assert_array_equal(selected, [0, -1, 0])
+
+    def test_split_upper_lower_target_is_abstention_risk(self) -> None:
+        full_before = np.asarray([[0.42, 0.30, 0.78, 0.92]], dtype=np.float32)
+        split = np.asarray(
+            [
+                [0.42, 0.30, 0.78, 0.62],
+                [0.44, 0.48, 0.74, 0.92],
+            ],
+            dtype=np.float32,
+        )
+        full_after = np.asarray([[0.42, 0.30, 0.78, 0.92]], dtype=np.float32)
+        selected = np.asarray([0, 1, 0], dtype=np.int32)
+
+        risk, partner = target_fragmentation_risk(
+            [full_before, split, full_after], selected
+        )
+
+        np.testing.assert_array_equal(risk, [False, True, False])
+        self.assertEqual(int(partner[1]), 0)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,7 @@
+workload,batch_size,status,images_per_second,person_crops_per_second,effective_seconds_per_image,peak_allocated_gib,peak_reserved_gib,pose_gpu_utilization_mean_pct,pose_gpu_utilization_p95_pct,pose_power_mean_w,pose_power_max_w,max_confident_xy_delta_vs_batch1_px,max_confident_xy_delta_vs_all_detections_baseline_px,numerically_equivalent,recommended
+TARGET_ONLY,1,PASS,0.221007,0.221007,4.524741,19.977,20.961,96.143,100.000,337.399,366.530,0.000000,0.090454,True,False
+TARGET_ONLY,2,PASS,0.222323,0.222323,4.497961,20.585,21.766,97.100,100.000,355.358,425.040,0.000000,0.090454,True,False
+TARGET_ONLY,4,PASS,0.230449,0.230449,4.339358,21.803,23.801,97.309,100.000,348.408,430.460,0.090454,0.000000,True,True
+TARGET_ONLY,8,PASS,0.231504,0.231504,4.319582,24.234,28.451,96.786,100.000,349.506,440.160,0.090454,0.000000,True,False
+TARGET_ONLY,12,PASS,0.231187,0.231187,4.325510,26.666,33.701,96.717,100.000,351.672,470.120,0.090454,0.000000,True,False
+TARGET_ONLY,16,PASS,0.231951,0.231951,4.311254,29.099,37.426,96.489,100.000,349.936,426.880,0.090454,0.000000,True,False

@@ -1,2 +1,2 @@
-status,candidate,camera,frames_available,frames_processed,repository_revision,configuration,missing_component_count,reason
-BLOCKED_CHECKPOINT,latpulldown_0002,cam2,1136,0,21af1020979ef32ddf6be3597ef59a68bad2f1bf,refiner_on,8,required pretrained payload is unavailable locally
+status,candidate,camera,frames_available,frames_processed,repository_revision,configuration,missing_payload_set_count,required_bytes,required_gib,reason
+BLOCKED_CHECKPOINT,latpulldown_0002,cam2,1136,0,21af1020979ef32ddf6be3597ef59a68bad2f1bf,modes_A_B_C,7,26803630365,24.963,required pretrained payload is unavailable locally and download approval is pending

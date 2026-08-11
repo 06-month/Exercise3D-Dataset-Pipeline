@@ -148,6 +148,26 @@ def intersection_over_min_area(left: np.ndarray, right: np.ndarray) -> float:
     return intersection / denominator if denominator > 0 else 0.0
 
 
+def union_box(left: np.ndarray, right: np.ndarray) -> np.ndarray:
+    return np.concatenate((np.minimum(left[:2], right[:2]), np.maximum(left[2:], right[2:])))
+
+
+def detector_duplicate_pair(left: np.ndarray, right: np.ndarray) -> bool:
+    """Return conservative geometric evidence that two boxes describe one person.
+
+    This is diagnostic evidence only.  In particular, a contained partial-body
+    DETR box is retained rather than deleted because a real occluding person can
+    have similar geometry.
+    """
+
+    overlap = box_iou(left, right)
+    containment = intersection_over_min_area(left, right)
+    _, left_area, _ = box_geometry(left)
+    _, right_area, _ = box_geometry(right)
+    area_ratio = min(left_area, right_area) / max(left_area, right_area, 1e-9)
+    return overlap >= 0.65 or (containment >= 0.80 and area_ratio >= 0.20)
+
+
 def box_geometry(box: np.ndarray) -> tuple[np.ndarray, float, float]:
     size = np.maximum(box[2:] - box[:2], 1e-6)
     return (box[:2] + box[2:]) * 0.5, float(size[0] * size[1]), float(size[0] / size[1])
@@ -180,6 +200,85 @@ def association_affinity(previous: np.ndarray, current: np.ndarray, gap: int) ->
             + ASSOCIATION_WEIGHTS["log_aspect_continuity"] * aspect_similarity
         )
     )
+
+
+def target_fragmentation_risk(
+    boxes: Sequence[np.ndarray], selected: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Find split target boxes whose stable union is safer than either crop.
+
+    A prone subject can occasionally be emitted as complementary upper/lower
+    body detections.  We do not synthesize an unofficial detector box.  When
+    both adjacent target boxes strongly match the union, the frame is instead
+    abstained so a partial crop cannot reach Sapiens2.
+    """
+
+    risk = np.zeros(len(boxes), dtype=np.bool_)
+    partner = np.full(len(boxes), -1, dtype=np.int32)
+    for frame in range(1, len(boxes) - 1):
+        target_index = int(selected[frame])
+        previous_index = int(selected[frame - 1])
+        next_index = int(selected[frame + 1])
+        if target_index < 0 or previous_index < 0 or next_index < 0:
+            continue
+        target = boxes[frame][target_index]
+        _, target_area, _ = box_geometry(target)
+        for candidate_index, candidate in enumerate(boxes[frame]):
+            if candidate_index == target_index:
+                continue
+            overlap = box_iou(target, candidate)
+            containment = intersection_over_min_area(target, candidate)
+            combined = union_box(target, candidate)
+            _, combined_area, _ = box_geometry(combined)
+            if (
+                overlap < 0.15
+                or containment < 0.35
+                or combined_area / max(target_area, 1e-9) < 1.25
+            ):
+                continue
+            union_affinities = (
+                association_affinity(
+                    boxes[frame - 1][previous_index], combined, 1
+                ),
+                association_affinity(boxes[frame + 1][next_index], combined, 1),
+            )
+            if min(union_affinities) >= 0.70:
+                risk[frame] = True
+                partner[frame] = candidate_index
+                break
+    return risk, partner
+
+
+def apply_identity_switch_gate(
+    boxes: Sequence[np.ndarray],
+    selected: np.ndarray,
+    ambiguous: np.ndarray,
+    status: np.ndarray,
+    confidence: np.ndarray,
+    association_threshold: float,
+) -> np.ndarray:
+    """Abstain on discontinuous consecutive target boxes without wraparound."""
+
+    risk = np.zeros(len(boxes), dtype=np.bool_)
+    previous_frame = -1
+    for frame in range(len(boxes)):
+        if selected[frame] < 0:
+            previous_frame = -1
+            continue
+        if previous_frame >= 0 and previous_frame == frame - 1:
+            affinity = association_affinity(
+                boxes[previous_frame][selected[previous_frame]],
+                boxes[frame][selected[frame]],
+                1,
+            )
+            if affinity < max(association_threshold + 0.05, 0.38):
+                risk[frame] = True
+                ambiguous[frame] = True
+                selected[frame] = -1
+                status[frame] = "TARGET_AMBIGUOUS"
+                confidence[frame] = min(confidence[frame], 0.44)
+        previous_frame = frame if selected[frame] >= 0 else -1
+    return risk
 
 
 def minimum_cost_assignment(cost: np.ndarray) -> list[tuple[int, int]]:
@@ -599,24 +698,23 @@ def select_camera(
                 status[frame] = "TARGET_AMBIGUOUS"
                 confidence[frame] = min(confidence[frame], 0.44)
 
-    identity_switch_risk = np.zeros(len(frames), dtype=np.bool_)
-    previous_frame = -1
-    for frame in range(len(frames)):
-        if selected[frame] < 0:
-            continue
-        if previous_frame == frame - 1:
-            affinity = association_affinity(
-                boxes[previous_frame][selected[previous_frame]],
-                boxes[frame][selected[frame]],
-                1,
-            )
-            if affinity < max(args.association_threshold + 0.05, 0.38):
-                identity_switch_risk[frame] = True
-                ambiguous[frame] = True
-                selected[frame] = -1
-                status[frame] = "TARGET_AMBIGUOUS"
-                confidence[frame] = min(confidence[frame], 0.44)
-        previous_frame = frame if selected[frame] >= 0 else -1
+    fragmentation_risk, fragmentation_partner = target_fragmentation_risk(
+        boxes, selected
+    )
+    for frame in np.flatnonzero(fragmentation_risk):
+        ambiguous[frame] = True
+        selected[frame] = -1
+        status[frame] = "TARGET_AMBIGUOUS"
+        confidence[frame] = min(confidence[frame], 0.44)
+
+    identity_switch_risk = apply_identity_switch_gate(
+        boxes,
+        selected,
+        ambiguous,
+        status,
+        confidence,
+        args.association_threshold,
+    )
 
     occlusion_risk = np.zeros(len(frames), dtype=np.bool_)
     duplicate_count = np.zeros(len(frames), dtype=np.int16)
@@ -625,6 +723,11 @@ def select_camera(
     background_boxes: list[np.ndarray] = []
     normalization = np.asarray([width, height, width, height], dtype=np.float32)
     for frame in range(len(frames)):
+        duplicate_count[frame] = sum(
+            detector_duplicate_pair(boxes[frame][left], boxes[frame][right])
+            for left in range(len(boxes[frame]))
+            for right in range(left + 1, len(boxes[frame]))
+        )
         for candidate, box in enumerate(boxes[frame]):
             if candidate == selected[frame]:
                 continue
@@ -641,10 +744,6 @@ def select_camera(
             )
             if overlap >= 0.05 or containment >= 0.15 or normalized_distance <= 0.65:
                 occlusion_risk[frame] = True
-            _, other_area, _ = box_geometry(box)
-            area_ratio = min(target_area, other_area) / max(target_area, other_area, 1e-9)
-            if overlap >= 0.65 or (containment >= 0.80 and area_ratio >= 0.50):
-                duplicate_count[frame] += 1
         background_offsets[frame + 1] = len(background_boxes)
 
     possible_reflection_tracks: set[int] = set()
@@ -711,6 +810,8 @@ def select_camera(
         occlusion_risk=occlusion_risk,
         association_ambiguity=association_ambiguity,
         association_margin=association_margin,
+        target_fragmentation_risk=fragmentation_risk,
+        target_fragmentation_partner_index=fragmentation_partner,
         identity_switch_risk=identity_switch_risk,
         global_track_ambiguity=global_track_ambiguity,
         detector_duplicate_count=duplicate_count,
@@ -744,6 +845,10 @@ def select_camera(
                 "target_status": str(status[frame]),
                 "occlusion_risk": bool(occlusion_risk[frame]),
                 "association_ambiguity": bool(association_ambiguity[frame]),
+                "target_fragmentation_risk": bool(fragmentation_risk[frame]),
+                "target_fragmentation_partner_index": int(
+                    fragmentation_partner[frame]
+                ),
                 "identity_switch_risk": bool(identity_switch_risk[frame]),
                 "global_track_ambiguity": bool(global_track_ambiguity[frame]),
                 "detector_duplicate_count": int(duplicate_count[frame]),
@@ -783,7 +888,20 @@ def select_camera(
         "possible_reflection_track_ids": sorted(possible_reflection_tracks),
     }
     atomic_write_text(output_dir / "metadata.json", json.dumps(metadata, indent=2) + "\n")
-    save_overlays(output_dir, frames, boxes, scores, selected, confidence, ambiguous, no_target, occlusion_risk, possible_reflection_count, args.save_overlays)
+    save_overlays(
+        output_dir,
+        frames,
+        boxes,
+        scores,
+        selected,
+        confidence,
+        ambiguous,
+        no_target,
+        occlusion_risk,
+        possible_reflection_count,
+        fragmentation_risk,
+        args.save_overlays,
+    )
 
     accepted = selected >= 0
     center_jumps = []
@@ -825,6 +943,7 @@ def select_camera(
         "multi_person_frame_count": int((counts > 1).sum()),
         "occlusion_risk_count": int(occlusion_risk.sum()),
         "detector_duplicate_candidate_count": int(duplicate_count.sum()),
+        "target_fragmentation_risk_count": int(fragmentation_risk.sum()),
         "possible_reflection_candidate_count": int(possible_reflection_count.sum()),
         "forward_backward_disagreement_count": int(
             ((forward_choice != backward_choice) & ~no_target).sum()
@@ -862,6 +981,7 @@ def choose_overlay_indices(
     ambiguous: np.ndarray,
     occlusion: np.ndarray,
     reflection: np.ndarray,
+    fragmentation: np.ndarray,
     limit: int,
 ) -> list[int]:
     frame_count = len(counts)
@@ -875,7 +995,7 @@ def choose_overlay_indices(
                 int(candidate_index_changes[-1]),
             ]
         )
-    for mask in (ambiguous, occlusion, reflection > 0):
+    for mask in (ambiguous, fragmentation, occlusion, reflection > 0):
         indices = np.flatnonzero(mask)
         if len(indices):
             categories.extend([int(indices[0]), int(indices[len(indices) // 2]), int(indices[-1])])
@@ -905,12 +1025,22 @@ def save_overlays(
     no_target: np.ndarray,
     occlusion: np.ndarray,
     reflection: np.ndarray,
+    fragmentation: np.ndarray,
     limit: int,
 ) -> None:
     if limit < 1:
         return
     counts = np.asarray([len(item) for item in boxes])
-    indices = choose_overlay_indices(counts, selected, boxes, ambiguous, occlusion, reflection, limit)
+    indices = choose_overlay_indices(
+        counts,
+        selected,
+        boxes,
+        ambiguous,
+        occlusion,
+        reflection,
+        fragmentation,
+        limit,
+    )
     overlay_dir = output_dir / "debug" / "target_overlays"
     overlay_dir.mkdir(parents=True, exist_ok=True)
     manifest_rows = []
@@ -960,6 +1090,8 @@ def save_overlays(
             reasons.append("max_person_candidates")
         if ambiguous[frame]:
             reasons.append("target_ambiguous")
+        if fragmentation[frame]:
+            reasons.append("target_fragmentation_risk")
         if occlusion[frame]:
             reasons.append("occlusion_risk")
         if reflection[frame] > 0:
@@ -1107,6 +1239,12 @@ def main() -> int:
         "target_ambiguous_count": int(sum(row["target_ambiguous_count"] for row in summaries)),
         "no_target_count": int(sum(row["no_target_count"] for row in summaries)),
         "occlusion_risk_count": int(sum(row["occlusion_risk_count"] for row in summaries)),
+        "detector_duplicate_candidate_count": int(
+            sum(row["detector_duplicate_candidate_count"] for row in summaries)
+        ),
+        "target_fragmentation_risk_count": int(
+            sum(row["target_fragmentation_risk_count"] for row in summaries)
+        ),
         "identity_switch_count": int(sum(row["identity_switch_count"] for row in summaries)),
         "cross_view": cross_view,
     }

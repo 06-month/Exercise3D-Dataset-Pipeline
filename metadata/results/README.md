@@ -8,6 +8,11 @@
 - `review_sequences.csv`: REVIEW/FAIL 이유와 수치 요약
 - `bundle_adjustment_statistics.csv`: sequence별 optimizer와 residual 통계
 - `pushup_0003_recovery.csv`: Phase 5 baseline과 budget-only recovery의 직접 비교
+- `target_subject_selection_pilot.csv`: private bbox를 제외한 Phase 6 target identity aggregate
+- `sapiens2_target_only_batch_scaling.csv`: target-only batch throughput/resource/equivalence
+- `phase6_2_runtime_projection.csv`: stage별 65,595-frame runtime 외삽
+- `sam_body4d_checkpoint_manifest.csv`: Phase 8 공식 checkpoint 용량·경로·접근 조건
+- `sam_body4d_preflight.csv`: local checkpoint availability와 pilot 실행 가능 상태
 
 포함하지 않는 항목: absolute source/output path, exact camera matrices, frame image, depth,
 point map, feature, track, checkpoint, 개인 식별 metadata. CSV의 sequence ID는 연구용 logical ID다.

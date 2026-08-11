@@ -57,6 +57,11 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--sample-count", type=int, default=16)
     benchmark.add_argument("--warmup-count", type=int, default=1)
     benchmark.add_argument("--output-dir", type=Path, required=True)
+    benchmark.add_argument(
+        "--all-detections-root",
+        type=Path,
+        help="optional completed baseline for selected-candidate pose equivalence",
+    )
     benchmark.add_argument("--equivalence-xy-atol", type=float, default=0.5)
     benchmark.add_argument("--equivalence-score-atol", type=float, default=0.005)
 
@@ -186,6 +191,8 @@ def run_target_batch(
         monitor.set_phase("image_load", len(path_batch))
         with timer.measure("image_load"):
             images = [decode_image(path) for path in path_batch]
+        monitor.set_phase("detector", len(path_batch))
+        engine.detect(images, timer)
         detections = [selection.detection(index) for index in index_batch]
         predictions = engine.process_detections(
             path_batch,
@@ -214,6 +221,56 @@ def run_target_batch(
     }, timer, time.perf_counter() - started
 
 
+def all_detections_reference(
+    root: Path,
+    sequence: str,
+    camera: str,
+    frame_indices: Sequence[int],
+    selection: TargetSelection,
+) -> dict[str, np.ndarray]:
+    output_dir = root / sequence / camera
+    with np.load(output_dir / "poses_2d.npz", allow_pickle=False) as pose, np.load(
+        output_dir / "bboxes.npz", allow_pickle=False
+    ) as bbox:
+        if not np.array_equal(pose["instance_offsets"], selection.candidate_offsets):
+            raise RuntimeError("baseline and target selector candidate offsets differ")
+        absolute = np.asarray(
+            [
+                int(selection.candidate_offsets[frame])
+                + int(selection.target_candidate_index[frame])
+                for frame in frame_indices
+            ],
+            dtype=np.int64,
+        )
+        selected_boxes = np.stack(
+            [selection.detection(frame)[0][0] for frame in frame_indices]
+        )
+        baseline_boxes = bbox["all_bboxes_xyxy"][absolute]
+        if not np.allclose(selected_boxes, baseline_boxes, rtol=0.0, atol=1e-5):
+            raise RuntimeError("baseline and target selector boxes differ")
+        return {
+            "keypoints_xy": pose["all_keypoints_xy"][absolute].copy(),
+            "confidence": pose["all_confidence"][absolute].copy(),
+        }
+
+
+def equivalence_metrics(
+    arrays: dict[str, np.ndarray], reference: dict[str, np.ndarray]
+) -> dict[str, float]:
+    delta = np.linalg.norm(
+        arrays["keypoints_xy"] - reference["keypoints_xy"], axis=-1
+    )
+    confident = np.minimum(arrays["confidence"], reference["confidence"]) >= 0.3
+    return {
+        "max_xy": float(np.max(delta)),
+        "p95_xy": float(np.percentile(delta, 95)),
+        "max_confident_xy": float(np.max(delta[confident])) if confident.any() else 0.0,
+        "max_confidence": float(
+            np.max(np.abs(arrays["confidence"] - reference["confidence"]))
+        ),
+    }
+
+
 def benchmark_command(args: argparse.Namespace) -> int:
     if args.sample_count < 1 or args.warmup_count < 0 or 1 not in args.batch_sizes:
         raise RuntimeError("valid samples/warmup and batch 1 reference are required")
@@ -225,11 +282,31 @@ def benchmark_command(args: argparse.Namespace) -> int:
     paths, frame_indices, selection = selected_sample(
         dataset_root, selection_root, args.sequence, args.camera, args.sample_count
     )
+    baseline_reference = (
+        all_detections_reference(
+            args.all_detections_root.expanduser().resolve(),
+            args.sequence,
+            args.camera,
+            frame_indices,
+            selection,
+        )
+        if args.all_detections_root is not None
+        else None
+    )
+    selection_summary = json.loads(
+        (selection_root / args.sequence / args.camera / "summary.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    selector_seconds_per_frame = float(
+        selection_summary["selection_elapsed_seconds"]
+    ) / max(int(selection_summary["frame_count"]), 1)
     engine = Sapiens2BatchEngine(args)
     monitor_path = output_dir / "target_only_gpu_utilization.csv"
     monitor = GPUMonitor(monitor_path, args.gpu_sample_interval, engine.device_index)
     monitor.start()
     records: list[dict[str, Any]] = []
+    profile_rows: list[dict[str, Any]] = []
     reference: dict[str, np.ndarray] | None = None
     try:
         for batch_size in args.batch_sizes:
@@ -241,6 +318,8 @@ def benchmark_command(args: argparse.Namespace) -> int:
                     warmup_paths = paths[:warmup_count]
                     warmup_indices = frame_indices[:warmup_count]
                     warmup_images = [decode_image(path) for path in warmup_paths]
+                    monitor.set_phase("detector", len(warmup_paths))
+                    engine.detect(warmup_images)
                     engine.process_detections(
                         warmup_paths,
                         warmup_images,
@@ -260,19 +339,39 @@ def benchmark_command(args: argparse.Namespace) -> int:
                     )
                 if reference is None:
                     reference = arrays
-                    max_xy = max_confident_xy = p95_xy = max_confidence = 0.0
-                    equivalent = True
+                    batch_metrics = {
+                        "max_xy": 0.0,
+                        "p95_xy": 0.0,
+                        "max_confident_xy": 0.0,
+                        "max_confidence": 0.0,
+                    }
                 else:
-                    delta = np.linalg.norm(arrays["keypoints_xy"] - reference["keypoints_xy"], axis=-1)
-                    confident = np.minimum(arrays["confidence"], reference["confidence"]) >= 0.3
-                    max_xy = float(np.max(delta))
-                    p95_xy = float(np.percentile(delta, 95))
-                    max_confident_xy = float(np.max(delta[confident])) if confident.any() else 0.0
-                    max_confidence = float(np.max(np.abs(arrays["confidence"] - reference["confidence"])))
-                    equivalent = (
-                        max_confident_xy <= args.equivalence_xy_atol
-                        and max_confidence <= args.equivalence_score_atol
+                    batch_metrics = equivalence_metrics(arrays, reference)
+                baseline_metrics = (
+                    equivalence_metrics(arrays, baseline_reference)
+                    if baseline_reference is not None
+                    else {
+                        "max_xy": 0.0,
+                        "p95_xy": 0.0,
+                        "max_confident_xy": 0.0,
+                        "max_confidence": 0.0,
+                    }
+                )
+                batch_equivalent = (
+                    batch_metrics["max_confident_xy"] <= args.equivalence_xy_atol
+                    and batch_metrics["max_confidence"]
+                    <= args.equivalence_score_atol
+                )
+                baseline_equivalent = (
+                    baseline_reference is None
+                    or (
+                        baseline_metrics["max_confident_xy"]
+                        <= args.equivalence_xy_atol
+                        and baseline_metrics["max_confidence"]
+                        <= args.equivalence_score_atol
                     )
+                )
+                equivalent = batch_equivalent and baseline_equivalent
                 allocated, reserved = engine.memory()
                 record = {
                     "batch_size": batch_size,
@@ -284,6 +383,12 @@ def benchmark_command(args: argparse.Namespace) -> int:
                     "person_crops_per_second": len(paths) / elapsed,
                     "effective_seconds_per_image": elapsed / len(paths),
                     "image_load_seconds": timer.total("image_load"),
+                    "detector_preprocess_seconds": timer.total("detector_preprocess"),
+                    "detector_forward_seconds": timer.total("detector_forward"),
+                    "detector_postprocess_seconds": timer.total("detector_postprocess"),
+                    "target_selection_seconds_estimate": selector_seconds_per_frame
+                    * len(paths),
+                    "target_selection_timing_included": False,
                     "crop_preprocess_seconds": timer.total("crop_preprocess"),
                     "host_to_device_preprocess_seconds": timer.total("host_to_device_preprocess"),
                     "pose_forward_seconds": timer.total("pose_forward"),
@@ -291,15 +396,47 @@ def benchmark_command(args: argparse.Namespace) -> int:
                     "heatmap_transfer_seconds": timer.total("heatmap_transfer"),
                     "postprocess_seconds": timer.total("postprocess"),
                     "serialization_seconds": timer.total("serialization"),
+                    "detector_images_per_second": len(paths)
+                    / max(timer.total("detector_forward"), 1e-12),
+                    "pose_person_crops_per_second": len(paths)
+                    / max(
+                        timer.total("pose_forward") + timer.total("flip_forward"),
+                        1e-12,
+                    ),
                     "peak_allocated_bytes": allocated,
                     "peak_reserved_bytes": reserved,
-                    "max_xy_delta_vs_batch1_px": max_xy,
-                    "p95_xy_delta_vs_batch1_px": p95_xy,
-                    "max_confident_xy_delta_vs_batch1_px": max_confident_xy,
-                    "max_confidence_delta_vs_batch1": max_confidence,
+                    "max_xy_delta_vs_batch1_px": batch_metrics["max_xy"],
+                    "p95_xy_delta_vs_batch1_px": batch_metrics["p95_xy"],
+                    "max_confident_xy_delta_vs_batch1_px": batch_metrics[
+                        "max_confident_xy"
+                    ],
+                    "max_confidence_delta_vs_batch1": batch_metrics[
+                        "max_confidence"
+                    ],
+                    "max_confident_xy_delta_vs_all_detections_baseline_px": baseline_metrics[
+                        "max_confident_xy"
+                    ],
+                    "max_confidence_delta_vs_all_detections_baseline": baseline_metrics[
+                        "max_confidence"
+                    ],
+                    "batch_numerically_equivalent": batch_equivalent,
+                    "all_detections_baseline_equivalent": baseline_equivalent,
                     "numerically_equivalent": equivalent,
                     "error": "",
                 }
+                for stage, values in timer.values.items():
+                    profile_rows.append(
+                        {
+                            "batch_size": batch_size,
+                            "stage": stage,
+                            "measurement_count": len(values),
+                            "total_seconds": float(sum(values)),
+                            "mean_seconds": float(np.mean(values)),
+                            "median_seconds": float(np.median(values)),
+                            "p90_seconds": float(np.percentile(values, 90)),
+                            "seconds_per_image": float(sum(values) / len(paths)),
+                        }
+                    )
             except (engine.torch.cuda.OutOfMemoryError, RuntimeError) as exc:
                 if not (
                     isinstance(exc, engine.torch.cuda.OutOfMemoryError)
@@ -326,19 +463,41 @@ def benchmark_command(args: argparse.Namespace) -> int:
     for record in records:
         if record["status"] != "PASS":
             continue
-        for key, value in summarize_samples(
-            gpu_rows, "pose", int(record["batch_size"])
-        ).items():
-            record[f"pose_{key}"] = value
+        for phase in ("detector", "pose"):
+            for key, value in summarize_samples(
+                gpu_rows, phase, int(record["batch_size"])
+            ).items():
+                record[f"{phase}_{key}"] = value
     atomic_write_csv(
         output_dir / "target_only_batch_scaling.csv",
         sorted({key for row in records for key in row}),
         records,
     )
+    atomic_write_csv(
+        output_dir / "target_only_stage_profile.csv",
+        (
+            "batch_size",
+            "stage",
+            "measurement_count",
+            "total_seconds",
+            "mean_seconds",
+            "median_seconds",
+            "p90_seconds",
+            "seconds_per_image",
+        ),
+        profile_rows,
+    )
     passing = [row for row in records if row["status"] == "PASS"]
     if not passing:
         raise RuntimeError("no target-only batch passed")
     best = max(passing, key=lambda row: float(row["images_per_second"]))
+    plateau = [
+        row
+        for row in passing
+        if float(row["images_per_second"])
+        >= 0.99 * float(best["images_per_second"])
+    ]
+    recommended = min(plateau, key=lambda row: int(row["batch_size"]))
     summary = {
         "schema_version": 1,
         "created_at_utc": utc_now(),
@@ -347,9 +506,12 @@ def benchmark_command(args: argparse.Namespace) -> int:
         "camera": args.camera,
         "sample_count": len(paths),
         "frame_indices": frame_indices,
-        "candidate_source": "cached official facebook/detr-resnet-101-dc5 detections",
+        "candidate_source": "cached official facebook/detr-resnet-101-dc5 target selection; official DETR rerun for timing",
         "target_selector": "bidirectional sequence-level temporal tracker",
-        "detector_timing_included": False,
+        "detector_timing_included": True,
+        "target_selection_timing_included": False,
+        "target_selection_seconds_per_frame": selector_seconds_per_frame,
+        "all_detections_baseline_equivalence_checked": baseline_reference is not None,
         "model": "facebook/sapiens2-pose-5b",
         "pose_input_hw": [1024, 768],
         "precision": "float32",
@@ -357,6 +519,9 @@ def benchmark_command(args: argparse.Namespace) -> int:
         "best_batch_size": int(best["batch_size"]),
         "best_images_per_second": float(best["images_per_second"]),
         "best_person_crops_per_second": float(best["person_crops_per_second"]),
+        "plateau_threshold_fraction_of_fastest": 0.99,
+        "recommended_batch_size": int(recommended["batch_size"]),
+        "recommended_images_per_second": float(recommended["images_per_second"]),
         "all_stable_batches_equivalent": all(bool(row["numerically_equivalent"]) for row in passing),
         "records": records,
     }

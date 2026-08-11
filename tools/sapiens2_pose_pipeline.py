@@ -593,6 +593,7 @@ def summarize_samples(rows: Sequence[dict[str, str]], phase: str, batch_size: in
         values = [float(row[source]) for row in selected if row.get(source)]
         result[f"{target}_mean"] = float(np.mean(values)) if values else None
         result[f"{target}_p90"] = float(np.percentile(values, 90)) if values else None
+        result[f"{target}_p95"] = float(np.percentile(values, 95)) if values else None
         result[f"{target}_max"] = float(np.max(values)) if values else None
     return result
 

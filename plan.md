@@ -11,8 +11,10 @@
 - Phase 5 downstream camera freeze gate: `DONE` (REVIEW uncertainty 전파 조건)
 - 최종 camera status: PASS 11 / REVIEW 15 / FAIL 0, Stage 1/2 26/26 수렴
 - Phase 6-0 Sapiens2-5B environment/smoke: `DONE`
-- Phase 6-1 multi-exercise pose pilot: `IN_PROGRESS`, all-person 결과는 baseline으로 보존
-- Phase 6-1A primary target selection: `IN_PROGRESS`, full dataset inference 전 필수 gate
+- Phase 6-1 multi-exercise pose pilot: `DONE`, all-person 결과는 baseline으로 보존
+- Phase 6-1A primary target selection: `DONE`, `GO_FULL_DATASET` 조건 충족
+- Phase 6-2 target-only runtime gate: `DONE/HOLD`, 사용자 승인 전 full inference 금지
+- Phase 8 runtime feasibility pilot: `WAITING_CHECKPOINT_APPROVAL`, 24.963 GiB download 미실행
 
 ## Phase 0 — Dataset Inventory / Integrity
 
@@ -146,7 +148,7 @@
 
 ### Phase 6-1/6-1A — Batch pilot와 primary target identity
 
-- 상태: `IN_PROGRESS`
+- 상태: `DONE`
 - pilot: `barbellrow_0000`, `squat_0001`, `pushup_0001`, `benchpress_0003`의 3-view
 - baseline: official DETR의 모든 person crop에 5B를 실행한 기존 결과를
   `ALL_DETECTIONS_BASELINE`으로 보존
@@ -162,6 +164,13 @@
   batch 1/2/4/8/(12/16) equivalence/throughput, 65,595-frame ETA 재계산
 - 최종 gate: `GO_FULL_DATASET`, `REVIEW_TARGET_SELECTION`, `NO_GO`
 - 안전 조건: gate 보고 전 full dataset inference를 시작하지 않음
+- 결과: 9,732 frame, candidate 19,596, target crop 9,725, ambiguity 7(0.072%),
+  no-target 0, obvious identity switch 0, crop reduction 50.37%
+- target-only batch: 1/2/4/8/12/16 모두 numerical equivalence PASS; raw fastest 16이지만
+  fastest의 99% plateau에서 가장 작은 batch 4를 권장
+- runtime projection: 65,595 frame, 약 65,548 target crop, 79.09 GPU-hours; all-person
+  157.38 GPU-hours 대비 약 78.30 GPU-hours 절감
+- 판정: target-selection acceptance는 `GO_FULL_DATASET`. 단 사용자 보고·승인 전 실행은 `HOLD`
 
 ## Phase 7 — Timestamp-Aware Multi-view Triangulation
 
@@ -175,12 +184,16 @@
 
 ## Phase 8 — SAM 3D Body / SAM-Body4D Human Prior
 
-- 상태: `TODO`
+- 상태: `WAITING_CHECKPOINT_APPROVAL`
 - 목적: pretrained model로 temporal MHR/body prior 생성
 - 입력: RGB reference와 Phase 6/7 evidence
 - 출력: temporal body prior, uncertainty, modal/amodal 구분
 - 주요 방법: pretrained checkpoint만 사용하고 teacher fine-tuning 금지
 - Acceptance: amodal completion을 image GT가 아닌 prior로 표시, model failure/disagreement 기록
+- runtime gate: control과 severe-occlusion clip에서 (A) SAM 3D Body base, (B) SAM-Body4D
+  completion off, (C) completion on을 비교하고 target selector의 primary bbox 1개만 seed
+- 현재 blocker: 공식 pretrained payload 7개 묶음 24.963 GiB가 local에 없고 SAM 3/SAM 3D Body는
+  gated access 승인이 필요하다. 명시적 사용자 승인 전 다운로드하지 않음
 - 다음 gate: sequence-level optimization의 weak/noisy prior로만 사용
 
 ## Phase 9 — Sequence-Level Body Fitting

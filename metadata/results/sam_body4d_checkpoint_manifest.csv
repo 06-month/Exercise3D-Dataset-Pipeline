@@ -1,0 +1,9 @@
+component,required_for_mode,bytes,gib,local_relative_path,access_or_license,official_source,status
+SAM_3,B_and_C,3450062241,3.213,sam3/sam3.pt,gated_access_and_SAM_terms,https://huggingface.co/facebook/sam3,MISSING_APPROVAL_REQUIRED
+SAM_3D_BODY_PACKAGE,A_B_C,2805255047,2.613,sam-3d-body-dinov3/,gated_access_and_SAM_License,https://huggingface.co/facebook/sam-3d-body-dinov3,MISSING_APPROVAL_REQUIRED
+MOGE_2_VITL_NORMAL,A_B_C,1323815904,1.233,moge-2-vitl-normal/model.pt,upstream_model_terms,https://huggingface.co/Ruicheng/moge-2-vitl-normal,MISSING
+DIFFUSION_VAS_AMODAL,C,7558576794,7.039,diffusion-vas-amodal-segmentation/,upstream_checkpoint_terms,https://huggingface.co/Kaihua-Chen/vas_mask_compl,MISSING
+DIFFUSION_VAS_CONTENT,C,7558576764,7.039,diffusion-vas-content-completion/,upstream_checkpoint_terms,https://huggingface.co/Kaihua-Chen/vas_rgb_compl,MISSING
+DEPTH_ANYTHING_V2_LARGE,C,1341395338,1.249,depth_anything_v2_vitl.pth,upstream_model_terms,https://huggingface.co/depth-anything/Depth-Anything-V2-Large,MISSING
+VITDET,A_B_C,2765948277,2.576,vitdet/model_final_f05665.pkl,upstream_model_terms,https://dl.fbaipublicfiles.com/detectron2/ViTDet/COCO/cascade_mask_rcnn_vitdet_h/f328730692/model_final_f05665.pkl,MISSING
+TOTAL,A_B_C,26803630365,24.963,sam_body4d/,mixed_upstream_terms,official_sources_above,MISSING_APPROVAL_REQUIRED

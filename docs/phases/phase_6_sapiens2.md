@@ -180,6 +180,7 @@ python tools/target_subject_selection.py \
 conda run -n sapiens2 python tools/sapiens2_target_pipeline.py benchmark \
   --dataset-root <PRIVATE_DATASET_ROOT> \
   --selection-root outputs/target_selection \
+  --all-detections-root outputs/sapiens2 \
   --batch-sizes 1,2,4,8,12,16 \
   --output-dir outputs/runtime/phase6_1_target_benchmark
 
@@ -196,3 +197,39 @@ Full dataset command는 이 pilot command들과 분리하며 acceptance report �
 현재 all-person pilot은 같은 official DETR candidate를 이미 lossless ragged array로 저장했으므로
 Phase 6-1A에서는 해당 cache를 재사용한다. 이후 dataset run은 `detr_person_candidates.py`로 pose 없는
 detection pass를 먼저 수행한다.
+
+## Phase 6-1A 결과와 Visual Gate
+
+4개 pilot sequence의 3-view, 총 9,732 frame을 검사했다. Official DETR candidate 19,596개는
+private ragged metadata에 모두 보존했고 target으로 확정한 9,725 crop만 pose-eligible로 만들었다.
+따라서 all-person 대비 crop reduction은 50.3725%다.
+
+- obvious identity switch 0, forward/backward disagreement 0
+- `NO_TARGET` 0, `TARGET_AMBIGUOUS` 7(0.0719%)
+- ambiguity 7건은 모두 `pushup_0001/cam1`: duplicate underdetermination 1건과 상·하체가
+  보완적으로 갈라진 DETR fragmentation 6건
+- ambiguous frame에서 잘못된 다른 사람을 강제 선택하지 않았고 나머지 두 view는 target 유지
+- background crossing, target/background overlap, mirror 후보, 누운 benchpress, prone pushup,
+  candidate order 변화, background bbox가 target보다 큰 사례의 private overlay를 확인
+- severe-occlusion 후보 `latpulldown_0002/cam2` 1,136 frame도 추가 detection/selector preflight:
+  평균 2.121 persons/frame, 최대 대표 장면 5 candidates, identity switch/ambiguity 0
+
+Private overlay, bbox/keypoint coordinate와 source frame은 Git에 포함하지 않는다. 공개 aggregate는
+[`target_subject_selection_pilot.csv`](../../metadata/results/target_subject_selection_pilot.csv)에 있다.
+
+## Target-only batch scaling과 전체 runtime projection
+
+Representative target crop 16개에 대해 official DETR timing과 Sapiens2-5B FP32 flip-test를 포함해
+batch 1/2/4/8/12/16을 측정했다. 모든 batch가 batch 1 및 보존된 all-person target baseline과
+허용오차 내 numerical equivalence를 통과했다. Raw fastest는 batch 16의 0.231951 crop/s지만,
+batch 4는 0.230449 crop/s로 0.648%만 느리고 reserved VRAM을 약 13.625 GiB 덜 사용한다.
+따라서 fastest의 99% plateau에서 가장 작은 batch 4를 최종 권장한다.
+
+4-sequence crop 분포를 전체 65,595 frame에 외삽하면 약 65,548 target crop이고, measured stage
+timing 기반 total은 약 79.09 GPU-hours다. all-person workload 외삽 157.38 GPU-hours보다 약
+78.30 GPU-hours 감소한다. 이는 실측 pilot 기반 projection이며 전체 실행 전 추정치다.
+
+Phase 6 target-selection 판정은 `GO_FULL_DATASET`이지만, 전체 inference는 사용자 보고와 명시적
+승인 전 `HOLD`한다. Aggregate batch와 stage breakdown은 각각
+[`sapiens2_target_only_batch_scaling.csv`](../../metadata/results/sapiens2_target_only_batch_scaling.csv),
+[`phase6_2_runtime_projection.csv`](../../metadata/results/phase6_2_runtime_projection.csv)에 있다.
