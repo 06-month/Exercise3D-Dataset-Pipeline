@@ -4,6 +4,80 @@
 개인정보, media screenshot 및 대용량 numeric payload를 기록하지 않는다. 명령의 private
 경로는 `<PRIVATE_DATASET_ROOT>`처럼 치환한다.
 
+## 2026-08-11 — 2026-08-14 13:00 KST autonomous deadline 시작
+
+### Source-of-truth 재검증
+
+- HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화
+- A100 80GB idle, private source 65,595 frames와 checkpoint storage 정상, source mutation 0
+- deadline 2026-08-14 13:00 KST = 2026-08-14 04:00 UTC
+- 2026-08-11 17:31 KST 기준 remaining wall-clock 67.48 h
+- 전달된 과거 target 수치 대신 최신 repository result를 채택: 9,732 frames, 9,725 target crops,
+  ambiguity 7, identity switch 0, crop reduction 50.3725%
+- full target selector/Sapiens2/SAM output은 아직 없고, 4개 pilot sequence Sapiens2 output만 보존됨
+
+### 중간 계획 변경 보고 — 이번 deadline cycle의 유일한 major 변경 보고
+
+- 변경 사유: target-only Sapiens2 실측 projection 79.09 GPUh만으로 remaining 67.48 h를 넘고,
+  SAM Mode B 16.35 h 및 downstream을 더하면 한 A100에서 전량 완료가 물리적으로 불가능
+- 기존 계획: 전체 Sapiens2 → 전체 triangulation → 전체 SAM → fitting → freeze
+- 변경 계획: 기존 4개 pilot output 재사용 + sequence-complete streaming. GPU는 Sapiens2 우선,
+  CPU triangulation/QC 병행, SAM Mode B를 dependency 가능한 sequence에만 실행
+- 정확도 영향: 5B, official flip-test, detector, target abstention과 accepted threshold는 변경하지 않음
+- deadline 영향: 전체 26개 완료 보장은 포기하지 않되, deadline에는 완결 sequence 수를 최대화하고
+  나머지는 resumable `INCOMPLETE_DEADLINE` provenance로 동결
+- 리스크: Sapiens throughput 저하, Phase 7/9 구현 critical path, SAM output disk 증가
+- 즉시 적용: official DETR full 26-sequence resumable pass 시작; full selector 후 Sapiens2 진입
+
+### Phase 6 full 준비와 lossless pilot 재사용
+
+- official DETR full pass는 26 sequence/78 camera에 대해 batch 16, chunk 512, source mutation 없이
+  실행 중이다. 완료 camera마다 consolidated bbox/candidate payload와 QA를 원자적으로 기록한다.
+- 기존 `ALL_DETECTIONS_BASELINE`에는 모든 candidate의 308-keypoint 결과가 보존되어 있으므로,
+  accepted target candidate만 exact gather해 4개 pilot의 target-only output을 만들었다.
+- 결과: 12 cameras, 9,732 frames, target poses 9,725, 새 5B inference 0회, elapsed 72.29 s.
+- baseline 대비 confident XY/confidence 최대 delta는 12/12 camera 모두 0.0이었다.
+- resume chunk는 frame 이름뿐 아니라 현재 selector의 abstention/status/index 및 selected bbox/score가
+  일치해야 재사용하도록 강화했다. 기존 45 chunks는 selection-bound 검증 PASS.
+- 17개 unit test와 compile PASS.
+
+### Full selector incremental gate
+
+DETR이 먼저 끝난 9 sequences/27 cameras에 full selector와 별도 lossless validator를 적용했다.
+
+- frames 19,224, all candidates 37,966, target crops 19,068
+- ambiguity 130, `NO_TARGET` 26, background candidates 18,898
+- identity-switch risk 0, forward/backward disagreement 0, integrity failure 0
+- candidate offsets/boxes/scores는 DETR consolidated arrays와 exact-match
+- gate `GO_FULL_DATASET`
+
+`barbellrow_0003`의 130 ambiguity와 26 NO_TARGET은 촬영 종료 후 target이 화면에서 나가는
+구간에 집중됐다. 16-frame private overlay에서 background 사람을 강제 선택하지 않는 올바른
+abstention임을 확인했다. 전체 78-camera 완료 후 동일 gate를 다시 실행한다.
+
+### Phase 7 timestamp-aware triangulation pilot
+
+```bash
+python tools/triangulate_sapiens2.py \
+  --dataset-root <PRIVATE_DATASET_ROOT> \
+  --pose-root <PRIVATE_OUTPUT_ROOT>/sapiens2_target_only_full \
+  --camera-root <PRIVATE_OUTPUT_ROOT>/background_ba \
+  --output-root <PRIVATE_OUTPUT_ROOT>/triangulation \
+  --runtime-dir <PRIVATE_OUTPUT_ROOT>/runtime/phase7_triangulation_pilot_gate \
+  --sequences barbellrow_0000,squat_0001,pushup_0001,benchpress_0003
+```
+
+- schema/finite/NaN contract 4/4 PASS, 3,244 reference timestamps
+- canonical source-joint reprojection median/p90 px:
+  `barbellrow_0000` 7.06/30.62, `squat_0001` 26.24/164.93,
+  `pushup_0001` 326.93/2,004.04, `benchpress_0003` 7.91/97.84
+- Huber scale 10 px 배수의 사전 명시 gate 결과: REVIEW 2, NO_GO 2
+- private overlay상 squat/pushup target 2D pose는 정상이므로 identity error로 덮지 않았다.
+  current refined camera와 human observations의 epipolar inconsistency로 판정했다.
+- NO_GO proposal은 진단용으로 보존하지만 `eligible_for_body_fitting=false`이며 export에 사용하지 않는다.
+- Phase 5 camera를 덮어쓰지 않고, recovery를 수행한다면 observation-conditioned provenance와
+  held-out-frame 검증을 요구한다.
+
 ## 2026-08-09 — 초기 synchronization / derivative 구축 기록 이관
 
 ### 수행

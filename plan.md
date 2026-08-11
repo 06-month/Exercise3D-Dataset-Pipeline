@@ -3,6 +3,19 @@
 상태 표기: `TODO`, `IN_PROGRESS`, `DONE`, `REVIEW`. 각 Phase는 구현, 정량·시각 검증,
 문서 갱신, 공개 안전 검사, commit/push까지 완료되어야 Definition of Done을 만족한다.
 
+## Deadline critical path — 2026-08-14 13:00 KST
+
+- primary objective: correctness·provenance·identity consistency를 유지하면서 deadline까지
+  end-to-end로 완결되고 freeze 가능한 sequence 수를 최대화
+- 2026-08-11 17:31 KST 기준 remaining wall-clock 67.48 h
+- 최신 target-only Sapiens2 projection 79.09 GPUh와 SAM Mode B 16.35 h는 한 A100에서
+  deadline 전 전량 순차 완료가 불가능하므로, sequence-complete streaming으로 변경
+- 이미 완료된 4개 pilot sequence output은 검증 후 재사용하고 재추론하지 않음
+- GPU priority: Sapiens2-5B target-only; CPU는 이전 완료 sequence의 triangulation/QC를 병행
+- SAM policy: Mode B default, Mode C는 실제 failure/occlusion escalation evidence가 있는 경우만 REVIEW
+- deadline에 미완료된 sequence는 `INCOMPLETE_DEADLINE`로 명시하고 PASS로 위장하지 않음
+- Fit3D exhaustive tolerance/ablation은 final private dataset critical path를 방해하면 freeze 이후로 이동
+
 ## 현재 Gate
 
 - Phase 0–4: `DONE`
@@ -13,9 +26,8 @@
 - Phase 6-0 Sapiens2-5B environment/smoke: `DONE`
 - Phase 6-1 multi-exercise pose pilot: `DONE`, all-person 결과는 baseline으로 보존
 - Phase 6-1A primary target selection: `DONE`, `GO_FULL_DATASET` 조건 충족
-- Phase 6-2 target-only runtime gate: `DONE/HOLD`, 사용자 승인 전 full inference 금지
-- Phase 8 runtime feasibility pilot: `WAITING_CHECKPOINT_APPROVAL`, target adapter/preflight 완료,
-  22.387 GiB download 미실행
+- Phase 6-2 target-only runtime gate: `DONE`, autonomous full inference 승인·critical path 진입
+- Phase 8 runtime feasibility pilot: `PILOT_COMPLETE_REVIEW`, Mode B default / Mode C selective
 
 ## Phase 0 — Dataset Inventory / Integrity
 
@@ -138,7 +150,7 @@
 
 ## Phase 6 — High-Quality 2D Pose Observation
 
-- 상태: `TODO`
+- 상태: `IN_PROGRESS` — full DETR/selector 실행 중, 이후 resumable 5B target-only 실행
 - 목적: 모든 camera/frame의 canonical 2D joint와 confidence 생성
 - 입력: synchronized frame reference, Phase 5 camera status
 - 출력: teacher-native keypoints, canonical mapping, confidence, optional teacher disagreement
@@ -167,25 +179,32 @@
 - 안전 조건: gate 보고 전 full dataset inference를 시작하지 않음
 - 결과: 9,732 frame, candidate 19,596, target crop 9,725, ambiguity 7(0.072%),
   no-target 0, obvious identity switch 0, crop reduction 50.37%
-- target-only batch: 1/2/4/8/12/16 모두 numerical equivalence PASS; raw fastest 16이지만
-  fastest의 99% plateau에서 가장 작은 batch 4를 권장
+- target-only batch: 1/2/4/8/12/16 모두 numerical equivalence PASS. 일반 실행 권장은
+  plateau의 최소 batch 4이나, deadline run은 동일한 출력과 안전한 VRAM이 확인된 raw-fastest
+  batch 16을 사용
 - runtime projection: 65,595 frame, 약 65,548 target crop, 79.09 GPU-hours; all-person
   157.38 GPU-hours 대비 약 78.30 GPU-hours 절감
-- 판정: target-selection acceptance는 `GO_FULL_DATASET`. 단 사용자 보고·승인 전 실행은 `HOLD`
+- 판정: target-selection acceptance는 `GO_FULL_DATASET`; autonomous deadline 지침에 따라
+  full 실행 critical path 진입
 
 ## Phase 7 — Timestamp-Aware Multi-view Triangulation
 
-- 상태: `TODO`
+- 상태: `PILOT_COMPLETE_CAMERA_RECOVERY_REQUIRED`
 - 목적: Phase 2 timing correction과 Phase 5 camera를 사용한 robust 3D joints
 - 입력: refined camera, temporal metadata, Phase 6 joints
 - 출력: 3D joints, reprojection/ray uncertainty, 2-view fallback provenance
 - 주요 방법: corrected timestamp pairing, robust triangulation, 3-view 우선, 필요 시 2D trajectory만 interpolation
 - Acceptance: cheirality, reprojection, ray angle, cross-view joint consistency와 fallback 이유 저장
-- 다음 gate: reliable 3D evidence를 body prior/fitting으로 전달
+- pilot: 4 sequence/3,244 reference timestamps, schema 4/4 PASS. canonical reprojection
+  median/p90은 barbellrow 7.06/30.62, squat 26.24/164.93, pushup 326.93/2,004.04,
+  benchpress 7.91/97.84 px
+- gate: barbellrow/benchpress REVIEW, squat/pushup `NO_GO_TRIANGULATION`; NO_GO proposal은
+  보존하되 body fitting/export에서 제외
+- 다음 gate: Phase 5 camera를 덮어쓰지 않는 recovery candidate와 held-out-frame 검증
 
 ## Phase 8 — SAM 3D Body / SAM-Body4D Human Prior
 
-- 상태: `PILOT_COMPLETE_REVIEW`; full 65,595-frame inference는 `HOLD`
+- 상태: `PILOT_COMPLETE_REVIEW`; Mode B full policy 동결, GPU scheduling 대기
 - 목적: pretrained model로 temporal MHR/body prior 생성
 - 입력: RGB reference와 Phase 6/7 evidence
 - 출력: temporal body prior, uncertainty, modal/amodal 구분
@@ -204,10 +223,10 @@
   개선은 표본 최대 0.303 mm라 refiner 효용은 아직 입증되지 않음
 - projection: SAM optimistic/expected/pessimistic 16.35/20.80/32.63 h; Sapiens2 target-only와
   한 GPU 순차 합계 95.43/99.88/111.71 h
-- deadline gate: 2026-08-15 00:00 UTC freeze `NO_GO`; end-of-day도 QA 포함
-  `DEADLINE_AT_RISK`
+- deadline gate: 2026-08-14 13:00 KST까지 Sapiens2와 순차 전량은 불가능하므로
+  sequence-complete output 최대화 및 미완료 provenance 보존
 - 다음 gate: Mode B를 full 기본 후보로 유지하고 실제 completion trigger case에서 Mode C 효용 검증;
-  별도 사용자 승인 전 Sapiens2/SAM full inference 시작 금지
+  Mode C는 selective escalation evidence가 있을 때만 사용
 
 ## Phase 9 — Sequence-Level Body Fitting
 

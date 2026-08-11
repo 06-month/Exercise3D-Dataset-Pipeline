@@ -63,22 +63,32 @@ camera calibration을 구분합니다.
 | 6-0. Sapiens2-5B Environment | DONE | A100 80GB smoke PASS, 308 keypoints, peak 19.986 GiB, 4.517 s/image |
 | 6-1. Sapiens2 Pose Pilot | DONE | all-person baseline 보존, batch 1/2/4/8/12/16 완료 |
 | 6-1A. Primary Target Selection | DONE | 9,732 frame, identity switch 0, ambiguity 7, crop 50.37% 감소 |
-| 6-2. Target-only Runtime Gate | DONE/HOLD | batch 4 권장, 전체 65,595-frame ETA 79.09 h; 사용자 승인 전 실행 보류 |
-| 7. Timestamp-aware Triangulation | TODO | Phase 6 full observation 이후 진행 |
-| 8. SAM Body Runtime Feasibility | PILOT DONE/REVIEW | 22.387 GiB integrity PASS, A/B/C 6-run 완료; full inference HOLD |
-| 9–13 | TODO | runtime feasibility와 사용자 승인 이후 body/quality pipeline 진행 |
+| 6-2. Target-only Runtime Gate | IN PROGRESS | full DETR/selector 실행 중; lossless pilot 9,725 poses 재사용, deadline run은 equivalent batch 16 |
+| 7. Timestamp-aware Triangulation | PILOT REVIEW/NO_GO | schema 4/4 PASS, pose-camera REVIEW 2 / NO_GO 2; camera recovery 필요 |
+| 8. SAM Body Runtime Feasibility | PILOT DONE/REVIEW | 22.387 GiB integrity PASS, A/B/C 6-run 완료; Mode B full policy 동결 |
+| 9–13 | TODO | 완료 sequence 단위 fitting/QC/export로 진행 |
 
 `pushup_0003`은 Phase 5.1에서 observation, initialization, objective와 gate를 그대로 두고
 Stage 2 budget만 300에서 600으로 확장했습니다. 실제 322 evaluations에서 `xtol`로 수렴했고,
 제한된 sparse support 때문에 `RECOVERED_REVIEW`로 유지합니다. Dataset-level FAIL은 0이며
 camera geometry freeze는 REVIEW uncertainty 전파 조건으로 승인되었습니다.
 
+2026-08-14 13:00 KST deadline을 기준으로 full target-only Sapiens2 projection과 SAM을 한
+A100에서 모두 순차 실행하는 것은 불가능합니다. 따라서 5B/flip-test/abstention을 유지한 채
+기존 pilot output을 lossless하게 재사용하고, shortest-first resumable sequence 처리와 CPU QA를
+병행합니다. 미완료 항목은 `INCOMPLETE_DEADLINE` provenance로 남기며 PASS로 위장하지 않습니다.
+
+Phase 7 pilot에서는 2D target이 정상인데도 `squat_0001`과 `pushup_0001`의 current camera와
+epipolar consistency가 무너지는 새 evidence가 확인됐습니다. 해당 3D proposal은 fitting/export에서
+제외했고, 원본 Phase 5 camera를 덮어쓰지 않는 recovery와 held-out 검증을 요구합니다.
+자세한 내용은 [Phase 7 문서](docs/phases/phase_7_triangulation.md)에 있습니다.
+
 Phase 8 primary-target pilot는 control/severe 두 clip의 Mode A/B/C 여섯 run을 완료했습니다.
 SAM full-stage projection은 16.35/20.80/32.63시간, Sapiens2 target-only와 한 GPU에서 순차
 실행하는 합계는 95.43/99.88/111.71시간입니다. Mode C는 약 2배 느렸지만 이번 severe clip에서
-content completion이 호출되지 않아 선택적 refiner 정책은 `REVIEW`로 유지합니다. 8월 15일
-00:00 UTC freeze는 `NO_GO`, end-of-day도 `DEADLINE_AT_RISK`이며 full inference는 시작하지
-않았습니다. 상세 근거는 [Phase 8 문서](docs/phases/phase_8_sam_body4d.md)에 있습니다.
+content completion이 호출되지 않아 선택적 refiner 정책은 `REVIEW`로 유지합니다. full 기본은
+Mode B이며 Mode C는 evidence가 있는 frame/sequence만 selective escalation합니다. 상세 근거는
+[Phase 8 문서](docs/phases/phase_8_sam_body4d.md)에 있습니다.
 
 세부 상태와 acceptance gate는 [plan.md](plan.md), 시간순 실행 기록은
 [process.md](process.md)를 기준으로 합니다.
@@ -222,7 +232,9 @@ Sapiens2 Pose 5B single-image smoke:
 | `tools/detr_person_candidates.py` | explicit sequence allowlist의 official DETR detection-only pass | ignored private output만 생성 |
 | `tools/target_subject_selection.py` | all DETR candidate 보존 + bidirectional primary target tracking | ignored private output + aggregate report |
 | `tools/sapiens2_target_pipeline.py` | accepted target-only 5B batch benchmark/inference/verification | ignored output만 생성 |
+| `tools/validate_target_selection_full.py` | DETR candidate lossless 보존·identity/abstention full gate | ignored aggregate 생성 |
 | `tools/summarize_phase6_1.py` | all-person/target-only 비교, ETA와 acceptance gate 집계 | redacted aggregate 생성 |
+| `tools/triangulate_sapiens2.py` | PTS-aware weighted triangulation과 pose-camera consistency gate | ignored private output 생성 |
 | `tools/benchmark_sam_body4d.py` | SAM-Body4D checkpoint preflight와 refiner on/off runtime 측정 | ignored output만 생성 |
 | `tools/sam_body_primary_target_runner.py` | SAM base/4D에 accepted primary bbox 1개만 전달하는 adapter | ignored private output만 생성 |
 | `tools/summarize_sam_body_runtime.py` | A/B/C ratio, occlusion 증가와 best/expected/worst runtime 집계 | redacted aggregate 생성 |

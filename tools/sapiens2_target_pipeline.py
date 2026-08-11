@@ -80,6 +80,21 @@ def build_parser() -> argparse.ArgumentParser:
     infer.add_argument("--overwrite", action="store_true")
     infer.add_argument("--save-overlays", type=int, default=6)
 
+    materialize = commands.add_parser(
+        "materialize-baseline",
+        help="losslessly select accepted targets from a completed all-detections baseline",
+    )
+    add_target_sources(materialize)
+    materialize.add_argument("--all-detections-root", type=Path, required=True)
+    materialize.add_argument("--output-root", type=Path, required=True)
+    materialize.add_argument("--runtime-dir", type=Path, required=True)
+    materialize.add_argument(
+        "--sequences", type=parse_str_list, default=list(PILOT_SEQUENCES)
+    )
+    materialize.add_argument("--cameras", type=parse_str_list, default=list(CAMERAS))
+    materialize.add_argument("--chunk-size", type=int, default=256)
+    materialize.set_defaults(batch_size=0)
+
     verify = commands.add_parser("verify", help="verify target-only output schema")
     add_target_sources(verify)
     verify.add_argument("--output-root", type=Path, required=True)
@@ -575,6 +590,53 @@ def save_target_chunk(
     )
 
 
+def materialize_baseline_chunk(
+    path: Path,
+    frame_paths: Sequence[Path],
+    frame_start: int,
+    selection: TargetSelection,
+    all_keypoints_xy: np.ndarray,
+    all_confidence: np.ndarray,
+    all_bboxes_xyxy: np.ndarray,
+    all_bbox_scores: np.ndarray,
+) -> None:
+    count = len(frame_paths)
+    indices = np.arange(frame_start, frame_start + count, dtype=np.int32)
+    xy = np.full((count, 308, 2), np.nan, dtype=np.float32)
+    confidence = np.full((count, 308), np.nan, dtype=np.float32)
+    bbox = np.full((count, 4), np.nan, dtype=np.float32)
+    bbox_score = np.full(count, np.nan, dtype=np.float32)
+    present = selection.target_candidate_index[indices] >= 0
+    for local in np.flatnonzero(present):
+        frame = int(indices[local])
+        absolute = (
+            int(selection.candidate_offsets[frame])
+            + int(selection.target_candidate_index[frame])
+        )
+        xy[local] = all_keypoints_xy[absolute]
+        confidence[local] = all_confidence[absolute]
+        bbox[local] = all_bboxes_xyxy[absolute]
+        bbox_score[local] = all_bbox_scores[absolute]
+    atomic_savez(
+        path,
+        keypoints_xy=xy,
+        confidence=confidence,
+        valid_mask=np.isfinite(xy).all(axis=-1) & np.isfinite(confidence),
+        bbox_xyxy=bbox,
+        bbox_score=bbox_score,
+        target_present=present,
+        frame_index=indices,
+        frame_name=np.asarray([item.name for item in frame_paths]),
+        num_person_candidates=selection.num_person_candidates[indices],
+        target_candidate_index=selection.target_candidate_index[indices],
+        target_selection_confidence=selection.target_selection_confidence[indices],
+        target_ambiguous=selection.target_ambiguous[indices],
+        no_target=selection.no_target[indices],
+        target_status=selection.target_status[indices],
+        occlusion_risk=selection.occlusion_risk[indices],
+    )
+
+
 TARGET_ARRAY_KEYS = (
     "keypoints_xy",
     "confidence",
@@ -592,6 +654,75 @@ TARGET_ARRAY_KEYS = (
     "target_status",
     "occlusion_risk",
 )
+
+
+def target_chunk_matches_selection(
+    payload: Any,
+    frame_paths: Sequence[Path],
+    frame_start: int,
+    selection: TargetSelection,
+) -> bool:
+    """Return whether a resumable chunk is tied to the current selector output.
+
+    Frame names alone are insufficient: a rerun may preserve the same source frames
+    while changing abstention or target-candidate decisions.  Reusing such a chunk
+    would silently mix identities.  Compare the selector fields and the selected
+    detection payload before accepting a resume hit.
+    """
+    count = len(frame_paths)
+    indices = np.arange(frame_start, frame_start + count, dtype=np.int32)
+    required = {
+        "frame_index",
+        "frame_name",
+        "target_present",
+        "num_person_candidates",
+        "target_candidate_index",
+        "target_selection_confidence",
+        "target_ambiguous",
+        "no_target",
+        "target_status",
+        "occlusion_risk",
+        "bbox_xyxy",
+        "bbox_score",
+    }
+    if not required.issubset(payload.files):
+        return False
+    exact = {
+        "frame_index": indices,
+        "frame_name": np.asarray([item.name for item in frame_paths]),
+        "target_present": selection.target_candidate_index[indices] >= 0,
+        "num_person_candidates": selection.num_person_candidates[indices],
+        "target_candidate_index": selection.target_candidate_index[indices],
+        "target_ambiguous": selection.target_ambiguous[indices],
+        "no_target": selection.no_target[indices],
+        "target_status": selection.target_status[indices],
+        "occlusion_risk": selection.occlusion_risk[indices],
+    }
+    if any(not np.array_equal(payload[key], value) for key, value in exact.items()):
+        return False
+    if not np.allclose(
+        payload["target_selection_confidence"],
+        selection.target_selection_confidence[indices],
+        rtol=0.0,
+        atol=1e-7,
+        equal_nan=True,
+    ):
+        return False
+    present = exact["target_present"]
+    expected_bbox = np.full((count, 4), np.nan, dtype=np.float32)
+    expected_score = np.full(count, np.nan, dtype=np.float32)
+    for local in np.flatnonzero(present):
+        detection_bbox, detection_score, _ = selection.detection(int(indices[local]))
+        expected_bbox[local] = detection_bbox[0]
+        expected_score[local] = detection_score[0]
+    return bool(
+        np.allclose(
+            payload["bbox_xyxy"], expected_bbox, rtol=0.0, atol=1e-4, equal_nan=True
+        )
+        and np.allclose(
+            payload["bbox_score"], expected_score, rtol=0.0, atol=1e-6, equal_nan=True
+        )
+    )
 
 
 def consolidate_target_camera(
@@ -761,6 +892,12 @@ def infer_camera(
     selection = TargetSelection(selection_path, frame_paths)
     output_dir = output_root / sequence / camera
     (output_dir / "chunks").mkdir(parents=True, exist_ok=True)
+    prior_metadata_path = output_dir / "metadata.json"
+    prior_metadata = (
+        json.loads(prior_metadata_path.read_text(encoding="utf-8"))
+        if prior_metadata_path.exists()
+        else {}
+    )
     timer = StageTimer()
     skipped = retries = processed_crops = 0
     started = time.perf_counter()
@@ -769,8 +906,11 @@ def infer_camera(
         chunk_path = target_chunk_path(output_dir, chunk_start, chunk_end)
         if chunk_path.exists() and not args.overwrite:
             with np.load(chunk_path, allow_pickle=False) as payload:
-                if np.array_equal(payload["frame_index"], np.arange(chunk_start, chunk_end, dtype=np.int32)) and np.array_equal(
-                    payload["frame_name"], np.asarray([item.name for item in frame_paths[chunk_start:chunk_end]])
+                if target_chunk_matches_selection(
+                    payload,
+                    frame_paths[chunk_start:chunk_end],
+                    chunk_start,
+                    selection,
                 ):
                     skipped += int(payload["target_present"].sum())
                     continue
@@ -828,6 +968,31 @@ def infer_camera(
     qa = consolidate_target_camera(
         output_dir, frame_paths, selection_path, sequence, camera, engine, args
     )
+    metadata = json.loads(prior_metadata_path.read_text(encoding="utf-8"))
+    metadata["pose_inference_performed_in_this_stage"] = processed_crops > 0
+    metadata["resume_skipped_target_crops"] = skipped
+    if (
+        processed_crops == 0
+        and skipped == qa["target_pose_count"]
+        and prior_metadata.get("materialization_source")
+    ):
+        for key in (
+            "materialization_source",
+            "materialization_equivalence",
+            "baseline_repository_output",
+        ):
+            metadata[key] = prior_metadata[key]
+        metadata["resume_provenance"] = (
+            "all target chunks selection-bound and reused from lossless baseline gather"
+        )
+    elif skipped:
+        metadata["resume_provenance"] = (
+            "selection-bound existing chunks plus newly inferred target chunks"
+        )
+    atomic_write_text(
+        prior_metadata_path,
+        json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
+    )
     save_pose_overlays(output_dir, frame_paths, args.save_overlays, engine)
     elapsed = time.perf_counter() - started
     metrics = {
@@ -835,6 +1000,7 @@ def infer_camera(
         "camera": camera,
         "frame_count": len(frame_paths),
         "target_pose_count": qa["target_pose_count"],
+        "processed_target_crops": processed_crops,
         "elapsed_seconds": elapsed,
         "frames_per_second": len(frame_paths) / elapsed,
         "person_crops_per_second": processed_crops / max(elapsed, 1e-12),
@@ -878,17 +1044,163 @@ def infer_command(args: argparse.Namespace) -> int:
         "workload": "TARGET_ONLY",
         "frame_count": int(sum(row["frame_count"] for row in metrics_rows)),
         "target_pose_count": int(sum(row["target_pose_count"] for row in metrics_rows)),
+        "processed_target_crops": int(
+            sum(row["processed_target_crops"] for row in metrics_rows)
+        ),
+        "resume_skipped_target_crops": int(
+            sum(row["resume_skipped_target_crops"] for row in metrics_rows)
+        ),
         "target_ambiguous_count": int(sum(row["target_ambiguous_count"] for row in qa_rows)),
         "no_target_count": int(sum(row["no_target_count"] for row in qa_rows)),
         "total_elapsed_seconds": float(sum(row["elapsed_seconds"] for row in metrics_rows)),
         "aggregate_frames_per_second": float(sum(row["frame_count"] for row in metrics_rows) / max(sum(row["elapsed_seconds"] for row in metrics_rows), 1e-12)),
-        "aggregate_person_crops_per_second": float(sum(row["target_pose_count"] for row in metrics_rows) / max(sum(row["elapsed_seconds"] for row in metrics_rows), 1e-12)),
+        "aggregate_target_output_crops_per_second_including_resume": float(
+            sum(row["target_pose_count"] for row in metrics_rows)
+            / max(sum(row["elapsed_seconds"] for row in metrics_rows), 1e-12)
+        ),
+        "aggregate_new_person_crops_per_second": float(
+            sum(row["processed_target_crops"] for row in metrics_rows)
+            / max(sum(row["elapsed_seconds"] for row in metrics_rows), 1e-12)
+        ),
         "peak_allocated_bytes": allocated,
         "peak_reserved_bytes": reserved,
         "pass_cameras": int(sum(row["status"] == "PASS" for row in qa_rows)),
         "fail_cameras": int(sum(row["status"] == "FAIL" for row in qa_rows)),
     }
     atomic_write_text(runtime_dir / "target_only_pilot_summary.json", json.dumps(summary, indent=2) + "\n")
+    print(json.dumps(summary, indent=2))
+    return 0 if summary["fail_cameras"] == 0 else 2
+
+
+def materialize_baseline_command(args: argparse.Namespace) -> int:
+    if args.chunk_size < 1:
+        raise RuntimeError("chunk size must be positive")
+    dataset_root = args.dataset_root.expanduser().resolve()
+    selection_root = args.selection_root.expanduser().resolve()
+    baseline_root = args.all_detections_root.expanduser().resolve()
+    output_root = args.output_root.expanduser().resolve()
+    runtime_dir = args.runtime_dir.expanduser().resolve()
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    rows: list[dict[str, Any]] = []
+    started_all = time.perf_counter()
+    for sequence in args.sequences:
+        for camera in args.cameras:
+            started = time.perf_counter()
+            frame_paths = list_images(resolve_frame_dir(dataset_root, sequence, camera))
+            selection_path = (
+                selection_root / sequence / camera / "target_selection.npz"
+            )
+            selection = TargetSelection(selection_path, frame_paths)
+            baseline_dir = baseline_root / sequence / camera
+            baseline_metadata = json.loads(
+                (baseline_dir / "metadata.json").read_text(encoding="utf-8")
+            )
+            output_dir = output_root / sequence / camera
+            (output_dir / "chunks").mkdir(parents=True, exist_ok=True)
+            with np.load(
+                baseline_dir / "poses_2d.npz", allow_pickle=False
+            ) as pose, np.load(
+                baseline_dir / "bboxes.npz", allow_pickle=False
+            ) as bbox:
+                if not np.array_equal(
+                    pose["instance_offsets"], selection.candidate_offsets
+                ):
+                    raise RuntimeError(
+                        f"baseline candidate offsets differ: {sequence}/{camera}"
+                    )
+                if not np.array_equal(
+                    bbox["instance_offsets"], selection.candidate_offsets
+                ):
+                    raise RuntimeError(
+                        f"baseline bbox offsets differ: {sequence}/{camera}"
+                    )
+                if not np.allclose(
+                    bbox["all_bboxes_xyxy"],
+                    selection.all_person_detections_xyxy,
+                    rtol=0.0,
+                    atol=1e-5,
+                ):
+                    raise RuntimeError(
+                        f"baseline candidate boxes differ: {sequence}/{camera}"
+                    )
+                if not np.allclose(
+                    bbox["all_bbox_scores"],
+                    selection.all_person_detection_scores,
+                    rtol=0.0,
+                    atol=1e-6,
+                ):
+                    raise RuntimeError(
+                        f"baseline candidate scores differ: {sequence}/{camera}"
+                    )
+                for chunk_start in range(0, len(frame_paths), args.chunk_size):
+                    chunk_end = min(chunk_start + args.chunk_size, len(frame_paths))
+                    materialize_baseline_chunk(
+                        target_chunk_path(output_dir, chunk_start, chunk_end),
+                        frame_paths[chunk_start:chunk_end],
+                        chunk_start,
+                        selection,
+                        pose["all_keypoints_xy"],
+                        pose["all_confidence"],
+                        bbox["all_bboxes_xyxy"],
+                        bbox["all_bbox_scores"],
+                    )
+
+            class MetadataOnlyEngine:
+                keypoint_id2name = baseline_metadata["keypoint_names"]
+
+            qa = consolidate_target_camera(
+                output_dir,
+                frame_paths,
+                selection_path,
+                sequence,
+                camera,
+                MetadataOnlyEngine(),
+                args,
+            )
+            metadata_path = output_dir / "metadata.json"
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            metadata.update(
+                {
+                    "pose_inference_performed_in_this_stage": False,
+                    "materialization_source": "ALL_DETECTIONS_BASELINE",
+                    "materialization_equivalence": "lossless accepted-candidate gather",
+                    "baseline_repository_output": str(baseline_dir),
+                    "batch_size": None,
+                }
+            )
+            atomic_write_text(
+                metadata_path,
+                json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
+            )
+            row = {
+                **qa,
+                "elapsed_seconds": time.perf_counter() - started,
+                "materialization_source": "ALL_DETECTIONS_BASELINE",
+            }
+            rows.append(row)
+            print(json.dumps(row), flush=True)
+    atomic_write_csv(
+        runtime_dir / "baseline_materialization_qa.csv",
+        sorted({key for row in rows for key in row}),
+        rows,
+    )
+    summary = {
+        "schema_version": 1,
+        "created_at_utc": utc_now(),
+        "workload": "TARGET_ONLY",
+        "materialization_source": "ALL_DETECTIONS_BASELINE",
+        "camera_count": len(rows),
+        "frame_count": int(sum(row["frame_count"] for row in rows)),
+        "target_pose_count": int(sum(row["target_pose_count"] for row in rows)),
+        "pass_cameras": int(sum(row["status"] == "PASS" for row in rows)),
+        "fail_cameras": int(sum(row["status"] == "FAIL" for row in rows)),
+        "elapsed_seconds": time.perf_counter() - started_all,
+        "new_pose_inference_performed": False,
+    }
+    atomic_write_text(
+        runtime_dir / "baseline_materialization_summary.json",
+        json.dumps(summary, indent=2) + "\n",
+    )
     print(json.dumps(summary, indent=2))
     return 0 if summary["fail_cameras"] == 0 else 2
 
@@ -989,6 +1301,8 @@ def main() -> int:
         return benchmark_command(args)
     if args.command == "infer":
         return infer_command(args)
+    if args.command == "materialize-baseline":
+        return materialize_baseline_command(args)
     if args.command == "verify":
         return verify_command(args)
     raise AssertionError(args.command)
