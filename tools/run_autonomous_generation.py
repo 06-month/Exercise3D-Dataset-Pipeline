@@ -1,0 +1,354 @@
+#!/usr/bin/env python3
+"""Supervise the remaining private Exercise3D generation critical path.
+
+The supervisor first waits for an already-running Sapiens2 process.  If that
+process exits before all selection-bound camera outputs are complete, it uses
+the same frozen configuration to resume.  It then runs Phase 7, SAM Mode B,
+prior consolidation, sequence fitting and a versioned private export.  A
+failure is recorded per sequence and does not silently promote incomplete data.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+try:
+    from tools.run_phase7_streaming import sequence_ready
+except ModuleNotFoundError:
+    from run_phase7_streaming import sequence_ready
+
+
+CAMERAS = "cam1,cam2,cam3"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def parse_list(value: str) -> list[str]:
+    result = [item.strip() for item in value.split(",") if item.strip()]
+    if not result:
+        raise argparse.ArgumentTypeError("expected a non-empty comma-separated list")
+    return result
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dataset-root", type=Path, required=True)
+    parser.add_argument("--selection-root", type=Path, required=True)
+    parser.add_argument("--pose-root", type=Path, required=True)
+    parser.add_argument("--camera-root", type=Path, required=True)
+    parser.add_argument("--initial-triangulation-root", type=Path, required=True)
+    parser.add_argument("--recovery-camera-root", type=Path, required=True)
+    parser.add_argument("--triangulation-root", type=Path, required=True)
+    parser.add_argument("--sam-output-root", type=Path, required=True)
+    parser.add_argument("--sam-prior-root", type=Path, required=True)
+    parser.add_argument("--body-fit-root", type=Path, required=True)
+    parser.add_argument("--export-root", type=Path, required=True)
+    parser.add_argument("--runtime-dir", type=Path, required=True)
+    parser.add_argument("--build-id", required=True)
+    parser.add_argument("--sequences", type=parse_list, required=True)
+    parser.add_argument("--wait-sapiens-pid", type=int)
+    parser.add_argument("--sapiens-python", type=Path, required=True)
+    parser.add_argument("--body4d-python", type=Path, required=True)
+    parser.add_argument("--checkpoint-root", type=Path, required=True)
+    parser.add_argument("--sam-body4d-root", type=Path, required=True)
+    parser.add_argument("--sapiens-retries", type=int, default=2)
+    parser.add_argument("--poll-seconds", type=float, default=30.0)
+    parser.add_argument("--deadline-utc", default="2026-08-14T04:00:00+00:00")
+    parser.add_argument("--minimum-free-gib", type=float, default=20.0)
+    return parser
+
+
+def process_alive(pid: int) -> bool:
+    try:
+        state = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").split()[2]
+        return state != "Z"
+    except (OSError, IndexError):
+        return False
+
+
+def free_gib(path: Path) -> float:
+    existing = path.resolve()
+    while not existing.exists():
+        existing = existing.parent
+    return shutil.disk_usage(existing).free / (1024**3)
+
+
+def atomic_text(path: Path, value: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + f".{os.getpid()}.tmp")
+    temporary.write_text(value, encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def atomic_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + f".{os.getpid()}.tmp")
+    fields = list(rows[0])
+    with temporary.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+    os.replace(temporary, path)
+
+
+def missing_pose_sequences(args: argparse.Namespace) -> list[str]:
+    return [
+        sequence
+        for sequence in args.sequences
+        if not sequence_ready(
+            args.dataset_root.resolve(), args.pose_root.resolve(), sequence
+        )
+    ]
+
+
+def update_state(
+    args: argparse.Namespace,
+    stage: str,
+    rows: list[dict[str, Any]],
+    **extra: Any,
+) -> None:
+    deadline = datetime.fromisoformat(args.deadline_utc)
+    if deadline.tzinfo is None:
+        raise RuntimeError("deadline must include a timezone")
+    now = datetime.now(timezone.utc)
+    state = {
+        "schema_version": 1,
+        "updated_at_utc": now.isoformat(),
+        "deadline_utc": deadline.astimezone(timezone.utc).isoformat(),
+        "remaining_wall_hours": (deadline.astimezone(timezone.utc) - now).total_seconds()
+        / 3600.0,
+        "stage": stage,
+        "sequence_count": len(args.sequences),
+        "completed_body_fit_count": sum(row["status"] in {"PASS", "REVIEW"} for row in rows),
+        "failed_or_incomplete_count": sum(
+            row["status"] not in {"PASS", "REVIEW"} for row in rows
+        ),
+        **extra,
+    }
+    atomic_text(
+        args.runtime_dir.resolve() / "autonomous_generation_state.json",
+        json.dumps(state, ensure_ascii=False, indent=2) + "\n",
+    )
+
+
+def run(command: list[str]) -> int:
+    print(json.dumps({"command": command, "started_at_utc": utc_now()}), flush=True)
+    process = subprocess.run(command, cwd=PROJECT_ROOT)
+    print(
+        json.dumps(
+            {
+                "exit_code": process.returncode,
+                "finished_at_utc": utc_now(),
+                "executable": command[0],
+                "tool": command[1] if len(command) > 1 else "",
+            }
+        ),
+        flush=True,
+    )
+    return process.returncode
+
+
+def sapiens_command(args: argparse.Namespace) -> list[str]:
+    return [
+        str(args.sapiens_python.resolve()),
+        str(PROJECT_ROOT / "tools" / "sapiens2_target_pipeline.py"),
+        "infer",
+        "--dataset-root", str(args.dataset_root.resolve()),
+        "--selection-root", str(args.selection_root.resolve()),
+        "--output-root", str(args.pose_root.resolve()),
+        "--runtime-dir", str((args.runtime_dir.resolve() / "phase6_resume")),
+        "--sequences", ",".join(args.sequences),
+        "--cameras", CAMERAS,
+        "--batch-size", "16",
+        "--chunk-size", "256",
+        "--loader-workers", "8",
+        "--prefetch-batches", "4",
+        "--retry-failures", "1",
+        "--save-overlays", "0",
+    ]
+
+
+def phase7_command(args: argparse.Namespace, sequence: str) -> list[str]:
+    return [
+        sys.executable,
+        str(PROJECT_ROOT / "tools" / "run_phase7_streaming.py"),
+        "--dataset-root", str(args.dataset_root.resolve()),
+        "--pose-root", str(args.pose_root.resolve()),
+        "--camera-root", str(args.camera_root.resolve()),
+        "--initial-output-root", str(args.initial_triangulation_root.resolve()),
+        "--recovery-camera-root", str(args.recovery_camera_root.resolve()),
+        "--final-output-root", str(args.triangulation_root.resolve()),
+        "--runtime-dir", str(args.runtime_dir.resolve() / "phase7" / sequence),
+        "--sequences", sequence,
+        "--poll-seconds", str(args.poll_seconds),
+    ]
+
+
+def sam_command(args: argparse.Namespace, sequence: str) -> list[str]:
+    return [
+        sys.executable,
+        str(PROJECT_ROOT / "tools" / "run_sam_body4d_full.py"),
+        "--dataset-root", str(args.dataset_root.resolve()),
+        "--selection-root", str(args.selection_root.resolve()),
+        "--output-root", str(args.sam_output_root.resolve()),
+        "--runtime-dir", str(args.runtime_dir.resolve() / "phase8" / sequence),
+        "--checkpoint-root", str(args.checkpoint_root.resolve()),
+        "--sam-body4d-root", str(args.sam_body4d_root.resolve()),
+        "--body4d-python", str(args.body4d_python.resolve()),
+        "--sequences", sequence,
+        "--cameras", CAMERAS,
+        "--retry-failures", "1",
+    ]
+
+
+def consolidate_command(args: argparse.Namespace, sequence: str) -> list[str]:
+    return [
+        sys.executable,
+        str(PROJECT_ROOT / "tools" / "consolidate_sam_body_prior.py"),
+        "--sam-root", str(args.sam_output_root.resolve()),
+        "--output-root", str(args.sam_prior_root.resolve()),
+        "--runtime-dir", str(args.runtime_dir.resolve() / "phase8_prior" / sequence),
+        "--sequences", sequence,
+        "--cameras", CAMERAS,
+    ]
+
+
+def fit_command(args: argparse.Namespace, sequence: str) -> list[str]:
+    return [
+        sys.executable,
+        str(PROJECT_ROOT / "tools" / "fit_sequence_body.py"),
+        "--triangulation-root", str(args.triangulation_root.resolve()),
+        "--sam-prior-root", str(args.sam_prior_root.resolve()),
+        "--output-root", str(args.body_fit_root.resolve()),
+        "--runtime-dir", str(args.runtime_dir.resolve() / "phase9" / sequence),
+        "--sequences", sequence,
+    ]
+
+
+def export_command(args: argparse.Namespace) -> list[str]:
+    return [
+        sys.executable,
+        str(PROJECT_ROOT / "tools" / "export_private_dataset.py"),
+        "--dataset-root", str(args.dataset_root.resolve()),
+        "--selection-root", str(args.selection_root.resolve()),
+        "--pose-root", str(args.pose_root.resolve()),
+        "--triangulation-root", str(args.triangulation_root.resolve()),
+        "--sam-prior-root", str(args.sam_prior_root.resolve()),
+        "--body-fit-root", str(args.body_fit_root.resolve()),
+        "--output-root", str(args.export_root.resolve()),
+        "--build-id", args.build_id,
+        "--sequences", ",".join(args.sequences),
+    ]
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    if args.poll_seconds <= 0 or args.sapiens_retries < 0 or args.minimum_free_gib <= 0:
+        raise RuntimeError("invalid poll/retry configuration")
+    rows: list[dict[str, Any]] = []
+    if args.wait_sapiens_pid is not None:
+        while process_alive(args.wait_sapiens_pid):
+            update_state(
+                args,
+                "WAIT_RUNNING_SAPIENS2",
+                rows,
+                monitored_pid=args.wait_sapiens_pid,
+            )
+            time.sleep(args.poll_seconds)
+
+    for attempt in range(args.sapiens_retries + 1):
+        missing = missing_pose_sequences(args)
+        if not missing:
+            break
+        update_state(
+            args,
+            "RESUME_SAPIENS2",
+            rows,
+            sapiens_attempt=attempt + 1,
+            missing_pose_sequences=missing,
+        )
+        run(sapiens_command(args))
+    pose_missing = missing_pose_sequences(args)
+
+    for sequence in args.sequences:
+        started = time.perf_counter()
+        row: dict[str, Any] = {
+            "sequence": sequence,
+            "status": "INCOMPLETE",
+            "failed_stage": "",
+            "started_at_utc": utc_now(),
+            "finished_at_utc": "",
+            "elapsed_seconds": 0.0,
+        }
+        if sequence in pose_missing:
+            row["failed_stage"] = "SAPIENS2"
+        elif run(phase7_command(args, sequence)) != 0:
+            row["failed_stage"] = "PHASE7"
+        elif free_gib(args.sam_output_root) < args.minimum_free_gib:
+            row["failed_stage"] = "DISK_RESERVE"
+        elif run(sam_command(args, sequence)) != 0:
+            row["failed_stage"] = "SAM_MODE_B"
+        elif run(consolidate_command(args, sequence)) != 0:
+            row["failed_stage"] = "SAM_PRIOR_CONSOLIDATION"
+        elif run(fit_command(args, sequence)) != 0:
+            row["failed_stage"] = "BODY_FIT"
+        else:
+            metadata_path = args.body_fit_root.resolve() / sequence / "metadata.json"
+            try:
+                body_status = json.loads(metadata_path.read_text(encoding="utf-8"))["qa"][
+                    "status"
+                ]
+                row["status"] = "REVIEW" if str(body_status).startswith("REVIEW") else "PASS"
+            except (OSError, KeyError, json.JSONDecodeError):
+                row["failed_stage"] = "BODY_FIT_VALIDATION"
+        row["finished_at_utc"] = utc_now()
+        row["elapsed_seconds"] = time.perf_counter() - started
+        rows.append(row)
+        atomic_csv(args.runtime_dir.resolve() / "autonomous_sequences.csv", rows)
+        update_state(
+            args,
+            "SEQUENCE_PIPELINE",
+            rows,
+            active_sequence=sequence,
+            remaining_sequences=args.sequences[len(rows) :],
+            mode_b_default=True,
+            mode_c_automatic=False,
+            free_storage_gib=free_gib(args.sam_output_root),
+            minimum_free_gib=args.minimum_free_gib,
+        )
+        print(json.dumps(row, ensure_ascii=False), flush=True)
+
+    export_exit = run(export_command(args))
+    final_status = (
+        "PASS_OR_REVIEW"
+        if export_exit == 0 and all(row["status"] in {"PASS", "REVIEW"} for row in rows)
+        else "INCOMPLETE_OR_FAIL"
+    )
+    update_state(
+        args,
+        "COMPLETE",
+        rows,
+        final_status=final_status,
+        export_exit_code=export_exit,
+        mode_c_automatic=False,
+    )
+    return 0 if final_status == "PASS_OR_REVIEW" else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

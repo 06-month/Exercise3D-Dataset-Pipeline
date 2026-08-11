@@ -168,6 +168,21 @@ Mode C는 여전히 selective evidence가 없는 전체 기본값으로 사용�
 - 이 단계는 implementation readiness이며 아직 full SAM/body input이 없으므로 실제 Phase 9/13
   acceptance 결과로 간주하지 않는다. 관련 신규/회귀 unit test 18개와 전체 31개 test가 PASS했다.
 
+### 장시간 critical path supervisor 시작
+
+- current Sapiens2 PID가 정상인 동안 30초 간격으로 상태/deadline만 기록하고 GPU에는 개입하지 않는다.
+- process 종료 시 78-camera pose completeness를 전수 검사하고, incomplete이면 동일 batch 16/chunk 256,
+  selector-bound resume를 최대 2회 수행한다.
+- 이후 sequence별 Phase 7 final gate, SAM Mode B, compact prior consolidation, staged body fit을 실행하고
+  마지막에 versioned private export/SHA/schema validation을 실행한다.
+- stage 실패는 sequence row에 남기고 다른 sequence를 계속 처리하며, export에서 FAIL/INCOMPLETE를
+  freeze-eligible로 승격하지 않는다.
+- supervisor 시작 시 private storage 여유는 170 GiB다. SAM 예상 약 78 GiB와 compact/export payload를
+  수용 가능하지만 sequence마다 확인하고 20 GiB reserve 아래에서는 새 SAM run을 시작하지 않는다.
+- Mode C 자동 full 실행은 금지했다. candidate/acceptance는
+  `configs/sam_mode_c_escalation.json`에 동결했으며, occlusion 단독으로 escalation하지 않는다.
+- supervisor process-alive/storage helper를 포함한 전체 unit test 32개가 PASS했다.
+
 ## 2026-08-09 — 초기 synchronization / derivative 구축 기록 이관
 
 ### 수행

@@ -13,6 +13,8 @@
 - 이미 완료된 4개 pilot sequence output은 검증 후 재사용하고 재추론하지 않음
 - GPU priority: Sapiens2-5B target-only; CPU는 이전 완료 sequence의 triangulation/QC를 병행
 - SAM policy: Mode B default, Mode C는 실제 failure/occlusion escalation evidence가 있는 경우만 REVIEW
+- long-run supervision: current 5B 종료 감시, 불완전 camera selection-bound resume, Phase 7→Mode B→
+  consolidation→body fit→versioned private export를 sequence별 자동 진행
 - deadline에 미완료된 sequence는 `INCOMPLETE_DEADLINE`로 명시하고 PASS로 위장하지 않음
 - Fit3D exhaustive tolerance/ablation은 final private dataset critical path를 방해하면 freeze 이후로 이동
 
@@ -237,6 +239,9 @@
   camera 단위 exact completeness를 검사
 - 다음 gate: Mode B를 full 기본 후보로 유지하고 실제 completion trigger case에서 Mode C 효용 검증;
   Mode C는 selective escalation evidence가 있을 때만 사용
+- Mode C candidate: occlusion-risk와 함께 Mode B missing/nonfinite 또는 sequence median+5 MAD
+  temporal/alignment outlier가 있어야 하며, identity/PTS exact match, schema PASS, ≥10% alignment 개선
+  또는 content-completion 호출, geometry displacement 증가 ≤5%를 모두 검증한 뒤에만 채택
 
 ## Phase 9 — Sequence-Level Body Fitting
 

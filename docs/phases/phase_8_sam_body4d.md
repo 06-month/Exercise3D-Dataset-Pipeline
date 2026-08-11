@@ -166,3 +166,12 @@ Official MHR replay smoke에서는 저장된 204-d parameter와 shape/expression
 checkpoint의 308-landmark mapping을 적용했을 때 keypoint 최대 차이 `2.68e-7 m`, mesh 최대 차이
 `7.15e-7 m`를 확인했다. 따라서 compact parameter는 PLY와 분리된 재현 가능한 body representation으로
 사용할 수 있지만, 여전히 monocular learned prior이며 GT가 아니다.
+
+## Mode C selective escalation
+
+전체 기본은 계속 Mode B다. [`configs/sam_mode_c_escalation.json`](../../configs/sam_mode_c_escalation.json)은
+Mode C candidate를 occlusion-risk와 Mode B missing/nonfinite 또는 robust temporal/alignment outlier의
+교집합으로 제한한다. 후보 clip은 양쪽 15-frame padding, sequence 최대 10%다. Mode C가 identity/PTS
+exact match와 schema를 통과하고 content completion이 실제 호출되거나 canonical alignment residual을
+10% 이상 낮추며 geometry displacement를 5% 넘게 악화시키지 않을 때만 채택한다. 그렇지 않으면
+Mode B를 유지하고 REVIEW로 남긴다.

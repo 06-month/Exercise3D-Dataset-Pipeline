@@ -97,6 +97,12 @@ Phase 9는 triangulated geometry를 dominant observation으로 두는 staged fit
 export는 source RGB를 포함하지 않고 stage payload의 byte equality와 SHA-256, PASS/REVIEW/FAIL/
 INCOMPLETE 상태를 versioned manifest에 기록합니다.
 
+현재 장기 supervisor는 실행 중인 5B PID를 기다리고, 불완전 종료 시 동일 selection-bound 설정으로
+resume한 뒤 Phase 7 → SAM Mode B → prior consolidation → body fit → private export를 sequence별로
+이어갑니다. Mode C는 자동 full mode가 아니며
+[`configs/sam_mode_c_escalation.json`](configs/sam_mode_c_escalation.json)의 occlusion+failure/outlier
+조건과 B/C 개선 gate를 모두 통과할 때만 선택 후보입니다.
+
 세부 상태와 acceptance gate는 [plan.md](plan.md), 시간순 실행 기록은
 [process.md](process.md)를 기준으로 합니다.
 
@@ -247,6 +253,7 @@ Sapiens2 Pose 5B single-image smoke:
 | `tools/benchmark_sam_body4d.py` | SAM-Body4D checkpoint preflight와 refiner on/off runtime 측정 | ignored output만 생성 |
 | `tools/sam_body_primary_target_runner.py` | primary bbox 1개 adapter와 compact MHR parameter provenance 저장 | ignored private output만 생성 |
 | `tools/run_sam_body4d_full.py` | Mode B camera 단위 resume/completeness orchestration | ignored private output만 생성 |
+| `tools/run_autonomous_generation.py` | Sapiens resume부터 Phase 7–13까지 장시간 critical path supervision | ignored private output 생성 |
 | `tools/consolidate_sam_body_prior.py` | frame/PTS/identity-aware MHR numeric prior 통합 | ignored private output 생성 |
 | `tools/verify_mhr_parameter_replay.py` | compact 204-d MHR parameter의 official model exact replay 검사 | ignored aggregate 생성 |
 | `tools/fit_sequence_body.py` | geometry-dominant staged sequence body fit과 S0 | ignored private output 생성 |
