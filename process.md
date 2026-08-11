@@ -200,7 +200,7 @@ Mode C는 여전히 selective evidence가 없는 전체 기본값으로 사용�
 - `barbellrow_0001/cam1`과 cam2는 각각 481/481 target crop, schema PASS로 완료됐다.
 - 두 camera completion timestamp 사이 steady-state rate는 `0.23323 crop/s`다. 2026-08-11
   19:50 KST 기준 완료 pose 10,687/65,430, 남은 crop 54,743, complete camera 14/78이다.
-- recent-camera rate projection은 Sapiens 종료 `2026-08-14 13:02 KST`로 deadline과 사실상 동일하고
+- recent-camera rate projection은 Sapiens 종료 `2026-08-14 12:58 KST`로 deadline과 사실상 동일하고
   retry/QC reserve는 없다. Saved-chunk 기준 전체 effective rate는 current incomplete chunk 때문에
   `0.216 crop/s`로 보수적으로 진동한다.
 - supervisor state에 current KST 대응 UTC, remaining wall, completed/remaining crop, recent/effective

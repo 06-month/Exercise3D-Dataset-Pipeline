@@ -190,7 +190,7 @@
 - runtime projection: 기존 pilot 9,725 pose를 lossless resume하여 새 inference 55,705 crops.
   cached-detector 보수적 환산 약 66.1 GPU-hours이며 실제 full wall-clock으로 계속 갱신
 - first two new cameras steady rate `0.23323 crop/s`; 2026-08-11 19:50 KST projection은
-  Sapiens 종료 2026-08-14 13:02 KST로 deadline reserve가 사실상 0
+  Sapiens 종료 2026-08-14 12:58 KST로 deadline reserve가 사실상 0
 - 판정: target-selection acceptance는 `GO_FULL_DATASET`; autonomous deadline 지침에 따라
   batch 16 full 실행 critical path 진입
 

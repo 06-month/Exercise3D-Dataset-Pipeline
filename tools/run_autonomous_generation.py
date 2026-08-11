@@ -197,7 +197,27 @@ def sapiens_progress(args: argparse.Namespace) -> dict[str, Any]:
         recent_rate = recent_crops / recent_elapsed if recent_elapsed > 0 else 0.0
     remaining = max(0, args.expected_target_crops - completed_crops)
     projection_rate = recent_rate or rate
-    eta_hours = remaining / projection_rate / 3600.0 if projection_rate > 0 else None
+    if recent_rate and new_camera_events:
+        remaining_after_first_new_camera = max(
+            0,
+            args.expected_target_crops
+            - args.reused_target_crops
+            - new_camera_events[0][1],
+        )
+        projected_completion = datetime.fromtimestamp(
+            new_camera_events[0][0].timestamp()
+            + remaining_after_first_new_camera / recent_rate,
+            tz=timezone.utc,
+        )
+        eta_hours = max(0.0, (projected_completion - now).total_seconds() / 3600.0)
+    elif projection_rate > 0:
+        eta_hours = remaining / projection_rate / 3600.0
+        projected_completion = datetime.fromtimestamp(
+            now.timestamp() + eta_hours * 3600, tz=timezone.utc
+        )
+    else:
+        eta_hours = None
+        projected_completion = None
     return {
         "expected_target_crops": args.expected_target_crops,
         "completed_target_crops": completed_crops,
@@ -212,8 +232,8 @@ def sapiens_progress(args: argparse.Namespace) -> dict[str, Any]:
         "elapsed_hours": elapsed / 3600.0,
         "estimated_remaining_sapiens_hours": eta_hours,
         "estimated_sapiens_completion_utc": (
-            datetime.fromtimestamp(now.timestamp() + eta_hours * 3600, tz=timezone.utc).isoformat()
-            if eta_hours is not None
+            projected_completion.isoformat()
+            if projected_completion is not None
             else None
         ),
         "downstream_expected_sam_hours": args.expected_sam_hours,
