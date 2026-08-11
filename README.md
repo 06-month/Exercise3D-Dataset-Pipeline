@@ -74,8 +74,8 @@ camera calibration을 구분합니다.
 | 6-1A. Primary Target Selection | DONE | 9,732 frame, identity switch 0, ambiguity 7, crop 50.37% 감소 |
 | 6-2. Target-only Runtime Gate | RUNNING | full selector `GO_FULL_DATASET`; 78 view/65,595 frame, target 65,430, identity/integrity failure 0; 5B batch 16 실행 중 |
 | 7. Timestamp-aware Triangulation | RUNNING | pilot 4/4 final schema PASS; pose-complete sequence CPU streaming, NO_GO에만 held-out recovery |
-| 8. SAM Body Runtime Feasibility | FULL RUNNING/REVIEW | 22.387 GiB integrity PASS, A/B/C 6-run 완료; 첫 Mode B sequence 1,770/1,770 PASS |
-| 9. Sequence Body Fitting | RUNNING/REVIEW | 첫 sequence 590×26 완료; schema PASS, camera/displacement REVIEW 전파 |
+| 8. SAM Body Runtime Feasibility | FULL RUNNING/REVIEW | 22.387 GiB integrity PASS, A/B/C 6-run 완료; Mode B 2 sequence/5,571 frame PASS |
+| 9. Sequence Body Fitting | RUNNING/REVIEW | 2 sequence 완료; schema PASS, camera/displacement REVIEW 2/FAIL 0 |
 | 10–13 | IMPLEMENTED PARTIAL/SMOKE PASS | 첫 private export 34 files, SHA/size mismatch 0; deadline build 입력 누적 중 |
 
 `pushup_0003`은 Phase 5.1에서 observation, initialization, objective와 gate를 그대로 두고
@@ -111,6 +111,11 @@ INCOMPLETE 상태를 versioned manifest에 기록합니다.
 geometry displacement p95 0.05167을 그대로 전파해 sequence는 `REVIEW_BODY_FIT_QUALITY`입니다.
 Complete sequence 하나만 사용한 private export smoke는 34 files의 size/SHA-256 불일치 없이
 freeze-eligible이었으며, REVIEW를 PASS로 승격하지 않았습니다.
+
+두 번째 `squat_0001`도 Mode B 3-view 3,801/3,801 frame과 1,267×26 body fit을 완료했습니다.
+Body fit coverage/alignment는 1.0이고 prior-only joint는 0이지만 normalized displacement p95
+0.07936과 camera uncertainty를 전파해 REVIEW로 유지합니다. Mode C 후보는 0으로
+`PASS_MODE_B_FROZEN`이며 expensive Mode C를 실행하지 않았습니다.
 
 현재 장기 supervisor는 실행 중인 5B PID를 기다리고, 불완전 종료 시 동일 selection-bound 설정으로
 resume한 뒤 Phase 7 → SAM Mode B → prior consolidation → body fit → private export를 sequence별로

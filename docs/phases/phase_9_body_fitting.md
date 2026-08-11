@@ -62,6 +62,11 @@ Displacement p95가 사전 동결 REVIEW 경계 0.05를 소폭 넘고 upstream c
 자동 PASS로 승격하지 않았다. Mode C assessor가 고른 84 frame은 주로 sequence 경계의 temporal
 outlier이며, current Mode B output을 교체할 품질 증거로 사용하지 않는다.
 
+`squat_0001`은 1,267 reference timestamp × 26 joint, final coverage/alignment 1.0,
+prior-only fraction 0, median bone-length CV 0.02327, finite/NaN contract PASS다. Normalized
+observation displacement p95 0.07936과 observation-conditioned camera uncertainty 때문에
+`REVIEW_BODY_FIT_QUALITY`이며 FAIL은 없다. Mode C candidate는 0이고 Mode B를 동결했다.
+
 ## 사전 동결 quality gate
 
 Full Mode B 결과를 보기 전에 [`configs/phase9_body_fit.json`](../../configs/phase9_body_fit.json)에

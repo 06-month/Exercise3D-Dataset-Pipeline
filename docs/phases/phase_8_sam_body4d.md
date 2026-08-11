@@ -115,6 +115,13 @@ trigger가 실제 발생하는 별도 짧은 case와 downstream residual 개선 
 Mode C assessor는 84개 boundary temporal-outlier frame을 REVIEW 후보로 기록했지만 missing/nonfinite,
 alignment failure 또는 content-completion evidence가 없어 Mode C를 실행하거나 Mode B를 교체하지 않았다.
 
+`squat_0001`은 cam1/cam2/cam3 각 1,267 frame을 2,023.09/2,033.27/2,024.20초에 처리했다.
+Aggregate는 3,801 frame/6,080.57초 = 0.62511 frame/s이며 세 camera 모두 combined peak
+70,359 MiB, schema·finite·mesh·numeric·provenance completion PASS다. Cam2/cam3의
+occlusion-risk 545/689를 보존했지만 missing/nonfinite/temporal/alignment candidate는 0이어서
+`PASS_MODE_B_FROZEN`이고 Mode C를 실행하지 않았다. 두 full sequence cumulative rate는
+5,571 frame/9,041.38초 = 0.61617 frame/s다.
+
 ## 전체 runtime projection과 8월 15일 판정
 
 Expected prevalence에는 Phase 6 네 sequence/12-camera pilot의 conservative occlusion proxy

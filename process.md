@@ -286,6 +286,25 @@ Mode C는 여전히 selective evidence가 없는 전체 기본값으로 사용�
   recent 0.22073 crop/s projection은 2026-08-14 16:49 KST로 deadline보다 약 3.82시간 늦다.
   `squat_0001/cam1` Mode B를 다음 streaming input으로 시작했고 기존 두 job은 중단하지 않았다.
 
+### Second end-to-end sequence — squat_0001
+
+- `squat_0001` Mode B cam1/cam2/cam3 각 1,267 frame을 모두 first attempt에서 완료했다.
+  Elapsed는 2,023.09/2,033.27/2,024.20초, aggregate 3,801 frame/6,080.57초 =
+  0.62511 frame/s다. 세 camera combined peak는 70,359 MiB이고 OOM은 없었다.
+- Mesh/numeric/PTS/provenance count와 required schema가 3,801/3,801 exact, nonfinite/missing/temp 0이다.
+  Cam2/cam3 occlusion-risk 545/689를 frame provenance로 보존했다.
+- Consolidated prior accepted/output 3,801/3,801, camera PASS 3/3이다.
+- Body fit은 1,267×26, coverage/alignment 1.0, prior-only 0, median bone CV 0.02327,
+  finite/NaN PASS다. Displacement p95 0.07936과 camera uncertainty로
+  `REVIEW_BODY_FIT_QUALITY`; FAIL은 없다.
+- Mode C candidate는 0이고 `PASS_MODE_B_FROZEN`; Mode C 실행/채택 0이다.
+- 두 full sequence cumulative SAM은 5,571 frame/9,041.38초 = 0.61617 frame/s다.
+- 같은 구간 Sapiens2는 `pushup_0004` 3-view를 PASS로 완료해 durable 18/78 camera가 됐고,
+  `pushup_0002/cam1` first chunk까지 current partial 포함 12,951/65,430 crop이다.
+  Recent 0.20622 crop/s projection은 Sapiens 종료 2026-08-14 21:27 KST다.
+- Supervisor는 `pushup_0001`의 Phase 7 recovery provenance를 재확인한 뒤 Mode B `cam1`을
+  즉시 시작했다. 정상 Sapiens와 deadline/handoff monitor는 중단하지 않았다.
+
 ## 2026-08-09 — 초기 synchronization / derivative 구축 기록 이관
 
 ### 수행

@@ -7,14 +7,14 @@
 
 - primary objective: correctness·provenance·identity consistency를 유지하면서 deadline까지
   end-to-end로 완결되고 freeze 가능한 sequence 수를 최대화
-- 2026-08-11 21:12 KST 기준 remaining wall-clock 63.80 h
+- 2026-08-11 22:50 KST 기준 remaining wall-clock 62.17 h
 - 최신 target-only Sapiens2 projection 79.09 GPUh와 SAM Mode B 16.35 h는 한 A100에서
   deadline 전 전량 순차 완료가 불가능하므로, sequence-complete streaming으로 변경
 - 이미 완료된 4개 pilot sequence output은 검증 후 재사용하고 재추론하지 않음
 - GPU scheduling: Sapiens2-5B는 계속 실행하고, pose-complete sequence의 Mode B를 겹쳐
   end-to-end 완결 sequence를 확보한다. 첫 full camera 병렬 peak 61,821 MiB와 completion PASS 확인
-- current projection: Sapiens 11,677/65,430 crop, recent 0.22073 crop/s,
-  전량 ETA 2026-08-14 16:49 KST; 약 -3.82 h deadline margin을 end-to-end complete sequence 확보와
+- current projection: Sapiens current partial 포함 12,951/65,430 crop, recent 0.20622 crop/s,
+  전량 ETA 2026-08-14 21:27 KST; 약 -8.45 h deadline margin을 end-to-end complete sequence 확보와
   명시적 INCOMPLETE provenance로 관리
 - SAM policy: Mode B default, Mode C는 실제 failure/occlusion escalation evidence가 있는 경우만 REVIEW
 - long-run supervision: current 5B 종료 감시, 불완전 camera selection-bound resume, Phase 7→Mode B→
@@ -30,6 +30,8 @@
   실행하고 PASS/REVIEW/FAIL/INCOMPLETE를 고정한 뒤 generation은 중단 없이 계속
 - first end-to-end gate: `barbellrow_0000` Mode B 1,770/1,770, body fit 590×26,
   export checksum/schema PASS; camera/displacement uncertainty를 숨기지 않고 sequence REVIEW 유지
+- second end-to-end gate: `squat_0001` Mode B 3,801/3,801, body fit 1,267×26,
+  Mode C candidate 0 `PASS_MODE_B_FROZEN`; displacement/camera uncertainty로 REVIEW 유지
 
 ## 현재 Gate
 
@@ -261,6 +263,8 @@
   않으며, candidate 또는 `PASS_MODE_B_FROZEN`을 final private manifest에 포함
 - first full result: `barbellrow_0000` 3 camera/1,770 frame PASS, 합산 2,960.81초
   (0.59781 frame/s), combined peak 61,821 MiB. mesh/numeric/provenance 수량 exact
+- second full result: `squat_0001` 3 camera/3,801 frame PASS, 합산 6,080.57초
+  (0.62511 frame/s), combined peak 70,359 MiB. cumulative 5,571 frame rate 0.61617 frame/s
 
 ## Phase 9 — Sequence-Level Body Fitting
 
@@ -278,6 +282,9 @@
   PASS/REVIEW/FAIL로 분리하고 camera REVIEW 전파
 - first result: `barbellrow_0000` 590×26, coverage/alignment 1.0, prior-only 0,
   median bone CV 0.01738. displacement p95 0.05167와 camera REVIEW 때문에
+  `REVIEW_BODY_FIT_QUALITY`; finite/NaN schema FAIL 0
+- second result: `squat_0001` 1,267×26, coverage/alignment 1.0, prior-only 0,
+  median bone CV 0.02327. displacement p95 0.07936와 camera REVIEW 때문에
   `REVIEW_BODY_FIT_QUALITY`; finite/NaN schema FAIL 0
 - 다음 gate: subject-level shape consistency
 

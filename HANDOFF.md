@@ -8,7 +8,7 @@
 - 최종 deadline: 2026-08-14 13:00 KST
 - 현재 목표: correctness/provenance를 유지하며 end-to-end freeze 가능한 sequence 수 최대화
 - 현재 phase: Phase 6 target-only Sapiens2-5B + Phase 7/8 sequence streaming
-- acceptance gate: target selector `GO_FULL_DATASET`; SAM Mode B full 1-sequence와 private export smoke `PASS`
+- acceptance gate: target selector `GO_FULL_DATASET`; SAM Mode B full 2-sequence와 private export smoke `PASS`
 
 ## Current pipeline state
 
@@ -16,16 +16,16 @@
 - RUNNING: Phase 6 full 5B inference, pose-complete sequence의 Phase 7→SAM Mode B→Phase 9 streaming
 - TODO: remaining triangulation, SAM prior consolidation, body fitting/QC, deadline private export/freeze
 - BLOCKED: 없음
-- REVIEW/FAIL: camera PASS 11/REVIEW 15/FAIL 0; first body fit REVIEW 1/FAIL 0
+- REVIEW/FAIL: camera PASS 11/REVIEW 15/FAIL 0; body fit REVIEW 2/FAIL 0
 
 ## Active job
 
 - Sapiens2 PID 373049, 시작 2026-08-11 18:35 KST, output `outputs/sapiens2_target_only_full`
 - autonomous supervisor PID 537033, 시작 2026-08-11 20:17 KST, output `outputs/runtime/autonomous_generation`
-- 현재 SAM child: `squat_0001/cam1` Mode B full 실행 중
-- Sapiens 완료 camera output 11,677/65,430 crop, 16/78 camera
-- Sapiens recent-chunk throughput 0.22073 crop/s; 병렬 effective 0.21034 crop/s
-- GPU: A100 80GB, 100%, 약 62 GiB/342 W; OOM 없음
+- 현재 SAM child: `pushup_0001/cam1` Mode B full 실행 중
+- Sapiens durable 18/78 camera, current partial 포함 12,951/65,430 crop
+- Sapiens recent-chunk throughput 0.20622 crop/s; 병렬 effective 0.21208 crop/s
+- GPU: A100 80GB, active initialization 약 39 GiB/100%; observed combined peak 70,359 MiB, OOM 없음
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
 - handoff monitor PID 608232: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
   `updated_at_utc` 증가와 exact active/resume command/stage count 보존 확인 완료
@@ -49,26 +49,28 @@ Public-safe Sapiens command 형태:
 ## Completed work
 
 - full selector: 65,595 frame, target 65,430, ambiguity 139, `NO_TARGET` 26, identity/integrity failure 0
-- Sapiens2 pose: 11,677 accepted target crops; `barbellrow_0001` 1,443/1,443와
-  `pushup_0004/cam1` 509/509, schema/finite PASS
+- Sapiens2 pose: complete 18 camera와 current partial 합계 12,951 accepted target crops;
+  `pushup_0004` 3-view 1,527/1,527, schema/finite PASS
 - Phase 7 final: 4 pilot sequence schema PASS/body-fit eligible, NO_GO 0
 - concurrent Mode B 8-frame smoke: mesh/numeric/PTS schema PASS, combined peak 48,525 MiB
 - full Mode B `barbellrow_0000`: 3 camera/1,770 frame, 전 completion check PASS,
   합산 2,960.81초(0.59781 frame/s), combined peak 61,821 MiB
+- full Mode B `squat_0001`: 3 camera/3,801 frame, 전 completion check PASS,
+  합산 6,080.57초(0.62511 frame/s), combined peak 70,359 MiB
 - first body fit: 590 timestamp × 26 canonical joint, finite/NaN contract와 coverage/alignment PASS;
   displacement p95 0.05167 및 camera REVIEW 전파로 `REVIEW_BODY_FIT_QUALITY`
 - Mode C assessor: boundary temporal outlier 중심 84-frame `REVIEW_MODE_C_CANDIDATE`;
-  Mode C 실행/채택 0, Mode B payload 유지
+  `squat_0001`은 후보 0 `PASS_MODE_B_FROZEN`; Mode C 실행/채택 0, Mode B payload 유지
 - private export smoke: REVIEW 1/FAIL 0/INCOMPLETE 0, 34 files, SHA/size mismatch 0,
   `freeze_eligible=true`
-- completed Sapiens 16 camera와 SAM 3 camera의 `run_provenance.json` materialize PASS;
+- completed Sapiens 18 camera와 SAM 6 camera의 `run_provenance.json` materialize PASS;
   model/checkpoint/config/source/selection/tool/exact-resume identity 포함
 
 ## Remaining work
 
-- Sapiens2: 62/78 camera, 53,753 target crops
+- Sapiens2: 60/78 camera, current partial 포함 52,479 target crops
 - Phase 7 이후: `barbellrow_0001` 및 이후 pose-complete sequence
-- SAM full: 3/78 camera PASS, `squat_0001/cam1` RUNNING, full-complete sequence 1/26
+- SAM full: 6/78 camera PASS, `pushup_0001/cam1` RUNNING, full-complete sequence 2/26
 - critical path: pose-complete sequence → Phase 7 gate → Mode B → compact prior → body fit → Mode C candidate QA → export
 
 ## Resume instructions
@@ -107,9 +109,10 @@ Public-safe Sapiens command 형태:
 
 ## Runtime estimates
 
-- Sapiens current recent-chunk rate 0.22073 crop/s, streaming ETA 2026-08-14 16:49 KST
-- deadline margin: Sapiens 전량 기준 약 -3.82 h; 대신 Mode B complete sequence와 deadline snapshot 확보
-- concurrent SAM Mode B first sequence 0.59781 frame/s; standalone expected 20.80 h projection은
+- Sapiens current recent-chunk rate 0.20622 crop/s, streaming ETA 2026-08-14 21:27 KST
+- deadline margin: Sapiens 전량 기준 약 -8.45 h; 대신 Mode B complete sequence와 deadline snapshot 확보
+- concurrent SAM Mode B aggregate 5,571 frame/9,041.38초 = 0.61617 frame/s;
+  standalone expected 20.80 h projection은
   historical baseline이며 Mode C는 약 1.99배라 full default 금지
 - live 병렬 ETA와 deadline margin은 `.runtime/handoff_state.json`에서 확인한다.
 
@@ -124,4 +127,4 @@ Public-safe Sapiens command 형태:
 
 ## Last updated
 
-- 2026-08-11 21:12 KST
+- 2026-08-11 22:50 KST
