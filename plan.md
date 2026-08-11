@@ -21,6 +21,8 @@
 - Fit3D exhaustive tolerance/ablation은 final private dataset critical path를 방해하면 freeze 이후로 이동
 - persistent handoff: `HANDOFF.md` + ignored `.runtime/handoff_state.json` 30초 atomic checkpoint;
   completion metadata/schema PASS item만 skip하고 incomplete/corrupt item만 resume
+- expensive camera output별 atomic `run_provenance.json`: checkpoint/config/source/selection/tool/command
+  identity를 보존하며 기존 PASS output에는 재추론 없이 sidecar만 materialize
 
 ## 현재 Gate
 

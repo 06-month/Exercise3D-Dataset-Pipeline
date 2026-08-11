@@ -12,6 +12,8 @@ payload는 공개하지 않습니다. 저장소에는 재현 가능한 코드, �
 [`HANDOFF.md`](HANDOFF.md)를 읽습니다. 실시간 private command/PID/progress는 Git에서 제외된
 `.runtime/handoff_state.json`에 30초 간격으로 atomic 저장되며, 살아 있는 inference를 중복
 실행하지 않는 startup 순서는 [`AGENTS.md`](AGENTS.md)에 고정했습니다.
+완료된 expensive camera output에는 checkpoint/config/source/selection/tool/command identity를
+담은 `run_provenance.json`을 별도 atomic sidecar로 남깁니다.
 
 ## 프로젝트 목표
 

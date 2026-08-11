@@ -251,6 +251,10 @@ Mode C는 여전히 selective evidence가 없는 전체 기본값으로 사용�
   GPU와 downstream counts가 들어간다. detached monitor PID 575526과 multi-cycle timestamp 전진을 확인했다.
 - supervisor resume는 PASS/REVIEW row만 durable complete로 불러오고 incomplete row를 retry한다.
   handoff/resume regression을 포함한 전체 44개 unit test PASS다.
+- 완료 camera마다 별도 `run_provenance.json`을 atomic materialize한다. Sapiens 15개와 SAM 1개
+  기존 PASS output에 inference 재실행 없이 sidecar를 생성했으며 model/checkpoint identity,
+  batch/chunk/mode, source/selection digest, camera/timing version, tool commit/SHA와 exact resume
+  command를 기록했다. Live monitor가 새 completion을 30초마다 추가 materialize한다.
 
 ## 2026-08-09 — 초기 synchronization / derivative 구축 기록 이관
 

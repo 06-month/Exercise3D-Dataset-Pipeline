@@ -27,7 +27,7 @@
 - pre-concurrency steady throughput: 0.23323 crop/s; 병렬 steady throughput은 첫 full SAM camera 후 재계산
 - GPU: A100 80GB, cam1 합산 peak 61,821 MiB/100%; OOM 없음
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
-- handoff monitor PID 575526: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
+- handoff monitor PID 589008: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
   `updated_at_utc` 증가와 exact active/resume command/stage count 보존 확인 완료
 
 Public-safe Sapiens command 형태:
@@ -51,6 +51,8 @@ Public-safe Sapiens command 형태:
 - concurrent Mode B 8-frame smoke: mesh/numeric/PTS schema PASS, combined peak 48,525 MiB
 - full Mode B `barbellrow_0000/cam1`: 590/590, 전 completion check PASS,
   970.94초(0.6077 frame/s), combined peak 61,821 MiB
+- completed Sapiens 15 camera와 SAM 1 camera의 `run_provenance.json` materialize PASS;
+  model/checkpoint/config/source/selection/tool/exact-resume identity 포함
 
 ## Remaining work
 
@@ -106,4 +108,4 @@ Public-safe Sapiens command 형태:
 
 ## Last updated
 
-- 2026-08-11 20:40 KST
+- 2026-08-11 20:45 KST

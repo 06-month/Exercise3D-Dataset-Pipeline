@@ -14,6 +14,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+try:
+    from tools.materialize_inference_provenance import materialize_all
+except ModuleNotFoundError:
+    from materialize_inference_provenance import materialize_all
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PROCESS_MARKERS = (
@@ -270,6 +275,8 @@ def build_state(args: argparse.Namespace) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dataset-root", type=Path, required=True)
+    parser.add_argument("--selection-root", type=Path, required=True)
     parser.add_argument("--pose-root", type=Path, required=True)
     parser.add_argument("--triangulation-root", type=Path, required=True)
     parser.add_argument("--sam-output-root", type=Path, required=True)
@@ -293,6 +300,16 @@ def main() -> int:
                 if marker in process["command"]:
                     resume_commands[marker] = process["command"]
         state["resume_commands"] = resume_commands
+        atomic_json(output, state)
+        provenance_args = argparse.Namespace(
+            dataset_root=args.dataset_root,
+            selection_root=args.selection_root,
+            pose_root=args.pose_root,
+            sam_output_root=args.sam_output_root,
+            handoff_state=output,
+            sequences=[item for item in args.sequences.split(",") if item],
+        )
+        state["provenance_materialized"] = materialize_all(provenance_args)
         atomic_json(output, state)
         if args.once:
             return 0
