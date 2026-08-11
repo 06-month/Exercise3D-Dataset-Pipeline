@@ -2,8 +2,8 @@
 
 ## 상태와 역할
 
-상태는 `IMPLEMENTED_WAITING_FULL_INPUT`이다. 구현과 synthetic test는 완료했지만 full SAM Mode B
-prior가 아직 생성되지 않았으므로 실제 sequence acceptance를 선행해 선언하지 않는다.
+상태는 `IN_PROGRESS_REVIEW`다. 구현과 synthetic test에 더해 첫 full SAM Mode B sequence의
+실제 fit을 완료했으며, 나머지는 Mode B input이 생성되는 순서대로 streaming한다.
 
 Phase 9의 목표는 SAM 출력을 복사해 GT로 부르는 것이 아니다. timestamp-aware 3-view geometry를
 가장 강한 observation으로 유지하면서 MHR body/pose와 시간 연속성을 약한 prior로 결합한다.
@@ -47,6 +47,20 @@ hip/arm length를 이 reference로 나누며 MHR beta/shape parameter와 별도 
 - camera가 REVIEW 또는 observation-conditioned이면 body fit도 REVIEW 유지
 
 Full input이 생기면 sequence 단위로 위 gate를 실행하고 FAIL을 숨기지 않는다.
+
+## First full-input result
+
+`barbellrow_0000`의 590 reference timestamp × 26 canonical joint를 처리했다.
+
+- final joint coverage 1.0, SAM alignment success 1.0, prior-only fraction 0
+- median bone-length CV 0.01738
+- valid finite/invalid NaN contract PASS
+- normalized observation displacement p95 0.05167
+- result: `REVIEW_BODY_FIT_QUALITY`, FAIL 0
+
+Displacement p95가 사전 동결 REVIEW 경계 0.05를 소폭 넘고 upstream camera도 REVIEW이므로
+자동 PASS로 승격하지 않았다. Mode C assessor가 고른 84 frame은 주로 sequence 경계의 temporal
+outlier이며, current Mode B output을 교체할 품질 증거로 사용하지 않는다.
 
 ## 사전 동결 quality gate
 

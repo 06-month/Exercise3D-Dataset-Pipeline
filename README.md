@@ -74,9 +74,9 @@ camera calibration을 구분합니다.
 | 6-1A. Primary Target Selection | DONE | 9,732 frame, identity switch 0, ambiguity 7, crop 50.37% 감소 |
 | 6-2. Target-only Runtime Gate | RUNNING | full selector `GO_FULL_DATASET`; 78 view/65,595 frame, target 65,430, identity/integrity failure 0; 5B batch 16 실행 중 |
 | 7. Timestamp-aware Triangulation | RUNNING | pilot 4/4 final schema PASS; pose-complete sequence CPU streaming, NO_GO에만 held-out recovery |
-| 8. SAM Body Runtime Feasibility | FULL RUNNING/REVIEW | 22.387 GiB integrity PASS, A/B/C 6-run 완료; Mode B sequence streaming, 첫 full camera completion PASS |
-| 9. Sequence Body Fitting | IMPLEMENTED/WAITING INPUT | geometry-dominant staged fit, MHR exact replay와 uncertainty schema 구현 |
-| 10–13 | IMPLEMENTED PARTIAL/WAITING INPUT | S0와 versioned private export/SHA 검증 구현; full input 후 QC/freeze gate 실행 |
+| 8. SAM Body Runtime Feasibility | FULL RUNNING/REVIEW | 22.387 GiB integrity PASS, A/B/C 6-run 완료; 첫 Mode B sequence 1,770/1,770 PASS |
+| 9. Sequence Body Fitting | RUNNING/REVIEW | 첫 sequence 590×26 완료; schema PASS, camera/displacement REVIEW 전파 |
+| 10–13 | IMPLEMENTED PARTIAL/SMOKE PASS | 첫 private export 34 files, SHA/size mismatch 0; deadline build 입력 누적 중 |
 
 `pushup_0003`은 Phase 5.1에서 observation, initialization, objective와 gate를 그대로 두고
 Stage 2 budget만 300에서 600으로 확장했습니다. 실제 322 evaluations에서 `xtol`로 수렴했고,
@@ -105,6 +105,12 @@ SAM compact prior는 MHR pose/shape/hand/expression/joint/model parameter와 sou
 Phase 9는 triangulated geometry를 dominant observation으로 두는 staged fit만 허용합니다. 최종 private
 export는 source RGB를 포함하지 않고 stage payload의 byte equality와 SHA-256, PASS/REVIEW/FAIL/
 INCOMPLETE 상태를 versioned manifest에 기록합니다.
+
+첫 end-to-end `barbellrow_0000`은 Mode B 3-view 1,770 frame과 body fit 590 timestamp × 26 joint를
+완료했습니다. Numeric/mesh/provenance와 finite/NaN contract는 PASS했지만 camera REVIEW와 normalized
+geometry displacement p95 0.05167을 그대로 전파해 sequence는 `REVIEW_BODY_FIT_QUALITY`입니다.
+Complete sequence 하나만 사용한 private export smoke는 34 files의 size/SHA-256 불일치 없이
+freeze-eligible이었으며, REVIEW를 PASS로 승격하지 않았습니다.
 
 현재 장기 supervisor는 실행 중인 5B PID를 기다리고, 불완전 종료 시 동일 selection-bound 설정으로
 resume한 뒤 Phase 7 → SAM Mode B → prior consolidation → body fit → private export를 sequence별로

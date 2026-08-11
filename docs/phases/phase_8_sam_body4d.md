@@ -2,9 +2,9 @@
 
 ## 현재 상태와 실행 경계
 
-`PILOT_COMPLETE_REVIEW`. Gated checkpoint access, 22.387 GiB payload integrity, primary-target
-adapter, control/severe Mode A/B/C pilot는 완료했다. Full Sapiens2는 실행 중이며 full SAM은
-GPU contention을 피하기 위해 그 뒤에 Mode B로 실행한다.
+`FULL_IN_PROGRESS_REVIEW`. Gated checkpoint access, 22.387 GiB payload integrity, primary-target
+adapter, control/severe Mode A/B/C pilot를 완료했고, pose-ready sequence는 Sapiens2와 동시에
+Mode B로 처리한다. 동시 실행은 first full sequence에서 OOM과 output corruption 없이 통과했다.
 
 검증한 upstream은 다음과 같다.
 
@@ -98,6 +98,22 @@ Output sanity 결과는 다음과 같다.
 
 따라서 full run 기본 후보는 Mode B다. Mode C를 선택적으로 사용하려면 official content-completion
 trigger가 실제 발생하는 별도 짧은 case와 downstream residual 개선 근거를 먼저 확보해야 한다.
+
+## First full Mode B sequence
+
+`barbellrow_0000`의 primary target 한 명만 3-view 전수 처리했다.
+
+- cam1/cam2/cam3: 각 590 frame, mesh/numeric/PTS/provenance completion PASS
+- elapsed: 970.94 / 979.27 / 1,010.60초
+- aggregate: 1,770 frame / 2,960.81초 = 0.59781 frame/s
+- concurrent peak: camera별 combined 61,821 MiB, OOM 0
+- GPU mean 약 96.2%, power mean 약 339 W
+- compact prior accepted/output 1,770/1,770, schema·finite mismatch 0
+
+이 병렬 rate는 standalone pilot보다 느리지만 Sapiens2의 첫 camera 구간 slowdown은 약 12.6%였다.
+따라서 deadline 전 end-to-end complete sequence 수를 늘리는 현재 streaming policy를 유지한다.
+Mode C assessor는 84개 boundary temporal-outlier frame을 REVIEW 후보로 기록했지만 missing/nonfinite,
+alignment failure 또는 content-completion evidence가 없어 Mode C를 실행하거나 Mode B를 교체하지 않았다.
 
 ## 전체 runtime projection과 8월 15일 판정
 

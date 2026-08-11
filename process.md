@@ -266,6 +266,26 @@ Mode C는 여전히 selective evidence가 없는 전체 기본값으로 사용�
   시작했다. 2026-08-14 13:00 KST에 별도 build ID로 export하며 manifest가 이미 있으면 duplicate하지
   않는다. Export exit 2도 expected incomplete snapshot이면 manifest/status를 보존하고 generation은 계속한다.
 
+### First end-to-end sequence와 private export smoke
+
+- `barbellrow_0000` Mode B 3 camera를 모두 완료했다. 각 590 frame이며 elapsed는
+  970.94/979.27/1,010.60초, aggregate는 1,770 frame/2,960.81초 = 0.59781 frame/s다.
+- camera별 mesh/numeric/PTS/provenance count가 exact이고 nonfinite/missing 0, combined peak
+  61,821 MiB, mean GPU utilization 약 96.2%, mean power 약 339 W였다.
+- consolidated SAM prior는 output/accepted 1,770/1,770과 inference provenance dependency를 통과했다.
+- sequence body fit은 590 timestamp × 26 joint, coverage/alignment 1.0, prior-only 0,
+  median bone-length CV 0.01738, finite/NaN contract PASS다.
+- 사전 동결 displacement REVIEW 경계 0.05 대비 p95 0.05167이고 camera REVIEW도 전파되어
+  `REVIEW_BODY_FIT_QUALITY`로 보존했다. FAIL은 없다.
+- Mode C assessor는 84개 reference frame을 `REVIEW_MODE_C_CANDIDATE`로 기록했다. Missing/nonfinite와
+  alignment outlier는 0이고 주로 sequence boundary temporal outlier라, Sapiens2+Mode B critical path를
+  중단하지 않고 Mode C 실행/채택 0으로 Mode B를 유지했다.
+- complete sequence 하나만 사용한 private export smoke는 REVIEW 1/FAIL 0/INCOMPLETE 0,
+  34 files, payload 28,960,929 bytes, 누락·size·SHA-256 mismatch 0, `freeze_eligible=true`였다.
+- 2026-08-11 21:10 KST에는 Sapiens2 16/78 camera, 11,677/65,430 crop까지 완료했다.
+  recent 0.22073 crop/s projection은 2026-08-14 16:49 KST로 deadline보다 약 3.82시간 늦다.
+  `squat_0001/cam1` Mode B를 다음 streaming input으로 시작했고 기존 두 job은 중단하지 않았다.
+
 ## 2026-08-09 — 초기 synchronization / derivative 구축 기록 이관
 
 ### 수행

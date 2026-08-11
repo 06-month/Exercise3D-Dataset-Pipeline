@@ -7,14 +7,15 @@
 
 - primary objective: correctness·provenance·identity consistency를 유지하면서 deadline까지
   end-to-end로 완결되고 freeze 가능한 sequence 수를 최대화
-- 2026-08-11 20:35 KST 기준 remaining wall-clock 64.42 h
+- 2026-08-11 21:12 KST 기준 remaining wall-clock 63.80 h
 - 최신 target-only Sapiens2 projection 79.09 GPUh와 SAM Mode B 16.35 h는 한 A100에서
   deadline 전 전량 순차 완료가 불가능하므로, sequence-complete streaming으로 변경
 - 이미 완료된 4개 pilot sequence output은 검증 후 재사용하고 재추론하지 않음
 - GPU scheduling: Sapiens2-5B는 계속 실행하고, pose-complete sequence의 Mode B를 겹쳐
   end-to-end 완결 sequence를 확보한다. 첫 full camera 병렬 peak 61,821 MiB와 completion PASS 확인
-- first partial-chunk projection: recent Sapiens 0.22583 crop/s, 전량 ETA 2026-08-14 15:14 KST;
-  약 -2.23 h deadline margin을 end-to-end complete sequence 확보와 명시적 INCOMPLETE provenance로 관리
+- current projection: Sapiens 11,677/65,430 crop, recent 0.22073 crop/s,
+  전량 ETA 2026-08-14 16:49 KST; 약 -3.82 h deadline margin을 end-to-end complete sequence 확보와
+  명시적 INCOMPLETE provenance로 관리
 - SAM policy: Mode B default, Mode C는 실제 failure/occlusion escalation evidence가 있는 경우만 REVIEW
 - long-run supervision: current 5B 종료 감시, 불완전 camera selection-bound resume, Phase 7→Mode B→
   consolidation→body fit→versioned private export를 sequence별 자동 진행
@@ -27,6 +28,8 @@
   identity를 보존하며 기존 PASS output에는 재추론 없이 sidecar만 materialize
 - deadline sentinel: 2026-08-14 13:00 KST에 별도 immutable build ID로 private snapshot/export를
   실행하고 PASS/REVIEW/FAIL/INCOMPLETE를 고정한 뒤 generation은 중단 없이 계속
+- first end-to-end gate: `barbellrow_0000` Mode B 1,770/1,770, body fit 590×26,
+  export checksum/schema PASS; camera/displacement uncertainty를 숨기지 않고 sequence REVIEW 유지
 
 ## 현재 Gate
 
@@ -224,8 +227,8 @@
 
 ## Phase 8 — SAM 3D Body / SAM-Body4D Human Prior
 
-- 상태: `PILOT_COMPLETE_REVIEW`; Mode B full policy, exact-resume runner와 numeric prior schema 동결,
-  GPU scheduling 대기
+- 상태: `FULL_IN_PROGRESS_REVIEW`; Mode B full policy와 exact-resume/numeric prior schema 동결,
+  Sapiens2와 pose-ready sequence 단위 병렬 실행
 - 목적: pretrained model로 temporal MHR/body prior 생성
 - 입력: RGB reference와 Phase 6/7 evidence
 - 출력: temporal body prior, uncertainty, modal/amodal 구분
@@ -256,10 +259,12 @@
   또는 content-completion 호출, geometry displacement 증가 ≤5%를 모두 검증한 뒤에만 채택
 - full Mode B/body fit 직후 candidate assessor를 자동 실행하되 Mode C 자체는 비교 전 실행/채택하지
   않으며, candidate 또는 `PASS_MODE_B_FROZEN`을 final private manifest에 포함
+- first full result: `barbellrow_0000` 3 camera/1,770 frame PASS, 합산 2,960.81초
+  (0.59781 frame/s), combined peak 61,821 MiB. mesh/numeric/provenance 수량 exact
 
 ## Phase 9 — Sequence-Level Body Fitting
 
-- 상태: `IMPLEMENTED_WAITING_FULL_INPUT`
+- 상태: `IN_PROGRESS_REVIEW`; first full-input sequence 완료, 나머지는 Mode B dependency 대기/streaming
 - 목적: multi-view geometry, time, body constraint를 결합한 최종 body parameter
 - 입력: 2D/3D joints, human prior, silhouettes, contacts
 - 출력: subject shape, frame pose, global orientation/translation, optional global scale와 residual
@@ -271,6 +276,9 @@
   `2.68e-7 m`, mesh delta `7.15e-7 m`로 numeric contract 검증
 - 사전 동결 gate: coverage/alignment/geometry displacement/prior-only/bone CV를 scale-normalized
   PASS/REVIEW/FAIL로 분리하고 camera REVIEW 전파
+- first result: `barbellrow_0000` 590×26, coverage/alignment 1.0, prior-only 0,
+  median bone CV 0.01738. displacement p95 0.05167와 camera REVIEW 때문에
+  `REVIEW_BODY_FIT_QUALITY`; finite/NaN schema FAIL 0
 - 다음 gate: subject-level shape consistency
 
 ## Phase 10 — Subject-Level Shape / Anthropometric Descriptor
@@ -309,7 +317,7 @@
 
 ## Phase 13 — Final Dataset Freeze
 
-- 상태: `EXPORT_IMPLEMENTED_WAITING_FULL_INPUT`
+- 상태: `EXPORT_IMPLEMENTED_SMOKE_PASS`; deadline build 입력을 sequence 단위로 누적 중
 - 목적: immutable final schema, split, provenance와 release policy 확정
 - 입력: Phase 5–12 승인 결과
 - 출력: camera/image references/keypoints/body/quality/metadata schema와 dataset card
@@ -317,6 +325,8 @@
 - Acceptance: schema validation, no private payload in Git, documented access/license/citation, reproducible build ID
 - 구현: versioned private build, byte-exact copy/SHA-256, PASS/REVIEW/FAIL/INCOMPLETE 보존과
   source inventory/frame/PTS/camera/temporal/identity/2D/3D/body provenance 검증
+- first smoke: complete `barbellrow_0000`만 사용해 REVIEW 1/FAIL 0/INCOMPLETE 0,
+  34 files, payload 28,960,929 bytes, SHA/size mismatch 0, freeze-eligible 확인
 - 다음 gate: downstream 연구 사용 승인
 
 ## Phase별 Git Definition of Done
