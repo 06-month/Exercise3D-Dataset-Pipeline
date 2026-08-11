@@ -3,8 +3,8 @@
 ## 현재 상태와 실행 경계
 
 `PILOT_COMPLETE_REVIEW`. Gated checkpoint access, 22.387 GiB payload integrity, primary-target
-adapter, control/severe Mode A/B/C pilot는 완료했다. Full 65,595-frame SAM inference와 Sapiens2
-inference는 시작하지 않았다.
+adapter, control/severe Mode A/B/C pilot는 완료했다. Full Sapiens2는 실행 중이며 full SAM은
+GPU contention을 피하기 위해 그 뒤에 Mode B로 실행한다.
 
 검증한 upstream은 다음과 같다.
 
@@ -122,12 +122,12 @@ Expected prevalence에는 Phase 6 네 sequence/12-camera pilot의 conservative o
 남아 download 이후 orchestration, Sapiens/SAM validation, triangulation/body fitting, QC, 재시도와
 dataset freeze 시간을 보장할 수 없다. Pessimistic은 계산만으로 마감과 사실상 같다.
 
-최종 판정은 다음과 같다.
+이 수치는 이후 확정된 2026-08-14 13:00 KST deadline보다 느슨한 과거 가정에서 만든 projection이다.
+현재 운영 판정은 다음과 같다.
 
-- 2026-08-15 00:00 UTC freeze guarantee: `NO_GO`
-- 2026-08-15 end-of-day: `DEADLINE_AT_RISK`, uninterrupted expected case에서만 조건부 가능
-- SAM full inference gate: `REVIEW_SAM_REFINER_POLICY`
-- Full Sapiens2/SAM dataset inference: `HOLD`, 별도 사용자 승인 전 시작 금지
+- 2026-08-14 13:00 KST 전체 Sapiens2+SAM 순차 freeze: `NO_GO`
+- SAM full inference mode: Mode B 동결, Mode C selective fallback만 허용
+- scheduling: Sapiens2가 GPU를 전용한 뒤 camera 단위 resumable Mode B를 자율 실행
 
 이번 판정은 accuracy-first 정책을 유지하며, 5B teacher·official flip-test·detector·input resolution·
 keypoint convention을 변경하지 않는다.
@@ -149,3 +149,9 @@ python tools/benchmark_sam_body4d.py \
 
 Mode A에는 `--sam-3d-body-root`, Mode B/C에는 `--sam-body4d-root`만 필요하다. Runtime summary는
 여섯 PASS row와 measured prevalence가 모두 있어야 projection을 생성한다.
+
+Full runner는 [`tools/run_sam_body4d_full.py`](../../tools/run_sam_body4d_full.py)다. Mesh만으로
+body fitting을 수행하지 않도록 upstream PLY 저장 직전에 MHR pose/shape/scale/joint numeric prior를
+별도 compact NPZ로 보존한다. Target source frame index와 selector uncertainty도 함께 남기며,
+frame/mesh/numeric/provenance count가 모두 일치해야 camera resume PASS다. 이 payload는 private
+output이며 public Git에는 포함하지 않는다.

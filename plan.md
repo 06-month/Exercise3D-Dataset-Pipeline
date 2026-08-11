@@ -150,7 +150,7 @@
 
 ## Phase 6 — High-Quality 2D Pose Observation
 
-- 상태: `IN_PROGRESS` — full DETR/selector 실행 중, 이후 resumable 5B target-only 실행
+- 상태: `IN_PROGRESS` — full DETR/selector gate 완료, resumable 5B target-only 실행 중
 - 목적: 모든 camera/frame의 canonical 2D joint와 confidence 생성
 - 입력: synchronized frame reference, Phase 5 camera status
 - 출력: teacher-native keypoints, canonical mapping, confidence, optional teacher disagreement
@@ -182,14 +182,16 @@
 - target-only batch: 1/2/4/8/12/16 모두 numerical equivalence PASS. 일반 실행 권장은
   plateau의 최소 batch 4이나, deadline run은 동일한 출력과 안전한 VRAM이 확인된 raw-fastest
   batch 16을 사용
-- runtime projection: 65,595 frame, 약 65,548 target crop, 79.09 GPU-hours; all-person
-  157.38 GPU-hours 대비 약 78.30 GPU-hours 절감
+- full gate: 78/78 camera, 65,595 frame, candidate 120,586, target crop 65,430,
+  ambiguity 139, `NO_TARGET` 26, identity/F-B/integrity failure 0
+- runtime projection: 기존 pilot 9,725 pose를 lossless resume하여 새 inference 55,705 crops.
+  cached-detector 보수적 환산 약 66.1 GPU-hours이며 실제 full wall-clock으로 계속 갱신
 - 판정: target-selection acceptance는 `GO_FULL_DATASET`; autonomous deadline 지침에 따라
-  full 실행 critical path 진입
+  batch 16 full 실행 critical path 진입
 
 ## Phase 7 — Timestamp-Aware Multi-view Triangulation
 
-- 상태: `PILOT_COMPLETE_CAMERA_RECOVERY_REQUIRED`
+- 상태: `PILOT_RECOVERY_COMPLETE_REVIEW`; full pose 완료 sequence 단위 실행 대기
 - 목적: Phase 2 timing correction과 Phase 5 camera를 사용한 robust 3D joints
 - 입력: refined camera, temporal metadata, Phase 6 joints
 - 출력: 3D joints, reprojection/ray uncertainty, 2-view fallback provenance
@@ -200,11 +202,14 @@
   benchpress 7.91/97.84 px
 - gate: barbellrow/benchpress REVIEW, squat/pushup `NO_GO_TRIANGULATION`; NO_GO proposal은
   보존하되 body fitting/export에서 제외
-- 다음 gate: Phase 5 camera를 덮어쓰지 않는 recovery candidate와 held-out-frame 검증
+- recovery: 별도 observation-conditioned root와 20% held-out gate에서 squat/pushup 모두
+  NO_GO 해제. all-frame canonical median/p90 5.71/18.93, 8.11/96.04 px
+- provenance: 독립 calibration/GT가 아니므로 둘 다 REVIEW 유지, 원 Phase 5 output 보존
+- 다음 gate: full pose 완료 sequence의 원 camera consistency 검사 후 NO_GO에만 동일 recovery 적용
 
 ## Phase 8 — SAM 3D Body / SAM-Body4D Human Prior
 
-- 상태: `PILOT_COMPLETE_REVIEW`; Mode B full policy 동결, GPU scheduling 대기
+- 상태: `PILOT_COMPLETE_REVIEW`; Mode B full policy와 camera-resume runner 동결, GPU scheduling 대기
 - 목적: pretrained model로 temporal MHR/body prior 생성
 - 입력: RGB reference와 Phase 6/7 evidence
 - 출력: temporal body prior, uncertainty, modal/amodal 구분
@@ -225,6 +230,8 @@
   한 GPU 순차 합계 95.43/99.88/111.71 h
 - deadline gate: 2026-08-14 13:00 KST까지 Sapiens2와 순차 전량은 불가능하므로
   sequence-complete output 최대화 및 미완료 provenance 보존
+- full output contract: mesh뿐 아니라 MHR pose/shape/scale/joint numeric prior와 target source-index,
+  ambiguity/occlusion provenance를 frame별로 저장하고 camera 단위 exact completeness를 검사
 - 다음 gate: Mode B를 full 기본 후보로 유지하고 실제 completion trigger case에서 Mode C 효용 검증;
   Mode C는 selective escalation evidence가 있을 때만 사용
 

@@ -24,6 +24,23 @@ import numpy as np
 MODE_A = "A"
 MODE_B = "B"
 MODE_C = "C"
+BODY_PRIOR_KEYS = (
+    "bbox",
+    "focal_length",
+    "pred_keypoints_3d",
+    "pred_keypoints_2d",
+    "pred_cam_t",
+    "pred_pose_raw",
+    "global_rot",
+    "body_pose_params",
+    "hand_pose_params",
+    "scale_params",
+    "shape_params",
+    "expr_params",
+    "pred_joint_coords",
+    "pred_global_rots",
+    "mhr_model_params",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -73,6 +90,8 @@ def load_target_input(path: Path) -> dict[str, np.ndarray]:
         if missing:
             raise RuntimeError(f"target input is missing fields: {sorted(missing)}")
         result = {key: archive[key].copy() for key in required}
+        if "source_frame_names" in archive.files:
+            result["source_frame_names"] = archive["source_frame_names"].copy()
     frame_count = len(result["frame_names"])
     if result["target_bboxes_xyxy"].shape != (frame_count, 4):
         raise RuntimeError("target input must contain exactly one bbox slot per frame")
@@ -100,6 +119,40 @@ def numeric_payload(person: dict[str, Any]) -> dict[str, np.ndarray]:
             raise RuntimeError(f"non-finite SAM 3D Body output: {key}")
         payload[key] = array
     return payload
+
+
+def atomic_savez(path: Path, **arrays: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + f".{os.getpid()}.tmp.npz")
+    np.savez_compressed(temporary, **arrays)
+    os.replace(temporary, path)
+
+
+def save_body_prior_numeric(
+    outputs: list[dict[str, Any]] | None,
+    image_path: str,
+    object_ids: list[Any] | None,
+    output_root: Path,
+) -> tuple[int, set[str]]:
+    """Persist compact MHR parameters before upstream converts them to PLY."""
+    if outputs is None:
+        return 0, set()
+    if len(outputs) > 1:
+        raise RuntimeError("primary-target invariant violated while saving MHR prior")
+    saved = 0
+    keys: set[str] = set()
+    stem = Path(image_path).stem
+    for index, person in enumerate(outputs):
+        object_id = int(object_ids[index]) if object_ids else index + 1
+        numeric = numeric_payload(person)
+        payload = {key: numeric[key] for key in BODY_PRIOR_KEYS if key in numeric}
+        if not payload:
+            raise RuntimeError(f"no numeric MHR prior fields at frame {stem}")
+        payload["object_id"] = np.asarray(object_id, dtype=np.int32)
+        atomic_savez(output_root / str(object_id) / f"{stem}.npz", **payload)
+        saved += 1
+        keys.update(key for key in payload if key != "object_id")
+    return saved, keys
 
 
 def run_mode_a(args: argparse.Namespace, target: dict[str, np.ndarray]) -> dict[str, Any]:
@@ -279,6 +332,28 @@ def run_mode_body4d(args: argparse.Namespace, target: dict[str, np.ndarray]) -> 
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     app.OUTPUT_DIR = str(args.output_dir)
+    prior_state: dict[str, Any] = {"files": 0, "keys": set()}
+    original_mesh_saver = getattr(module, "save_mesh_results", None)
+    if original_mesh_saver is not None:
+        def save_mesh_and_prior(*call_args: Any, **call_kwargs: Any) -> Any:
+            outputs = call_kwargs.get("outputs", call_args[0] if call_args else None)
+            image_path = call_kwargs.get(
+                "image_path", call_args[4] if len(call_args) > 4 else ""
+            )
+            object_ids = call_kwargs.get(
+                "id_current", call_args[5] if len(call_args) > 5 else None
+            )
+            saved, keys = save_body_prior_numeric(
+                outputs,
+                str(image_path),
+                object_ids,
+                args.output_dir / "mhr_numeric",
+            )
+            prior_state["files"] += saved
+            prior_state["keys"].update(keys)
+            return original_mesh_saver(*call_args, **call_kwargs)
+
+        module.save_mesh_results = save_mesh_and_prior
     image_paths = [str(args.input_frames / str(name)) for name in target["frame_names"]]
     from PIL import Image
 
@@ -338,6 +413,8 @@ def run_mode_body4d(args: argparse.Namespace, target: dict[str, np.ndarray]) -> 
         "content_completion_calls": rgb_timer.calls if rgb_timer else 0,
         "depth_inference_calls": depth_timer.calls if depth_timer else 0,
         "mesh_file_count": mesh_count,
+        "numeric_prior_file_count": int(prior_state["files"]),
+        "numeric_prior_keys": sorted(prior_state["keys"]),
         "output_bytes": directory_size(args.output_dir),
     }
 
@@ -351,6 +428,10 @@ def main() -> int:
         raise RuntimeError("target input frame names do not match clip images")
     if not len(frame_names):
         raise RuntimeError("empty target input")
+    atomic_savez(
+        args.output_dir / "target_provenance.npz",
+        **{key: value for key, value in target.items()},
+    )
     started = time.perf_counter()
     profile = run_mode_a(args, target) if args.mode == MODE_A else run_mode_body4d(args, target)
     profile["elapsed_runner_seconds"] = time.perf_counter() - started

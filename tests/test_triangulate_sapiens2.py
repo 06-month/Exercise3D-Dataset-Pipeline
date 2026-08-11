@@ -90,6 +90,10 @@ class TriangulateSapiens2Test(unittest.TestCase):
             pose_camera_consistency_status(21.0, 50.0, "PASS", 10.0),
             "NO_GO_TRIANGULATION",
         )
+        self.assertEqual(
+            pose_camera_consistency_status(1.0, 2.0, "FAIL", 10.0),
+            "NO_GO_TRIANGULATION",
+        )
 
 
 if __name__ == "__main__":

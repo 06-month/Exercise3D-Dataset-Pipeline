@@ -15,7 +15,12 @@ from tools.benchmark_sam_body4d import (
     prepare_target_input,
     required_checkpoint_components,
 )
-from tools.sam_body_primary_target_runner import load_target_input, run_mode_body4d
+from tools.sam_body_primary_target_runner import (
+    load_target_input,
+    run_mode_body4d,
+    save_body_prior_numeric,
+)
+from tools.run_sam_body4d_full import completion_status
 from tools.summarize_sam_body_runtime import compute_pass_summary
 from tools.summarize_sam_body_runtime import read_rows
 
@@ -245,6 +250,60 @@ completion:
             np.testing.assert_allclose(
                 seeded[0], np.asarray([[0.1, 0.1, 0.9, 0.9]], dtype=np.float32)
             )
+
+    def test_compact_mhr_prior_excludes_mesh_and_is_finite(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            outputs = [{
+                "body_pose_params": np.arange(6, dtype=np.float32),
+                "shape_params": np.ones(4, dtype=np.float32),
+                "pred_keypoints_3d": np.zeros((3, 3), dtype=np.float32),
+                "pred_vertices": np.zeros((18439, 3), dtype=np.float32),
+            }]
+
+            count, keys = save_body_prior_numeric(
+                outputs, "00000007.jpg", [1], root
+            )
+
+            self.assertEqual(count, 1)
+            self.assertIn("body_pose_params", keys)
+            self.assertNotIn("pred_vertices", keys)
+            with np.load(root / "1" / "00000007.npz", allow_pickle=False) as payload:
+                self.assertEqual(int(payload["object_id"]), 1)
+                self.assertIn("shape_params", payload.files)
+                self.assertNotIn("pred_vertices", payload.files)
+
+    def test_full_resume_requires_mesh_numeric_and_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            private = root / "mode_b_private_output"
+            mesh = private / "mesh_4d_individual" / "1"
+            numeric = private / "mhr_numeric" / "1"
+            mesh.mkdir(parents=True)
+            numeric.mkdir(parents=True)
+            (root / "sam_body_benchmark.csv").write_text(
+                "status,frames_processed,elapsed_wall_seconds,peak_nvidia_vram_mib,gpu_utilization_mean_pct,power_mean_w\n"
+                "PASS,2,10,30000,20,100\n",
+                encoding="utf-8",
+            )
+            (root / "mode_b_profile.json").write_text(
+                '{"frames_processed":2,"input_frames":2,"target_seed_count":1,"persons_processed":1}',
+                encoding="utf-8",
+            )
+            np.savez_compressed(
+                private / "target_provenance.npz",
+                frame_names=np.asarray(["0.jpg", "1.jpg"]),
+                target_valid=np.asarray([True, False]),
+            )
+            for index in range(2):
+                (mesh / f"{index}.ply").touch()
+                np.savez_compressed(numeric / f"{index}.npz", value=np.asarray(index))
+
+            self.assertEqual(completion_status(root, 2)["status"], "PASS")
+            (numeric / "1.npz").unlink()
+            result = completion_status(root, 2)
+            self.assertEqual(result["status"], "INCOMPLETE")
+            self.assertIn("numeric_prior_complete", result["reason"])
 
     def test_runtime_summary_separates_best_expected_worst(self) -> None:
         rows = [

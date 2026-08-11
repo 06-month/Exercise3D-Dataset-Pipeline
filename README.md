@@ -63,8 +63,8 @@ camera calibration을 구분합니다.
 | 6-0. Sapiens2-5B Environment | DONE | A100 80GB smoke PASS, 308 keypoints, peak 19.986 GiB, 4.517 s/image |
 | 6-1. Sapiens2 Pose Pilot | DONE | all-person baseline 보존, batch 1/2/4/8/12/16 완료 |
 | 6-1A. Primary Target Selection | DONE | 9,732 frame, identity switch 0, ambiguity 7, crop 50.37% 감소 |
-| 6-2. Target-only Runtime Gate | IN PROGRESS | full DETR/selector 실행 중; lossless pilot 9,725 poses 재사용, deadline run은 equivalent batch 16 |
-| 7. Timestamp-aware Triangulation | PILOT REVIEW/NO_GO | schema 4/4 PASS, pose-camera REVIEW 2 / NO_GO 2; camera recovery 필요 |
+| 6-2. Target-only Runtime Gate | RUNNING | full selector `GO_FULL_DATASET`; 78 view/65,595 frame, target 65,430, identity/integrity failure 0; 5B batch 16 실행 중 |
+| 7. Timestamp-aware Triangulation | PILOT RECOVERY/REVIEW | 별도 observation-conditioned held-out recovery 후 NO_GO 0, REVIEW 4; 원 Phase 5 geometry 보존 |
 | 8. SAM Body Runtime Feasibility | PILOT DONE/REVIEW | 22.387 GiB integrity PASS, A/B/C 6-run 완료; Mode B full policy 동결 |
 | 9–13 | TODO | 완료 sequence 단위 fitting/QC/export로 진행 |
 
@@ -235,8 +235,10 @@ Sapiens2 Pose 5B single-image smoke:
 | `tools/validate_target_selection_full.py` | DETR candidate lossless 보존·identity/abstention full gate | ignored aggregate 생성 |
 | `tools/summarize_phase6_1.py` | all-person/target-only 비교, ETA와 acceptance gate 집계 | redacted aggregate 생성 |
 | `tools/triangulate_sapiens2.py` | PTS-aware weighted triangulation과 pose-camera consistency gate | ignored private output 생성 |
+| `tools/recover_cameras_from_pose_observations.py` | NO_GO camera의 별도 observation-conditioned/held-out recovery | ignored private output 생성 |
 | `tools/benchmark_sam_body4d.py` | SAM-Body4D checkpoint preflight와 refiner on/off runtime 측정 | ignored output만 생성 |
-| `tools/sam_body_primary_target_runner.py` | SAM base/4D에 accepted primary bbox 1개만 전달하는 adapter | ignored private output만 생성 |
+| `tools/sam_body_primary_target_runner.py` | primary bbox 1개 adapter와 compact MHR parameter provenance 저장 | ignored private output만 생성 |
+| `tools/run_sam_body4d_full.py` | Mode B camera 단위 resume/completeness orchestration | ignored private output만 생성 |
 | `tools/summarize_sam_body_runtime.py` | A/B/C ratio, occlusion 증가와 best/expected/worst runtime 집계 | redacted aggregate 생성 |
 | `tools/check_publication_safety.py` | staged/tracked 공개 안전 검사 | 없음 |
 

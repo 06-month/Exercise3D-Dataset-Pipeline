@@ -55,6 +55,27 @@ DETR이 먼저 끝난 9 sequences/27 cameras에 full selector와 별도 lossless
 구간에 집중됐다. 16-frame private overlay에서 background 사람을 강제 선택하지 않는 올바른
 abstention임을 확인했다. 전체 78-camera 완료 후 동일 gate를 다시 실행한다.
 
+### Full DETR / target selector gate와 5B 실행 시작
+
+- official DETR full candidate pass 완료: 26 sequences, 78/78 cameras PASS,
+  65,595 frames, person candidates 120,586, pose inference 0회
+- full selector/독립 validator 결과: target crops 65,430, ambiguity 139,
+  `NO_TARGET` 26, background candidates 55,156, occlusion-risk 19,525
+- detector candidate count/offset/bbox/score, source frame/PTS, selected index와 abstention contract를
+  전수 검사했고 integrity failure 0, forward/backward disagreement 0, identity-switch risk 0이다.
+- 4개 pilot/12 camera의 full selector arrays는 기존 accepted selector와 모든 field가 exact-match했다.
+  기존 9,725 target pose의 selection-bound resume가 유효하므로 재추론하지 않는다.
+- private representative overlay에서 pushup ambiguity, squat candidate-index 역전,
+  benchpress 누운 자세와 10-person scene, mirror/reflection 후보를 다시 확인했다. background를
+  target으로 바꾼 사례는 없고, ambiguous pushup frame은 target을 강제 선택하지 않았다.
+- 최종 gate: `GO_FULL_DATASET`.
+
+2026-08-11 18:35 KST에 batch 16, chunk 256, official flip-test, primary target only로
+resumable full Sapiens2-5B를 시작했다. 새 inference 대상은 55,705 crops이다. cached-detector
+benchmark의 보수적 end-to-end 환산 0.234 crops/s에서는 약 66.1 GPUh로, deadline까지 reserve가
+매우 작다. GPU는 Sapiens2에 전용하고 CPU triangulation/recovery/QC만 병행한다. 실제 첫 신규
+camera wall-clock이 확보되면 ETA를 다시 갱신한다.
+
 ### Phase 7 timestamp-aware triangulation pilot
 
 ```bash
@@ -77,6 +98,38 @@ python tools/triangulate_sapiens2.py \
 - NO_GO proposal은 진단용으로 보존하지만 `eligible_for_body_fitting=false`이며 export에 사용하지 않는다.
 - Phase 5 camera를 덮어쓰지 않고, recovery를 수행한다면 observation-conditioned provenance와
   held-out-frame 검증을 요구한다.
+
+### Phase 7 observation-conditioned camera recovery
+
+원 Phase 5 geometry는 수정하지 않고 별도 private output root에 recovery candidate를 만들었다.
+canonical body direct joints와 timestamp-aware pairing을 사용하며, 세 essential-pair/PnP topology 중
+fit residual이 가장 작은 것만 선택한 뒤 사전 분리한 20% held-out frame으로 검증했다.
+
+- fit/held-out overlap: 두 sequence 모두 0
+- `squat_0001`: held-out median/p90 26.21/164.86 → 5.70/18.88 px,
+  all-frame canonical 5.71/18.93 px
+- `pushup_0001`: held-out 311.60/2,020.79 → 8.12/95.12 px,
+  all-frame canonical 8.11/96.04 px
+- 두 sequence schema PASS, NO_GO 0, REVIEW 2
+- threshold/Huber scale은 변경하지 않았고 원 NO_GO proposal도 진단용으로 보존
+
+이는 같은 Sapiens2 observation으로 만든 geometry라 독립 calibration evidence가 아니다.
+`camera_source=SAPIENS2_2D_OBSERVATION_CONDITIONED`, 최종 상태는 둘 다
+`REVIEW_OBSERVATION_CONDITIONED`이며 camera/pose uncertainty를 fitting/export까지 전파한다.
+특히 pushup p90 96.04 px는 NO_GO 경계 100 px에 가까워 selective REVIEW QA 대상이다.
+
+### SAM Mode B full-run contract 준비
+
+GPU contention 때문에 5B 실행 중 SAM을 함께 올리지는 않는다. 대신 CPU에서 full runner와
+resume validation을 준비했다.
+
+- sequence/camera 단위 Mode B 실행과 PASS output resume
+- primary target seed 정확히 1개, source frame index와 selector confidence/ambiguity/occlusion 보존
+- upstream PLY 변환 직전 MHR pose/shape/scale/joints를 compact NPZ로 추가 저장
+- frame 수와 mesh/MHR numeric/provenance count가 모두 exact일 때만 camera PASS
+- partial/old mesh-only output은 complete로 오인하지 않고 deterministic rerun
+
+Mode C는 여전히 selective evidence가 없는 전체 기본값으로 사용하지 않는다.
 
 ## 2026-08-09 — 초기 synchronization / derivative 구축 기록 이관
 

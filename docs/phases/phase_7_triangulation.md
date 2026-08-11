@@ -2,7 +2,7 @@
 
 ## 목적과 현재 상태
 
-상태는 `PILOT_COMPLETE_CAMERA_RECOVERY_REQUIRED`다. 이 단계는 Sapiens2-5B의 view별
+상태는 `PILOT_RECOVERY_COMPLETE_REVIEW`다. 이 단계는 Sapiens2-5B의 view별
 2D 출력을 곧바로 3D ground truth로 승격하지 않는다. Phase 2의 PTS offset/drift,
 Phase 5의 fixed-camera geometry, view별 confidence와 실제 ray conditioning을 결합해
 3D observation proposal과 불확실성을 생성한다.
@@ -56,3 +56,23 @@ NO_GO sequence의 raw triangulation proposal은 진단용으로 보존하지만
 덮어쓰지 않는 별도 recovery candidate와 held-out-frame 검증이다. Sapiens2 observation으로 camera를
 보정하는 경우 그 결과는 독립 calibration이 아니라 observation-conditioned geometry라는
 provenance를 명시해야 한다.
+
+## Observation-conditioned recovery gate
+
+[`tools/recover_cameras_from_pose_observations.py`](../../tools/recover_cameras_from_pose_observations.py)는
+Phase 5 output을 덮어쓰지 않는 별도 recovery root만 생성한다. canonical direct joints와 Phase 2
+timestamp pairing으로 세 가지 essential-pair + tied-scale PnP topology를 fit frame에서만 비교하고,
+fit objective가 가장 낮은 topology를 사전 분리한 20% held-out frame에서 검증한다. cam1 identity,
+fixed K, sequence-local arbitrary scale은 유지한다.
+
+| sequence | current held-out median / p90 | recovered held-out median / p90 | all-frame canonical median / p90 | gate |
+|---|---:|---:|---:|---|
+| squat_0001 | 26.21 / 164.86 px | 5.70 / 18.88 px | 5.71 / 18.93 px | REVIEW |
+| pushup_0001 | 311.60 / 2,020.79 px | 8.12 / 95.12 px | 8.11 / 96.04 px | REVIEW |
+
+두 sequence 모두 fit/held-out overlap 0이고 held-out degradation/overfit gate를 통과했다. threshold는
+변경하지 않았으며 기존 NO_GO proposal은 그대로 남아 있다. recovery 결과는
+`SAPIENS2_2D_OBSERVATION_CONDITIONED`이고 Sapiens2와 같은 observation으로 만들었으므로 독립적인
+camera 정확도 검증이나 GT가 아니다. 따라서 NO_GO만 해제하되 `REVIEW_OBSERVATION_CONDITIONED`와
+원 camera uncertainty를 계속 전파한다. `pushup_0001` p90은 NO_GO 100 px 경계에 가깝기 때문에
+fitting/QC에서 특히 보수적으로 취급한다.

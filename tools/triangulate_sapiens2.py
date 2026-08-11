@@ -320,6 +320,8 @@ def pose_camera_consistency_status(
     camera accuracy estimate.  A NO_GO result keeps the raw proposal for
     diagnosis but excludes it from body fitting and pseudo-label export.
     """
+    if camera_acceptance == "FAIL":
+        return "NO_GO_TRIANGULATION"
     if median_px is None or p90_px is None:
         return "NO_GO_TRIANGULATION"
     if median_px > 2.0 * huber_scale_px or p90_px > 10.0 * huber_scale_px:
