@@ -65,13 +65,20 @@ camera calibration을 구분합니다.
 | 6-1A. Primary Target Selection | DONE | 9,732 frame, identity switch 0, ambiguity 7, crop 50.37% 감소 |
 | 6-2. Target-only Runtime Gate | DONE/HOLD | batch 4 권장, 전체 65,595-frame ETA 79.09 h; 사용자 승인 전 실행 보류 |
 | 7. Timestamp-aware Triangulation | TODO | Phase 6 full observation 이후 진행 |
-| 8. SAM Body Runtime Feasibility | WAITING APPROVAL | primary-target adapter/preflight PASS; 공식 checkpoint 22.387 GiB 승인 대기 |
+| 8. SAM Body Runtime Feasibility | PILOT DONE/REVIEW | 22.387 GiB integrity PASS, A/B/C 6-run 완료; full inference HOLD |
 | 9–13 | TODO | runtime feasibility와 사용자 승인 이후 body/quality pipeline 진행 |
 
 `pushup_0003`은 Phase 5.1에서 observation, initialization, objective와 gate를 그대로 두고
 Stage 2 budget만 300에서 600으로 확장했습니다. 실제 322 evaluations에서 `xtol`로 수렴했고,
 제한된 sparse support 때문에 `RECOVERED_REVIEW`로 유지합니다. Dataset-level FAIL은 0이며
 camera geometry freeze는 REVIEW uncertainty 전파 조건으로 승인되었습니다.
+
+Phase 8 primary-target pilot는 control/severe 두 clip의 Mode A/B/C 여섯 run을 완료했습니다.
+SAM full-stage projection은 16.35/20.80/32.63시간, Sapiens2 target-only와 한 GPU에서 순차
+실행하는 합계는 95.43/99.88/111.71시간입니다. Mode C는 약 2배 느렸지만 이번 severe clip에서
+content completion이 호출되지 않아 선택적 refiner 정책은 `REVIEW`로 유지합니다. 8월 15일
+00:00 UTC freeze는 `NO_GO`, end-of-day도 `DEADLINE_AT_RISK`이며 full inference는 시작하지
+않았습니다. 상세 근거는 [Phase 8 문서](docs/phases/phase_8_sam_body4d.md)에 있습니다.
 
 세부 상태와 acceptance gate는 [plan.md](plan.md), 시간순 실행 기록은
 [process.md](process.md)를 기준으로 합니다.
@@ -275,8 +282,8 @@ git diff --cached
 
 - VGGT-Ω: camera/depth/point-map initialization 전용, 최종 camera로 직접 사용하지 않음
 - Sapiens2 Pose 5B: Phase 6 primary offline 2D teacher로 확정; official DETR person detector 사용
-- SAM 3D Body / SAM-Body4D: pretrained temporal body prior 후보; checkpoint 승인 대기 중이며
-  target-selector가 고른 1명만 입력하는 adapter가 필수
+- SAM 3D Body / SAM-Body4D: checkpoint 28 files/22.387 GiB SHA-256 integrity와 primary-target
+  A/B/C pilot 완료; Mode B full 기본 후보, Mode C selective 정책은 REVIEW
 - Fit3D: Phase 12 정량 validation dataset 후보
 
 각 모델의 라이선스, 배포 조건, checkpoint 사용 권한은 upstream 정책을 따릅니다.

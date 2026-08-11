@@ -1,9 +1,10 @@
 # Phase 8 — SAM 3D Body / SAM-Body4D Runtime Feasibility
 
-## 현재 상태
+## 현재 상태와 실행 경계
 
-`WAITING_CHECKPOINT_APPROVAL`. Full 65,595-frame Sapiens2 inference와 SAM body inference는
-시작하지 않았다. Local A100은 현재 유휴 상태다.
+`PILOT_COMPLETE_REVIEW`. Gated checkpoint access, 22.387 GiB payload integrity, primary-target
+adapter, control/severe Mode A/B/C pilot는 완료했다. Full 65,595-frame SAM inference와 Sapiens2
+inference는 시작하지 않았다.
 
 검증한 upstream은 다음과 같다.
 
@@ -16,60 +17,122 @@
 SAM-Body4D official offline script는 initial frame의 모든 human detection을 자동 target으로 삼는다.
 이 dataset에서는 그대로 사용하지 않는다. `sam_body_primary_target_runner.py`가 Phase 6 selector의
 accepted primary bbox 하나만 SAM 3에 seed하고, background candidate는 metadata/ambiguity evidence로만
-유지한다. 이 adapter는 upstream에 존재하지 않는 CLI option을 가장하지 않고 official class/API를
-호출한다. Mode A도 official estimator의 `bboxes=` API로 frame당 accepted bbox 0/1개만 전달한다.
+유지한다. Mode A도 official estimator의 `bboxes=` API로 frame당 accepted bbox 0/1개만 전달한다.
 
-## 비교할 mode
+## Checkpoint access와 integrity gate
+
+2026-08-11 gated access 승인 후 credential 값을 출력하지 않는 `hf download --dry-run`을 다시
+수행했고 SAM 3, SAM 3D Body 및 나머지 네 repository 모두 접근 PASS를 확인했다. 공식 source가
+지정한 payload를 받은 뒤 cache를 제외한 required tree를 전수 검증했다.
+
+- required payload: 28 files, 24,037,668,123 bytes(22.387 GiB)
+- 누락·예상 밖 파일: 0 / 0
+- size mismatch: 0
+- SHA-256 mismatch: 0
+- checkpoint/config load와 CUDA smoke: PASS
+- credential, checkpoint 자체와 cache: Git 비포함
+
+파일별 상대 경로·크기·SHA-256은
+[`sam_body4d_checkpoint_integrity.csv`](../../metadata/results/sam_body4d_checkpoint_integrity.csv),
+component별 source/terms는
+[`sam_body4d_checkpoint_manifest.csv`](../../metadata/results/sam_body4d_checkpoint_manifest.csv)에
+기록했다. Primary-target adapter가 detector를 호출하지 않으므로 upstream all-human initialization용
+ViTDet 2.576 GiB는 계속 제외한다.
+
+## Pilot 구성
+
+| 조건 | Clip | Frames | 길이 | `OCCLUSION_RISK` | target |
+|---|---|---:|---:|---:|---:|
+| control | `squat_0001/cam1` | 1,267 | 약 42초 | 0 | 1 |
+| severe | `latpulldown_0002/cam2` | 1,136 | 약 38초 | 959(84.42%) | 1 |
 
 | Mode | 구성 | 목적 |
 |---|---|---|
-| A | official SAM 3D Body base + primary target bbox | single-image body prior의 최소 비용 기준 |
-| B | SAM-Body4D, `completion.enable=false` | SAM 3 temporal mask + base body, refiner 제외 |
-| C | SAM-Body4D, `completion.enable=true` | Diffusion-VAS amodal/refinement 포함 |
+| A | official SAM 3D Body base + primary bbox | single-image body 최소 비용 기준 |
+| B | SAM-Body4D, `completion.enable=false` | SAM 3 temporal mask + base body |
+| C | SAM-Body4D, `completion.enable=true` | amodal/depth/refiner 포함 |
 
-Control은 `squat_0001/cam1` 약 42초, severe-occlusion은 `latpulldown_0002/cam2` 약 38초로
-정했다. 후자는 1,136 frame 중 959 frame이 conservative `OCCLUSION_RISK`이고 detector candidate는
-평균 2.121/frame이지만 visual QA에서 primary identity switch는 0이다.
+모든 run은 initial target seed와 target track을 각각 1개만 사용했다. Background candidate에는
+SAM 3D Body inference를 수행하지 않았다.
 
-Mode C의 completion은 upstream config에서 global on/off다. QC-triggered selective ON은 기존 CLI가
-아니므로, mode B 전체 결과에서 severe/long occlusion 구간을 clip/subsequence 단위로 mode C에 보내는
-scheduler로 구현·검증해야 한다. Amodal output은 image ground truth가 아니라 noisy prior로 표시한다.
+## A/B/C 실측
 
-## Checkpoint preflight
+아래 sec/frame은 model initialization을 포함한 end-to-end 값이다. GPU utilization은 0.2초 간격
+`nvidia-smi` 표본의 mean/p95, VRAM은 process 구간의 device peak다.
 
-Local `<CHECKPOINT_ROOT>/sam_body4d`에는 필요한 payload가 없다. Primary-target adapter 기준 필요한
-공식 inventory는 총 24,037,668,123 bytes(22.387 GiB)이며 weights는 Git에 포함하거나 재배포하지
-않는다.
+| 조건 | Mode | sec/frame | total | FPS | peak VRAM | GPU mean/p95 | power mean/max |
+|---|---|---:|---:|---:|---:|---:|---:|
+| control | A | 0.8265 | 1,047.20s | 1.2099 | 7,367 MiB | 36.86/67% | 123.49/361.76 W |
+| control | B | 0.9177 | 1,162.70s | 1.0897 | 33,988 MiB | 13.32/95% | 100.00/429.00 W |
+| control | C | 1.8202 | 2,306.22s | 0.5494 | 44,175 MiB | 45.48/100% | 203.33/443.74 W |
+| severe | A | 0.8319 | 945.05s | 1.2020 | 7,367 MiB | 37.07/68% | 121.72/362.63 W |
+| severe | B | 0.9203 | 1,045.43s | 1.0866 | 32,344 MiB | 13.17/95% | 99.89/428.35 W |
+| severe | C | 1.8262 | 2,074.61s | 0.5476 | 42,531 MiB | 45.27/100% | 203.07/440.76 W |
 
-- Mode A 최소: SAM 3D Body package + MoGe-2, 3.845 GiB
-- Mode B 누적: Mode A + SAM 3, 7.059 GiB
-- Mode C 누적: Mode B + Diffusion-VAS 2개 + Depth Anything V2, 22.387 GiB
-- upstream all-human initialization용 ViTDet 2.576 GiB는 target adapter가 detector를 호출하지 않아 제외
-- SAM 3와 SAM 3D Body는 Hugging Face에서 사전 access acceptance와 인증이 필요
+Initialization을 제외한 실행 sec/frame은 control A/B/C가 각각 0.8135/0.8968/1.7887,
+severe A/B/C가 0.8170/0.8967/1.7901이다. 따라서 severe/control runtime ratio는
+A 1.0043, B 0.9999, C 1.0008로, 이 pilot에서는 가림 자체가 throughput을 유의미하게 바꾸지
+않았다. Mode C/B 실행시간 ratio는 control 1.9946, severe 1.9964다.
 
-2026-08-11 `hf download --dry-run` 결과 local 인증은 유효하지만 SAM 3와 SAM 3D Body 두 gated
-repository의 access approval은 아직 없다. MoGe-2, Depth Anything V2와 official setup script가 지정한
-`kaihuac/diffusion-vas-amodal-segmentation`, `kaihuac/diffusion-vas-content-completion`은 dry-run 접근에
-성공했다. Dry-run은 metadata/용량만 조회했으며 checkpoint download는 0 bytes다. SAM 3D Body load가
-인접 `model_config.yaml`을 실제 참조하므로 이를 required path에 포함했다.
+세부 실측은
+[`sam_body4d_runtime_pilot.csv`](../../metadata/results/sam_body4d_runtime_pilot.csv)에 있다.
 
-상세 파일/용량/라이선스 출처는
-[`sam_body4d_checkpoint_manifest.csv`](../../metadata/results/sam_body4d_checkpoint_manifest.csv)에
-기록했다. Credential은 문서, 로그, Git에 기록하지 않는다. 사용자 승인 전 다운로드하지 않는다.
+## Refiner ON/OFF와 output sanity
 
-## Primary-target preflight 결과
+Mode C는 control에서 refiner 1,287회, amodal segmentation 20회, depth 1,267회를 호출했고,
+severe에서는 각각 1,154/18/1,136회 호출했다. 두 조건 모두 content completion 호출은 0회였다.
+즉 selector의 bbox-overlap 기반 `OCCLUSION_RISK`와 official SAM-Body4D 내부 mask self-IoU
+trigger는 같은 정의가 아니다. Severe clip은 외부 가림 조건 runtime은 검증했지만 실제 content
+completion 품질 검증 사례로 간주하지 않는다.
 
-Checkpoint 없이도 input/selection/repository/config 경계까지 검증했다.
+Output sanity 결과는 다음과 같다.
 
-| Pilot | Frames | Mode A | Mode B | Mode C | Target seed |
-|---|---:|---|---|---|---:|
-| `squat_0001/cam1` control | 1,267 | BLOCKED_CHECKPOINT | BLOCKED_CHECKPOINT | BLOCKED_CHECKPOINT | 1 |
-| `latpulldown_0002/cam2` severe | 1,136 | BLOCKED_CHECKPOINT | BLOCKED_CHECKPOINT | BLOCKED_CHECKPOINT | 1 |
+- Mode A: 2,403 numeric result 전부 생성, 대표 시작/중간/끝 표본의 모든 numeric array finite
+- Mode B/C: 각 조건 frame 수와 동일한 PLY와 render 생성, 누락 0
+- 대표 mesh: 18,439 vertices / 36,874 faces, vertex와 bounds finite
+- 대표 render: 720×1,280 RGB decode PASS, 한 target body만 존재
+- 육안 표본에서 exploding mesh/두 번째 identity/빈 output은 없었지만, 일부 손·팔 형상은 noisy
+  prior 특성을 보여 image ground truth나 정답 mesh로 취급하지 않음
+- B/C 동일 frame 5개씩 비교한 최대 vertex delta는 control 0.237 mm, severe 0.303 mm였다.
+  Mode C가 약 2배 느린 것에 비해 현재 clip에서 material improvement 근거는 부족하다.
 
-두 clip 모두 target-valid frame은 전부였고 severe clip의 `OCCLUSION_RISK` 959 frame도 보존했다.
-각 mode가 정확히 한 bbox slot/seed만 허용하고 ambiguous first frame을 강제 선택하지 않는 synthetic
-test를 포함해 SAM/selector test 11개가 PASS했다. `BLOCKED_CHECKPOINT`는 model execution 실패가 아니라
-승인 전 의도된 preflight 종료다.
+따라서 full run 기본 후보는 Mode B다. Mode C를 선택적으로 사용하려면 official content-completion
+trigger가 실제 발생하는 별도 짧은 case와 downstream residual 개선 근거를 먼저 확보해야 한다.
+
+## 전체 runtime projection과 8월 15일 판정
+
+Expected prevalence에는 Phase 6 네 sequence/12-camera pilot의 conservative occlusion proxy
+2,657/9,732 frame(27.3018%)을 사용했다. 이는 전체 dataset의 확정 prevalence가 아니라 현재 확보한
+비편향에 가까운 pilot proxy이며, 그래서 optimistic/expected/pessimistic을 분리한다.
+
+| Scenario | SAM 65,595 frames | Sapiens2 target-only | 한 GPU 순차 합계 |
+|---|---:|---:|---:|
+| optimistic | 16.35 h | 79.09 h | 95.43 h |
+| expected | 20.80 h | 79.09 h | 99.88 h |
+| pessimistic | 32.63 h | 79.09 h | 111.71 h |
+
+- optimistic: 모든 frame Mode B, control 실행 rate
+- expected: control/severe weighted Mode B + 27.3018%에 Mode C incremental cost
+- pessimistic: 모든 frame Mode C, severe 실행 rate
+
+상세 수치는
+[`sam_body4d_runtime_projection.csv`](../../metadata/results/sam_body4d_runtime_projection.csv)에 있다.
+2026-08-11 08:16 UTC 기준 2026-08-15 00:00 UTC까지 약 87.7시간이므로 optimistic도 deadline을
+넘는다. 8월 15일 23:59 UTC를 마감으로 해석하면 expected 계산 자체는 들어오지만 약 12시간만
+남아 download 이후 orchestration, Sapiens/SAM validation, triangulation/body fitting, QC, 재시도와
+dataset freeze 시간을 보장할 수 없다. Pessimistic은 계산만으로 마감과 사실상 같다.
+
+최종 판정은 다음과 같다.
+
+- 2026-08-15 00:00 UTC freeze guarantee: `NO_GO`
+- 2026-08-15 end-of-day: `DEADLINE_AT_RISK`, uninterrupted expected case에서만 조건부 가능
+- SAM full inference gate: `REVIEW_SAM_REFINER_POLICY`
+- Full Sapiens2/SAM dataset inference: `HOLD`, 별도 사용자 승인 전 시작 금지
+
+이번 판정은 accuracy-first 정책을 유지하며, 5B teacher·official flip-test·detector·input resolution·
+keypoint convention을 변경하지 않는다.
+
+## 재현 명령
 
 ```bash
 python tools/benchmark_sam_body4d.py \
@@ -80,30 +143,9 @@ python tools/benchmark_sam_body4d.py \
   --input-frames <PRIVATE_CLIP_FRAME_DIR> \
   --target-selection <PRIVATE_TARGET_SELECTION_NPZ> \
   --frame-count <30_TO_60_SECOND_FRAME_COUNT> \
-  --output-dir outputs/runtime/phase8_sam/<CLIP>/<MODE>
+  --output-dir outputs/runtime/phase8_sam/<CLIP>/<MODE> \
+  --run
 ```
 
-Mode A에는 `--sam-3d-body-root`, Mode B/C에는 `--sam-body4d-root`만 필요하다. 실제 pilot은 사용자
-승인 뒤 `--run`을 추가한다.
-
-`summarize_sam_body_runtime.py`는 여섯 PASS row가 모두 존재해야 Mode C/B ratio와 occlusion runtime
-증가를 계산한다. `EXPECTED_CASE`에는 measured severe-frame fraction과 selective-refinement fraction을
-명시적으로 요구하며, 이 값이 없으면 낙관적인 숫자를 만들지 않고 중단한다.
-
-## Upstream 참고 수치와 local gate
-
-SAM-Body4D가 공개한 H800 80GB 측정에서 completion off는 1 target/100 frame에 masklet 15.55초,
-4D reconstruction 70.3초였다. Multi-target example에서는 completion on이 total runtime을 약
-7.6–9.1배 늘렸다. 이는 A100 local 실측이 아니므로 전체 runtime 확정값으로 쓰지 않는다.
-
-Checkpoint 승인 후 두 pilot clip에서 mode별 다음을 실측한다.
-
-- end-to-end/stage runtime, sec/frame, target track 수
-- peak VRAM, mean/p95 GPU utilization, mean/max power
-- output/temporary disk, per-frame output size
-- body/MHR validity, temporal identity, occlusion failure와 refiner invocation
-- full 65,595-frame best/expected/worst projection과 2026-08-15 deadline 판정
-
-Sapiens2 target-only projection만 79.09 GPU-hours다. 2026-08-11 현재 2026-08-15 00:00 UTC까지
-남은 시간에서 SAM/body fitting/QC 여유가 작으므로 provisional status는 `DEADLINE_AT_RISK`다.
-Local mode A/B/C 실측 전에는 final feasibility를 확정하지 않는다.
+Mode A에는 `--sam-3d-body-root`, Mode B/C에는 `--sam-body4d-root`만 필요하다. Runtime summary는
+여섯 PASS row와 measured prevalence가 모두 있어야 projection을 생성한다.

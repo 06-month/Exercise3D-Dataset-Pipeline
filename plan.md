@@ -185,7 +185,7 @@
 
 ## Phase 8 — SAM 3D Body / SAM-Body4D Human Prior
 
-- 상태: `WAITING_CHECKPOINT_APPROVAL`
+- 상태: `PILOT_COMPLETE_REVIEW`; full 65,595-frame inference는 `HOLD`
 - 목적: pretrained model로 temporal MHR/body prior 생성
 - 입력: RGB reference와 Phase 6/7 evidence
 - 출력: temporal body prior, uncertainty, modal/amodal 구분
@@ -195,9 +195,19 @@
   completion off, (C) completion on을 비교하고 target selector의 primary bbox 1개만 seed
 - adapter: upstream의 모든 initial human 자동 선택 대신 accepted primary bbox 1개만 전달하며,
   사용하지 않는 ViTDet checkpoint는 요구하지 않음
-- 현재 blocker: 공식 pretrained payload 6개 묶음 22.387 GiB가 local에 없고 SAM 3/SAM 3D Body는
-  gated access 승인이 필요하다. 명시적 사용자 승인 전 다운로드하지 않음
-- 다음 gate: sequence-level optimization의 weak/noisy prior로만 사용
+- checkpoint gate: gated access 재확인 후 28 files, 24,037,668,123 bytes(22.387 GiB),
+  size/SHA-256/누락 검사 모두 PASS
+- pilot 결과: control 1,267 frame + severe 1,136 frame의 A/B/C 6-run PASS, target seed/track 1
+- runtime: Mode A 0.827–0.832, Mode B 0.918–0.920, Mode C 1.820–1.826 sec/frame;
+  Mode C/B 약 1.98배, severe/control 약 1.00배
+- sanity: numeric/mesh/render 누락 0, finite PASS. 단 Mode C content completion 0회이고 B/C mesh
+  개선은 표본 최대 0.303 mm라 refiner 효용은 아직 입증되지 않음
+- projection: SAM optimistic/expected/pessimistic 16.35/20.80/32.63 h; Sapiens2 target-only와
+  한 GPU 순차 합계 95.43/99.88/111.71 h
+- deadline gate: 2026-08-15 00:00 UTC freeze `NO_GO`; end-of-day도 QA 포함
+  `DEADLINE_AT_RISK`
+- 다음 gate: Mode B를 full 기본 후보로 유지하고 실제 completion trigger case에서 Mode C 효용 검증;
+  별도 사용자 승인 전 Sapiens2/SAM full inference 시작 금지
 
 ## Phase 9 — Sequence-Level Body Fitting
 

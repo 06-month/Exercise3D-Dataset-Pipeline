@@ -27,6 +27,20 @@ def read_rows(root: Path) -> list[dict[str, str]]:
         with path.open(newline="", encoding="utf-8") as handle:
             for row in csv.DictReader(handle):
                 row["source_file"] = str(path.relative_to(root))
+                profile_path = (
+                    path.parent / f"mode_{row.get('mode', '').lower()}_profile.json"
+                )
+                if profile_path.is_file():
+                    profile = json.loads(profile_path.read_text(encoding="utf-8"))
+                    for key in (
+                        "refinement_model_calls",
+                        "amodal_segmentation_calls",
+                        "content_completion_calls",
+                        "depth_inference_calls",
+                        "mesh_file_count",
+                    ):
+                        if row.get(key, "") == "" and key in profile:
+                            row[key] = str(profile[key])
                 rows.append(row)
     return rows
 
@@ -57,6 +71,11 @@ def number(row: dict[str, str], key: str) -> float:
     if value == "":
         raise RuntimeError(f"missing numeric field {key} for mode {row.get('mode')}")
     return float(value)
+
+
+def optional_number(row: dict[str, str], key: str) -> float | None:
+    value = row.get(key, "")
+    return None if value == "" else float(value)
 
 
 def execution_seconds_per_frame(row: dict[str, str]) -> float:
@@ -118,7 +137,30 @@ def compute_pass_summary(
                 "execution_seconds_per_frame": execution_seconds_per_frame(row),
                 "initialization_seconds": number(row, "model_initialization_seconds"),
                 "peak_vram_mib": number(row, "peak_nvidia_vram_mib"),
+                "frames_per_second": optional_number(row, "frames_per_second"),
+                "gpu_utilization_mean_pct": optional_number(
+                    row, "gpu_utilization_mean_pct"
+                ),
+                "gpu_utilization_p95_pct": optional_number(
+                    row, "gpu_utilization_p95_pct"
+                ),
+                "power_mean_w": optional_number(row, "power_mean_w"),
+                "power_max_w": optional_number(row, "power_max_w"),
                 "refinement_model_seconds": number(row, "refinement_model_seconds"),
+                "refinement_model_calls": optional_number(
+                    row, "refinement_model_calls"
+                ),
+                "amodal_segmentation_calls": optional_number(
+                    row, "amodal_segmentation_calls"
+                ),
+                "content_completion_calls": optional_number(
+                    row, "content_completion_calls"
+                ),
+                "depth_inference_calls": optional_number(
+                    row, "depth_inference_calls"
+                ),
+                "mesh_file_count": optional_number(row, "mesh_file_count"),
+                "output_bytes": optional_number(row, "output_bytes"),
             }
 
     comparisons: dict[str, dict[str, float]] = {}

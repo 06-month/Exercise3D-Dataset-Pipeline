@@ -465,3 +465,40 @@ verdict는 보류한다.
 - credential 값을 출력하지 않은 HF auth 확인은 PASS했지만 SAM 3/SAM 3D Body gated access는
   `--dry-run`에서 denied; MoGe-2, Depth Anything V2, 두 official Diffusion-VAS repo는 dry-run PASS
 - official setup code 기준 Diffusion-VAS repo ID와 SAM 3D Body `model_config.yaml` requirement를 교정
+
+## 2026-08-11 — SAM Body checkpoint와 A/B/C pilot 완료
+
+### Access, download와 integrity
+
+- 사용자 gated access 승인 후 SAM 3/SAM 3D Body를 포함한 6개 official source의 access dry-run PASS
+- required checkpoint tree 28 files, 24,037,668,123 bytes(22.387 GiB) 다운로드 완료
+- 모든 payload의 file existence, byte size, SHA-256을 전수 재검증: 누락/불일치/예상 밖 파일 0
+- checkpoint/cache/credential은 ignored external storage에만 유지하고 공개 CSV에는 상대 경로,
+  크기와 digest만 기록
+- 별도 Python 3.12 / PyTorch 2.7.1 CUDA 환경에서 official load, headless EGL과 CUDA smoke PASS
+- official loader가 string path를 요구하는 실제 runtime incompatibility를 primary-target runner에서 교정
+
+### Primary-target A/B/C 6-run
+
+- control `squat_0001/cam1`: 1,267 frame, 약 42초, occlusion risk 0
+- severe `latpulldown_0002/cam2`: 1,136 frame, 약 38초, occlusion risk 959
+- 모든 mode에서 accepted primary target 1명만 처리하고 background detection에는 body inference 미수행
+- control A/B/C total 1,047.20/1,162.70/2,306.22초,
+  end-to-end 0.8265/0.9177/1.8202 sec/frame
+- severe A/B/C total 945.05/1,045.43/2,074.61초,
+  end-to-end 0.8319/0.9203/1.8262 sec/frame
+- peak VRAM A/B/C 최대 7,367/33,988/44,175 MiB; GPU/power telemetry도 0.2초 간격 보존
+- Mode C/B execution ratio control 1.9946, severe 1.9964; severe/control ratio는 모든 mode 약 1.00
+
+### Output sanity와 결정
+
+- Mode A numeric 2,403개, Mode B/C mesh와 render 각각 2,403개 생성, 누락 0
+- 시작/중간/끝 numeric finite, PLY 18,439 vertices/36,874 faces finite, JPEG decode와 private visual QA PASS
+- Mode C refiner는 control/severe에서 1,287/1,154회 호출됐지만 content completion은 모두 0회
+- B/C 대표 mesh 차이는 최대 0.303 mm로 현재 severe clip에서 refiner의 material improvement가
+  확인되지 않아 full 기본 후보는 Mode B, Mode C policy는 `REVIEW_SAM_REFINER_POLICY`
+- 65,595-frame SAM projection 16.35/20.80/32.63시간, Sapiens2 target-only를 합친 한 GPU 순차
+  projection 95.43/99.88/111.71시간
+- 2026-08-15 00:00 UTC freeze는 `NO_GO`; end-of-day도 QC/재시도 여유가 작아
+  `DEADLINE_AT_RISK`
+- 전체 Sapiens2/SAM inference는 실행하지 않았으며 별도 사용자 승인 전 `HOLD`

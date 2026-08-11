@@ -17,6 +17,7 @@ from tools.benchmark_sam_body4d import (
 )
 from tools.sam_body_primary_target_runner import load_target_input, run_mode_body4d
 from tools.summarize_sam_body_runtime import compute_pass_summary
+from tools.summarize_sam_body_runtime import read_rows
 
 
 class SamBodyRuntimeTest(unittest.TestCase):
@@ -273,6 +274,25 @@ completion:
             summary["comparisons"]["severe"]["refiner_on_off_execution_ratio"],
             summary["comparisons"]["control"]["refiner_on_off_execution_ratio"],
         )
+
+    def test_runtime_reader_enriches_profile_call_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            result = root / "control" / "mode_c"
+            result.mkdir(parents=True)
+            (result / "sam_body_benchmark.csv").write_text(
+                "mode,candidate,camera,status\nC,control,cam1,PASS\n",
+                encoding="utf-8",
+            )
+            (result / "mode_c_profile.json").write_text(
+                '{"refinement_model_calls": 12, "content_completion_calls": 3}',
+                encoding="utf-8",
+            )
+
+            rows = read_rows(root)
+
+            self.assertEqual(rows[0]["refinement_model_calls"], "12")
+            self.assertEqual(rows[0]["content_completion_calls"], "3")
 
 
 if __name__ == "__main__":

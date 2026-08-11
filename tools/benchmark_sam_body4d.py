@@ -347,6 +347,11 @@ def main() -> int:
         "base_body_inference_seconds": "",
         "body_stage_seconds": "",
         "refinement_model_seconds": "",
+        "refinement_model_calls": "",
+        "amodal_segmentation_calls": "",
+        "content_completion_calls": "",
+        "depth_inference_calls": "",
+        "mesh_file_count": "",
         "serialization_seconds": "",
         "output_bytes": "",
         "missing_checkpoint_components": "",
@@ -493,6 +498,19 @@ def main() -> int:
                     "refinement_model_seconds": profile.get(
                         "refinement_model_seconds", ""
                     ),
+                    "refinement_model_calls": profile.get(
+                        "refinement_model_calls", ""
+                    ),
+                    "amodal_segmentation_calls": profile.get(
+                        "amodal_segmentation_calls", ""
+                    ),
+                    "content_completion_calls": profile.get(
+                        "content_completion_calls", ""
+                    ),
+                    "depth_inference_calls": profile.get(
+                        "depth_inference_calls", ""
+                    ),
+                    "mesh_file_count": profile.get("mesh_file_count", ""),
                     "serialization_seconds": profile.get(
                         "serialization_seconds", ""
                     ),

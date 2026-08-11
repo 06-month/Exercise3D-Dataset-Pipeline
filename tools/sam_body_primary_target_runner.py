@@ -119,8 +119,10 @@ def run_mode_a(args: argparse.Namespace, target: dict[str, np.ndarray]) -> dict[
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     init_started = time.perf_counter()
-    model, model_config = load_sam_3d_body(checkpoint, device=device, mhr_path=mhr)
-    fov_estimator = FOVEstimator(name="moge2", device=device, path=fov)
+    model, model_config = load_sam_3d_body(
+        str(checkpoint), device=device, mhr_path=str(mhr)
+    )
+    fov_estimator = FOVEstimator(name="moge2", device=device, path=str(fov))
     estimator = SAM3DBodyEstimator(
         sam_3d_body_model=model,
         model_cfg=model_config,

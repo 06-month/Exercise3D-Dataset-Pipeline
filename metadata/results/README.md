@@ -12,7 +12,10 @@
 - `sapiens2_target_only_batch_scaling.csv`: target-only batch throughput/resource/equivalence
 - `phase6_2_runtime_projection.csv`: stage별 65,595-frame runtime 외삽
 - `sam_body4d_checkpoint_manifest.csv`: Phase 8 공식 checkpoint 용량·경로·접근 조건
-- `sam_body4d_preflight.csv`: local checkpoint availability와 pilot 실행 가능 상태
+- `sam_body4d_checkpoint_integrity.csv`: 필수 28개 payload의 상대 경로·크기·SHA-256 검증
+- `sam_body4d_preflight.csv`: 승인 전 checkpoint availability를 보존한 historical preflight
+- `sam_body4d_runtime_pilot.csv`: control/severe Mode A/B/C runtime·resource·sanity 실측
+- `sam_body4d_runtime_projection.csv`: SAM 및 Sapiens2를 합친 65,595-frame runtime 시나리오
 
 포함하지 않는 항목: absolute source/output path, exact camera matrices, frame image, depth,
 point map, feature, track, checkpoint, 개인 식별 metadata. CSV의 sequence ID는 연구용 logical ID다.
