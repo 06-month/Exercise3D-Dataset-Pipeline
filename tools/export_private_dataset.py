@@ -278,13 +278,21 @@ def main() -> int:
         / "temporal_alignment"
         / "camera_frame_mapping.csv",
     }
+    file_manifest = []
     for label, source in provenance_sources.items():
         if not source.is_file():
             raise RuntimeError(f"missing global source provenance: {source}")
-        copy_exact(source, build_root / label)
+        result = copy_exact(source, build_root / label)
+        file_manifest.append(
+            {
+                "sequence": "",
+                "path": label,
+                "bytes": result["bytes"],
+                "sha256": result["sha256"],
+            }
+        )
 
     sequence_rows = []
-    file_manifest = []
     for sequence in args.sequences:
         validation = validate_sequence(args, sequence)
         row = {
@@ -325,6 +333,17 @@ def main() -> int:
         atomic_text(
             sequence_root / "sequence_manifest.json",
             json.dumps(sequence_metadata, ensure_ascii=False, indent=2) + "\n",
+        )
+        sequence_manifest_path = sequence_root / "sequence_manifest.json"
+        file_manifest.append(
+            {
+                "sequence": sequence,
+                "path": str(
+                    (Path("sequences") / sequence / "sequence_manifest.json").as_posix()
+                ),
+                "bytes": sequence_manifest_path.stat().st_size,
+                "sha256": sha256(sequence_manifest_path),
+            }
         )
         print(json.dumps({"sequence": sequence, **validation}, ensure_ascii=False), flush=True)
 

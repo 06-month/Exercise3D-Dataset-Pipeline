@@ -189,6 +189,8 @@ Mode C는 여전히 selective evidence가 없는 전체 기본값으로 사용�
   median+5 scaled-MAD temporal/alignment outlier의 교집합을 판정한다. 후보 clip은 양쪽 15-frame,
   sequence 10% 상한이며 결과는 export dependency다. 후보를 찾는 것과 C 결과 채택은 분리하고,
   실제 B/C 개선 gate 전에는 Mode B를 덮어쓰지 않는다. 전체 unit test 35개 PASS다.
+- private export file manifest에는 sequence payload뿐 아니라 immutable source inventory,
+  temporal audit/frame mapping과 각 sequence manifest 자체의 byte count/SHA-256도 포함한다.
 
 ## 2026-08-09 — 초기 synchronization / derivative 구축 기록 이관
 
