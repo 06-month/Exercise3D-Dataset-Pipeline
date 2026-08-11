@@ -433,6 +433,7 @@ def fit_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]:
         alignment_scale=alignment_scale,
         alignment_residual_sequence_gauge=alignment_residual,
         sam_time_error_ms=time_error_ms,
+        sam_source_frame_index=matched_indices,
         shape_params_consensus=shape_consensus,
         scale_params_consensus=scale_consensus,
         body_pose_params_consensus=pose_consensus,

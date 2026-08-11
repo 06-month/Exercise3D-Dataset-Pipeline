@@ -58,6 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--triangulation-root", type=Path, required=True)
     parser.add_argument("--sam-output-root", type=Path, required=True)
     parser.add_argument("--sam-prior-root", type=Path, required=True)
+    parser.add_argument("--sam-mode-c-review-root", type=Path, required=True)
     parser.add_argument("--body-fit-root", type=Path, required=True)
     parser.add_argument("--export-root", type=Path, required=True)
     parser.add_argument("--runtime-dir", type=Path, required=True)
@@ -306,6 +307,18 @@ def fit_command(args: argparse.Namespace, sequence: str) -> list[str]:
     ]
 
 
+def mode_c_assessment_command(args: argparse.Namespace, sequence: str) -> list[str]:
+    return [
+        sys.executable,
+        str(PROJECT_ROOT / "tools" / "assess_sam_mode_c_escalation.py"),
+        "--sam-prior-root", str(args.sam_prior_root.resolve()),
+        "--body-fit-root", str(args.body_fit_root.resolve()),
+        "--triangulation-root", str(args.triangulation_root.resolve()),
+        "--output-root", str(args.sam_mode_c_review_root.resolve()),
+        "--sequences", sequence,
+    ]
+
+
 def export_command(args: argparse.Namespace) -> list[str]:
     return [
         sys.executable,
@@ -315,6 +328,7 @@ def export_command(args: argparse.Namespace) -> list[str]:
         "--pose-root", str(args.pose_root.resolve()),
         "--triangulation-root", str(args.triangulation_root.resolve()),
         "--sam-prior-root", str(args.sam_prior_root.resolve()),
+        "--sam-mode-c-review-root", str(args.sam_mode_c_review_root.resolve()),
         "--body-fit-root", str(args.body_fit_root.resolve()),
         "--output-root", str(args.export_root.resolve()),
         "--build-id", args.build_id,
@@ -392,13 +406,27 @@ def main() -> int:
             row["failed_stage"] = "SAM_PRIOR_CONSOLIDATION"
         elif run(fit_command(args, sequence)) != 0:
             row["failed_stage"] = "BODY_FIT"
+        elif run(mode_c_assessment_command(args, sequence)) != 0:
+            row["failed_stage"] = "MODE_C_ASSESSMENT"
         else:
             metadata_path = args.body_fit_root.resolve() / sequence / "metadata.json"
             try:
                 body_status = json.loads(metadata_path.read_text(encoding="utf-8"))["qa"][
                     "status"
                 ]
-                row["status"] = "REVIEW" if str(body_status).startswith("REVIEW") else "PASS"
+                mode_c_status = json.loads(
+                    (
+                        args.sam_mode_c_review_root.resolve()
+                        / sequence
+                        / "mode_c_escalation.json"
+                    ).read_text(encoding="utf-8")
+                )["status"]
+                row["status"] = (
+                    "REVIEW"
+                    if str(body_status).startswith("REVIEW")
+                    or mode_c_status == "REVIEW_MODE_C_CANDIDATE"
+                    else "PASS"
+                )
             except (OSError, KeyError, json.JSONDecodeError):
                 row["failed_stage"] = "BODY_FIT_VALIDATION"
         row["finished_at_utc"] = utc_now()

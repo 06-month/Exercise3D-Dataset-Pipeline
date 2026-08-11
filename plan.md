@@ -243,6 +243,8 @@
 - Mode C candidate: occlusion-risk와 함께 Mode B missing/nonfinite 또는 sequence median+5 MAD
   temporal/alignment outlier가 있어야 하며, identity/PTS exact match, schema PASS, ≥10% alignment 개선
   또는 content-completion 호출, geometry displacement 증가 ≤5%를 모두 검증한 뒤에만 채택
+- full Mode B/body fit 직후 candidate assessor를 자동 실행하되 Mode C 자체는 비교 전 실행/채택하지
+  않으며, candidate 또는 `PASS_MODE_B_FROZEN`을 final private manifest에 포함
 
 ## Phase 9 — Sequence-Level Body Fitting
 

@@ -185,6 +185,10 @@ Mode C는 여전히 selective evidence가 없는 전체 기본값으로 사용�
 - 5B 종료 직후 full SAM에 들어가기 전에 accepted target 8-frame Mode B smoke를 1회 실행한다.
   source PTS provenance, mesh 8, compact numeric 8과 MHR required field 전체가 exact할 때만 full
   camera run을 허용한다. 이 gate를 포함한 전체 unit test는 33개 PASS다.
+- Mode B/body fit 뒤 `assess_sam_mode_c_escalation.py`가 occlusion과 missing/nonfinite,
+  median+5 scaled-MAD temporal/alignment outlier의 교집합을 판정한다. 후보 clip은 양쪽 15-frame,
+  sequence 10% 상한이며 결과는 export dependency다. 후보를 찾는 것과 C 결과 채택은 분리하고,
+  실제 B/C 개선 gate 전에는 Mode B를 덮어쓰지 않는다. 전체 unit test 35개 PASS다.
 
 ## 2026-08-09 — 초기 synchronization / derivative 구축 기록 이관
 

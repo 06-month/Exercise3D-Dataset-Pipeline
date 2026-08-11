@@ -175,3 +175,9 @@ Mode C candidate를 occlusion-risk와 Mode B missing/nonfinite 또는 robust tem
 exact match와 schema를 통과하고 content completion이 실제 호출되거나 canonical alignment residual을
 10% 이상 낮추며 geometry displacement를 5% 넘게 악화시키지 않을 때만 채택한다. 그렇지 않으면
 Mode B를 유지하고 REVIEW로 남긴다.
+
+[`tools/assess_sam_mode_c_escalation.py`](../../tools/assess_sam_mode_c_escalation.py)는 full Mode B와
+Phase 9 fit 직후 이 조건을 실행한다. Robust threshold와 geometry-support 조건을 통과한 frame만
+bounded review clip으로 저장하며, 후보가 없으면 `PASS_MODE_B_FROZEN`을 기록한다. 이 assessor는
+Mode C를 실행하거나 B payload를 교체하지 않으며, 결과 JSON은 final private export의 필수
+uncertainty provenance다.

@@ -44,6 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pose-root", type=Path, required=True)
     parser.add_argument("--triangulation-root", type=Path, required=True)
     parser.add_argument("--sam-prior-root", type=Path, required=True)
+    parser.add_argument("--sam-mode-c-review-root", type=Path, required=True)
     parser.add_argument("--body-fit-root", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--build-id", required=True)
@@ -134,6 +135,9 @@ def sequence_dependencies(args: argparse.Namespace, sequence: str) -> dict[str, 
     files["geometry/metadata.json"] = triangulation / "metadata.json"
     files["body/body_fit.npz"] = body / "body_fit.npz"
     files["body/metadata.json"] = body / "metadata.json"
+    files["body/mode_c_escalation.json"] = (
+        args.sam_mode_c_review_root.resolve() / sequence / "mode_c_escalation.json"
+    )
     return files
 
 
@@ -214,12 +218,22 @@ def validate_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]
             encoding="utf-8"
         )
     )
+    mode_c_metadata = json.loads(
+        (
+            args.sam_mode_c_review_root.resolve()
+            / sequence
+            / "mode_c_escalation.json"
+        ).read_text(encoding="utf-8")
+    )
     if not tri_metadata["qa"]["eligible_for_body_fitting"]:
         reasons.append("triangulation_not_eligible")
     if str(body_metadata["qa"]["status"]).startswith("FAIL"):
         reasons.append("body_fit_fail")
     status = "FAIL" if reasons else (
-        "REVIEW" if body_metadata["qa"]["status"].startswith("REVIEW") else "PASS"
+        "REVIEW"
+        if body_metadata["qa"]["status"].startswith("REVIEW")
+        or mode_c_metadata["status"] == "REVIEW_MODE_C_CANDIDATE"
+        else "PASS"
     )
     return {
         "status": status,
@@ -227,6 +241,7 @@ def validate_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]
         "source_frame_counts": source_counts,
         "reference_frame_count": len(body["frame_index"]),
         "body_fit_status": body_metadata["qa"]["status"],
+        "sam_mode_c_review_status": mode_c_metadata["status"],
         "camera_geometry_status": tri_metadata["qa"]["pose_camera_consistency_status"],
         "valid_body_joint_fraction": float(body["valid_mask"].mean()),
         "prior_only_joint_count": int((body["evidence_type"] == 3).sum()),
@@ -280,6 +295,7 @@ def main() -> int:
             "valid_body_joint_fraction": validation.get("valid_body_joint_fraction", ""),
             "body_fit_status": validation.get("body_fit_status", ""),
             "camera_geometry_status": validation.get("camera_geometry_status", ""),
+            "sam_mode_c_review_status": validation.get("sam_mode_c_review_status", ""),
         }
         sequence_rows.append(row)
         if validation["status"] in {"INCOMPLETE", "FAIL"}:

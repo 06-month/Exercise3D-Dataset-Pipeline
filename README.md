@@ -103,6 +103,8 @@ resume한 뒤 Phase 7 → SAM Mode B → prior consolidation → body fit → pr
 검사합니다. Mode C는 자동 full mode가 아니며
 [`configs/sam_mode_c_escalation.json`](configs/sam_mode_c_escalation.json)의 occlusion+failure/outlier
 조건과 B/C 개선 gate를 모두 통과할 때만 선택 후보입니다.
+각 full Mode B sequence 뒤에는 이 조건을 실제로 평가해 후보 frame/clip 또는
+`PASS_MODE_B_FROZEN`을 private export provenance에 포함합니다.
 
 세부 상태와 acceptance gate는 [plan.md](plan.md), 시간순 실행 기록은
 [process.md](process.md)를 기준으로 합니다.
@@ -256,6 +258,7 @@ Sapiens2 Pose 5B single-image smoke:
 | `tools/run_sam_body4d_full.py` | Mode B camera 단위 resume/completeness orchestration | ignored private output만 생성 |
 | `tools/run_autonomous_generation.py` | Sapiens resume부터 Phase 7–13까지 장시간 critical path supervision | ignored private output 생성 |
 | `tools/consolidate_sam_body_prior.py` | frame/PTS/identity-aware MHR numeric prior 통합 | ignored private output 생성 |
+| `tools/assess_sam_mode_c_escalation.py` | Mode B failure/outlier 기반 bounded Mode C review clip 선정 | ignored private output 생성 |
 | `tools/verify_mhr_parameter_replay.py` | compact 204-d MHR parameter의 official model exact replay 검사 | ignored aggregate 생성 |
 | `tools/fit_sequence_body.py` | geometry-dominant staged sequence body fit과 S0 | ignored private output 생성 |
 | `tools/export_private_dataset.py` | versioned private dataset export와 byte/SHA/schema 검증 | ignored private output 생성 |
