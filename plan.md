@@ -288,12 +288,14 @@
 
 ## Phase 12 — Fit3D Validation
 
-- 상태: `TODO`
+- 상태: `METRICS_IMPLEMENTED_WAITING_DATASET`; exhaustive degradation은 freeze 이후
 - 목적: 전체 pipeline의 정량 accuracy와 calibration tolerance 검증
 - 입력: Fit3D의 3-view 구성, clean/degraded perturbation
 - 출력: MPJPE, N-MPJPE, PA-MPJPE, PVE, joint-angle MAE, ablation
 - 주요 방법: temporal/extrinsic perturbation, tolerance curve, staged loss ablation
 - Acceptance: metric 재현성, error attribution, downstream joint-angle 기준 확정
+- 현재: MPJPE/N-MPJPE/PA-MPJPE metric과 synthetic regression 구현, local Fit3D payload 부재로
+  실제 quantitative score는 아직 주장하지 않음
 - 다음 gate: final schema와 freeze 승인
 
 ## Phase 13 — Final Dataset Freeze

@@ -216,6 +216,15 @@ Mode C는 여전히 selective evidence가 없는 전체 기본값으로 사용�
   valid finite/invalid NaN contract 실패.
 - Threshold는 실제 결과를 보고 완화하지 않는다. Gate unit test 포함 전체 37개 PASS다.
 
+### Fit3D metric implementation readiness
+
+- Local workspace에 Fit3D payload가 없어 실제 score나 camera error를 주장하지 않는다.
+- Root-aligned MPJPE, per-frame scale-only N-MPJPE, similarity Procrustes PA-MPJPE를 별도로 계산하는
+  `tools/evaluate_fit3d_metrics.py`를 구현했다.
+- Known scale/rotation synthetic regression 포함 전체 unit test 39개 PASS다.
+- Dataset freeze 뒤 Fit3D access/convention을 확보하면 30 fps, 3-camera, timing/JPEG/camera
+  perturbation을 단계적으로 적용한다.
+
 ## 2026-08-09 — 초기 synchronization / derivative 구축 기록 이관
 
 ### 수행
