@@ -126,8 +126,12 @@ def sequence_dependencies(args: argparse.Namespace, sequence: str) -> dict[str, 
         files[f"view/{camera}_target_metadata.json"] = selection / "metadata.json"
         files[f"view/{camera}_pose_2d.npz"] = pose / "poses_2d.npz"
         files[f"view/{camera}_pose_metadata.json"] = pose / "metadata.json"
+        files[f"view/{camera}_pose_run_provenance.json"] = pose / "run_provenance.json"
         files[f"body/{camera}_sam_body_prior.npz"] = sam / "sam_body_prior.npz"
         files[f"body/{camera}_sam_body_metadata.json"] = sam / "metadata.json"
+        files[f"body/{camera}_sam_inference_run_provenance.json"] = (
+            sam / "inference_run_provenance.json"
+        )
     triangulation = args.triangulation_root.resolve() / sequence
     body = args.body_fit_root.resolve() / sequence
     files["geometry/triangulated_3d.npz"] = triangulation / "triangulated_3d.npz"

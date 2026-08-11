@@ -212,9 +212,27 @@ def materialize_sam(
     return True
 
 
+def propagate_sam_provenance(
+    sam_root: Path,
+    sam_prior_root: Path,
+    sequence: str,
+    camera: str,
+) -> bool:
+    source = sam_root / sequence / camera / "run_provenance.json"
+    prior = sam_prior_root / sequence / camera
+    destination = prior / "inference_run_provenance.json"
+    if destination.is_file() or not source.is_file() or not (prior / "metadata.json").is_file():
+        return False
+    payload = read_json(source)
+    if payload is None or payload.get("status") != "PASS_PROVENANCE":
+        return False
+    atomic_json(destination, payload)
+    return True
+
+
 def materialize_all(args: argparse.Namespace) -> dict[str, int]:
     handoff_state = read_json(args.handoff_state.resolve())
-    counts = {"pose_created": 0, "sam_created": 0}
+    counts = {"pose_created": 0, "sam_created": 0, "sam_prior_copied": 0}
     for sequence in args.sequences:
         for camera in CAMERAS:
             counts["pose_created"] += int(
@@ -237,6 +255,16 @@ def materialize_all(args: argparse.Namespace) -> dict[str, int]:
                     handoff_state,
                 )
             )
+            sam_prior_root = getattr(args, "sam_prior_root", None)
+            if sam_prior_root is not None:
+                counts["sam_prior_copied"] += int(
+                    propagate_sam_provenance(
+                        args.sam_output_root.resolve(),
+                        sam_prior_root.resolve(),
+                        sequence,
+                        camera,
+                    )
+                )
     return counts
 
 
@@ -246,6 +274,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--selection-root", type=Path, required=True)
     parser.add_argument("--pose-root", type=Path, required=True)
     parser.add_argument("--sam-output-root", type=Path, required=True)
+    parser.add_argument("--sam-prior-root", type=Path, required=True)
     parser.add_argument("--handoff-state", type=Path, required=True)
     parser.add_argument("--sequences", required=True)
     return parser

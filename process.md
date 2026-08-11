@@ -258,6 +258,10 @@ Mode C는 여전히 selective evidence가 없는 전체 기본값으로 사용�
 - partial chunk까지 포함하는 live throughput/ETA를 handoff state에 추가했다. 20:50 KST 기준
   pose 11,424/65,430, recent-chunk 0.22583 crop/s, Sapiens ETA는 2026-08-14 15:14 KST다.
   단독 projection보다 약 2.23시간 늦지만 Mode B end-to-end sequence를 deadline 전에 확보한다.
+- `barbellrow_0000/cam2`도 590/590 completion PASS. cam1+cam2 aggregate는 1,180 frame,
+  1,950.22초, 0.6051 frame/s이고 두 camera combined peak는 모두 61,821 MiB다.
+- pose/SAM inference provenance sidecar를 consolidated SAM prior와 final private export dependency로
+  전파하도록 확장했다. Export는 sidecar 누락 sequence를 complete로 인정하지 않는다.
 
 ## 2026-08-09 — 초기 synchronization / derivative 구축 기록 이관
 

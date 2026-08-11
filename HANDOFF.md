@@ -22,12 +22,12 @@
 
 - Sapiens2 PID 373049, 시작 2026-08-11 18:35 KST, output `outputs/sapiens2_target_only_full`
 - autonomous supervisor PID 537033, 시작 2026-08-11 20:17 KST, output `outputs/runtime/autonomous_generation`
-- 현재 SAM child: `barbellrow_0000/cam2` Mode B full 준비/실행 중
+- 현재 SAM child: `barbellrow_0000/cam3` Mode B full 준비/실행 중
 - Sapiens 완료 camera output 11,168 crop + current chunk 256 crop = 11,424/65,430
 - pre-concurrency steady throughput: 0.23323 crop/s; 병렬 steady throughput은 첫 full SAM camera 후 재계산
 - GPU: A100 80GB, cam1 합산 peak 61,821 MiB/100%; OOM 없음
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
-- handoff monitor PID 595302: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
+- handoff monitor PID 602046: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
   `updated_at_utc` 증가와 exact active/resume command/stage count 보존 확인 완료
 
 Public-safe Sapiens command 형태:
@@ -51,6 +51,8 @@ Public-safe Sapiens command 형태:
 - concurrent Mode B 8-frame smoke: mesh/numeric/PTS schema PASS, combined peak 48,525 MiB
 - full Mode B `barbellrow_0000/cam1`: 590/590, 전 completion check PASS,
   970.94초(0.6077 frame/s), combined peak 61,821 MiB
+- full Mode B cam1+cam2: 1,180 frame/1,950.22초, aggregate 0.6051 frame/s,
+  2/78 camera PASS; cam2 combined peak 61,821 MiB
 - completed Sapiens 15 camera와 SAM 1 camera의 `run_provenance.json` materialize PASS;
   model/checkpoint/config/source/selection/tool/exact-resume identity 포함
 
@@ -58,7 +60,7 @@ Public-safe Sapiens command 형태:
 
 - Sapiens2: 63/78 camera, current partial 포함 54,006 target crops
 - Phase 7 이후: `barbellrow_0001` 및 이후 pose-complete sequence
-- SAM full: 1/78 camera PASS, `barbellrow_0000/cam2` RUNNING, full-complete sequence 0/26
+- SAM full: 2/78 camera PASS, `barbellrow_0000/cam3` RUNNING, full-complete sequence 0/26
 - critical path: pose-complete sequence → Phase 7 gate → Mode B → compact prior → body fit → Mode C candidate QA → export
 
 ## Resume instructions
@@ -109,4 +111,4 @@ Public-safe Sapiens command 형태:
 
 ## Last updated
 
-- 2026-08-11 20:50 KST
+- 2026-08-11 20:52 KST

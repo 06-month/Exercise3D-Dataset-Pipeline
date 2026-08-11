@@ -3,7 +3,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tools.materialize_inference_provenance import materialize_pose, materialize_sam
+from tools.materialize_inference_provenance import (
+    materialize_pose,
+    materialize_sam,
+    propagate_sam_provenance,
+)
 
 
 class InferenceProvenanceTest(unittest.TestCase):
@@ -112,6 +116,14 @@ class InferenceProvenanceTest(unittest.TestCase):
         payload = json.loads((output / "run_provenance.json").read_text())
         self.assertEqual(payload["configuration"]["mode"], "B")
         self.assertEqual(payload["exact_resume_command"], "sam command")
+        prior = self.root / "prior" / "sequence" / "cam1"
+        prior.mkdir(parents=True)
+        (prior / "metadata.json").write_text('{"qa":{"status":"PASS"}}', encoding="utf-8")
+        self.assertTrue(
+            propagate_sam_provenance(sam, self.root / "prior", "sequence", "cam1")
+        )
+        copied = json.loads((prior / "inference_run_provenance.json").read_text())
+        self.assertEqual(copied["configuration_sha256"], payload["configuration_sha256"])
 
 
 if __name__ == "__main__":

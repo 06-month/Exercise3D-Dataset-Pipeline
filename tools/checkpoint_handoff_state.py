@@ -346,6 +346,7 @@ def main() -> int:
     parser.add_argument("--pose-root", type=Path, required=True)
     parser.add_argument("--triangulation-root", type=Path, required=True)
     parser.add_argument("--sam-output-root", type=Path, required=True)
+    parser.add_argument("--sam-prior-root", type=Path, required=True)
     parser.add_argument("--body-fit-root", type=Path, required=True)
     parser.add_argument("--supervisor-state", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=PROJECT_ROOT / ".runtime" / "handoff_state.json")
@@ -372,6 +373,7 @@ def main() -> int:
             selection_root=args.selection_root,
             pose_root=args.pose_root,
             sam_output_root=args.sam_output_root,
+            sam_prior_root=args.sam_prior_root,
             handoff_state=output,
             sequences=[item for item in args.sequences.split(",") if item],
         )
