@@ -12,6 +12,7 @@ import numpy as np
 from tools.consolidate_sam_body_prior import REQUIRED_PRIOR_FIELDS
 from tools.run_autonomous_generation import (
     free_gib,
+    load_successful_rows,
     process_alive,
     sam_smoke_complete,
     sapiens_progress,
@@ -19,6 +20,19 @@ from tools.run_autonomous_generation import (
 
 
 class AutonomousGenerationTest(unittest.TestCase):
+    def test_resume_loads_only_successful_sequence_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "rows.csv"
+            path.write_text(
+                "sequence,status,failed_stage\n"
+                "ready,PASS,\n"
+                "review,REVIEW,\n"
+                "retry,INCOMPLETE,SAM_MODE_B\n",
+                encoding="utf-8",
+            )
+            rows = load_successful_rows(path)
+            self.assertEqual([row["sequence"] for row in rows], ["ready", "review"])
+
     def test_process_alive_for_current_and_finished_process(self) -> None:
         self.assertTrue(process_alive(os.getpid()))
         process = subprocess.Popen(["true"])

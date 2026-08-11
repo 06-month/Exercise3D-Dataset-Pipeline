@@ -233,6 +233,25 @@ Mode C는 여전히 selective evidence가 없는 전체 기본값으로 사용�
   consolidation에서 뒤늦게 반복 실패하지 않는다. Schema mismatch 회귀 test 포함 전체 40개 PASS다.
 - Fit3D metric은 root joint 자체가 nonfinite인 frame을 제외하도록 보강했으며 전체 41개 test PASS다.
 
+### Persistent handoff와 sequence-complete GPU streaming
+
+- Sapiens2를 중단하지 않고 8-frame Mode B numeric smoke를 동시에 실행했다. mesh/numeric/PTS와
+  MHR required field가 모두 PASS했고 combined peak는 48,525 MiB였다.
+- 5B 종료까지 기다리면 deadline에 end-to-end 완결 sequence가 늘지 않으므로, 이미 보고한
+  sequence-complete 계획대로 pose-ready sequence를 Phase 7→Mode B→prior→body fit으로 즉시 보내는
+  resumable supervisor로 전환했다. 정상 Sapiens PID와 output은 유지했다.
+- 첫 full `barbellrow_0000/cam1` Mode B는 590/590 frame, primary target 1명,
+  mesh/numeric/provenance 전 completion check PASS. concurrent wall 970.94초,
+  0.6077 frame/s, combined peak 61,821 MiB, mean GPU 96.76%, mean power 339.60 W였다.
+- public `HANDOFF.md`에는 path-neutral operational checkpoint와 frozen decision/resume gate를,
+  `AGENTS.md`에는 10-step startup protocol을 기록했다. exact private command/PID/progress는
+  ignored `.runtime/handoff_state.json`에 30초마다 `*.tmp`→atomic rename으로 보존한다.
+- checkpoint에는 completed/in-progress/remaining, last completed camera, crop/frame counts,
+  config hash, checkpoint identity, source/camera/timing version, Git HEAD/diff hash, active/resume command,
+  GPU와 downstream counts가 들어간다. detached monitor PID 575526과 multi-cycle timestamp 전진을 확인했다.
+- supervisor resume는 PASS/REVIEW row만 durable complete로 불러오고 incomplete row를 retry한다.
+  handoff/resume regression을 포함한 전체 44개 unit test PASS다.
+
 ## 2026-08-09 — 초기 synchronization / derivative 구축 기록 이관
 
 ### 수행

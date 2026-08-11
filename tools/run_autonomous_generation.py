@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Supervise the remaining private Exercise3D generation critical path.
 
-The supervisor first waits for an already-running Sapiens2 process.  If that
-process exits before all selection-bound camera outputs are complete, it uses
-the same frozen configuration to resume.  It then runs Phase 7, SAM Mode B,
-prior consolidation, sequence fitting and a versioned private export.  A
-failure is recorded per sequence and does not silently promote incomplete data.
+The supervisor watches an already-running Sapiens2 process and immediately
+streams every pose-complete sequence through Phase 7, SAM Mode B, prior
+consolidation and sequence fitting.  This overlaps the low-duty-cycle SAM
+pipeline with Sapiens while retaining sequence-level resume.  If Sapiens exits
+before all selection-bound camera outputs are complete, the same frozen
+configuration is resumed.  A failure is recorded per sequence and does not
+silently promote incomplete data.
 """
 
 from __future__ import annotations
@@ -258,6 +260,18 @@ def atomic_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     os.replace(temporary, path)
 
 
+def load_successful_rows(path: Path) -> list[dict[str, Any]]:
+    """Load only durable completed rows; incomplete work is safe to retry."""
+    if not path.is_file():
+        return []
+    try:
+        with path.open(newline="", encoding="utf-8") as handle:
+            rows = list(csv.DictReader(handle))
+        return [row for row in rows if row.get("status") in {"PASS", "REVIEW"}]
+    except (OSError, csv.Error):
+        return []
+
+
 def missing_pose_sequences(args: argparse.Namespace) -> list[str]:
     return [
         sequence
@@ -445,6 +459,84 @@ def export_command(args: argparse.Namespace) -> list[str]:
     ]
 
 
+def ensure_sam_smoke(args: argparse.Namespace, sequence: str) -> bool:
+    smoke_frames = 8
+    smoke_dir = args.runtime_dir.resolve() / "sam_numeric_smoke"
+    if sam_smoke_complete(smoke_dir, smoke_frames):
+        return True
+    update_state(
+        args,
+        "SAM_MODE_B_NUMERIC_SMOKE",
+        [],
+        smoke_sequence=sequence,
+        smoke_camera="cam1",
+        smoke_frames=smoke_frames,
+        concurrent_with_sapiens=bool(
+            args.wait_sapiens_pid is not None
+            and process_alive(args.wait_sapiens_pid)
+        ),
+    )
+    run(sam_smoke_command(args, sequence, "cam1", smoke_frames))
+    return sam_smoke_complete(smoke_dir, smoke_frames)
+
+
+def run_sequence_pipeline(
+    args: argparse.Namespace, sequence: str, sam_smoke_ok: bool
+) -> dict[str, Any]:
+    started = time.perf_counter()
+    row: dict[str, Any] = {
+        "sequence": sequence,
+        "status": "INCOMPLETE",
+        "failed_stage": "",
+        "started_at_utc": utc_now(),
+        "finished_at_utc": "",
+        "elapsed_seconds": 0.0,
+    }
+    if not sam_smoke_ok:
+        row["failed_stage"] = "SAM_MODE_B_NUMERIC_SMOKE"
+    elif run(phase7_command(args, sequence)) != 0:
+        row["failed_stage"] = "PHASE7"
+    elif free_gib(args.sam_output_root) < args.minimum_free_gib:
+        row["failed_stage"] = "DISK_RESERVE"
+    elif run(sam_command(args, sequence)) != 0:
+        row["failed_stage"] = "SAM_MODE_B"
+    elif run(consolidate_command(args, sequence)) != 0:
+        row["failed_stage"] = "SAM_PRIOR_CONSOLIDATION"
+    elif run(fit_command(args, sequence)) != 0:
+        row["failed_stage"] = "BODY_FIT"
+    elif run(mode_c_assessment_command(args, sequence)) != 0:
+        row["failed_stage"] = "MODE_C_ASSESSMENT"
+    else:
+        metadata_path = args.body_fit_root.resolve() / sequence / "metadata.json"
+        try:
+            body_status = json.loads(metadata_path.read_text(encoding="utf-8"))["qa"][
+                "status"
+            ]
+            mode_c_status = json.loads(
+                (
+                    args.sam_mode_c_review_root.resolve()
+                    / sequence
+                    / "mode_c_escalation.json"
+                ).read_text(encoding="utf-8")
+            )["status"]
+            row["status"] = (
+                "REVIEW"
+                if str(body_status).startswith("REVIEW")
+                or mode_c_status == "REVIEW_MODE_C_CANDIDATE"
+                else "PASS"
+            )
+        except (OSError, KeyError, json.JSONDecodeError):
+            row["failed_stage"] = "BODY_FIT_VALIDATION"
+    row["finished_at_utc"] = utc_now()
+    row["elapsed_seconds"] = time.perf_counter() - started
+    return row
+
+
+def upsert_row(rows: list[dict[str, Any]], row: dict[str, Any]) -> None:
+    rows[:] = [existing for existing in rows if existing.get("sequence") != row["sequence"]]
+    rows.append(row)
+
+
 def main() -> int:
     args = build_parser().parse_args()
     if (
@@ -456,9 +548,47 @@ def main() -> int:
         or args.expected_sam_hours <= 0
     ):
         raise RuntimeError("invalid poll/retry configuration")
-    rows: list[dict[str, Any]] = []
+    sequence_csv = args.runtime_dir.resolve() / "autonomous_sequences.csv"
+    rows = load_successful_rows(sequence_csv)
+    successful = {row["sequence"] for row in rows}
+    stream_attempted: set[str] = set()
+    sam_smoke_ok = False
     if args.wait_sapiens_pid is not None:
         while process_alive(args.wait_sapiens_pid):
+            ready = next(
+                (
+                    sequence
+                    for sequence in args.sequences
+                    if sequence not in successful
+                    and sequence not in stream_attempted
+                    and sequence_ready(
+                        args.dataset_root.resolve(), args.pose_root.resolve(), sequence
+                    )
+                ),
+                None,
+            )
+            if ready is not None:
+                sam_smoke_ok = sam_smoke_ok or ensure_sam_smoke(args, ready)
+                update_state(
+                    args,
+                    "STREAM_SEQUENCE_PIPELINE",
+                    rows,
+                    active_sequence=ready,
+                    monitored_pid=args.wait_sapiens_pid,
+                    concurrent_with_sapiens=True,
+                    sapiens_progress=sapiens_progress(args),
+                    free_storage_gib=free_gib(args.sam_output_root),
+                )
+                row = run_sequence_pipeline(args, ready, sam_smoke_ok)
+                upsert_row(rows, row)
+                atomic_csv(sequence_csv, rows)
+                stream_attempted.add(ready)
+                if row["status"] in {"PASS", "REVIEW"}:
+                    successful.add(ready)
+                print(json.dumps(row, ensure_ascii=False), flush=True)
+                # A failed sequence has already consumed its configured retry;
+                # do not hot-loop it while the long teacher process is alive.
+                continue
             update_state(
                 args,
                 "WAIT_RUNNING_SAPIENS2",
@@ -483,80 +613,48 @@ def main() -> int:
         run(sapiens_command(args))
     pose_missing = missing_pose_sequences(args)
 
-    smoke_frames = 8
-    smoke_dir = args.runtime_dir.resolve() / "sam_numeric_smoke"
-    sam_smoke_ok = False
-    if not pose_missing:
-        sam_smoke_ok = sam_smoke_complete(smoke_dir, smoke_frames)
-        if not sam_smoke_ok:
-            update_state(
-                args,
-                "SAM_MODE_B_NUMERIC_SMOKE",
-                rows,
-                smoke_sequence=args.sequences[0],
-                smoke_camera="cam1",
-                smoke_frames=smoke_frames,
-            )
-            run(sam_smoke_command(args, args.sequences[0], "cam1", smoke_frames))
-            sam_smoke_ok = sam_smoke_complete(smoke_dir, smoke_frames)
+    if not sam_smoke_ok:
+        smoke_sequence = next(
+            (
+                sequence
+                for sequence in args.sequences
+                if sequence_ready(
+                    args.dataset_root.resolve(), args.pose_root.resolve(), sequence
+                )
+            ),
+            None,
+        )
+        sam_smoke_ok = bool(
+            smoke_sequence is not None and ensure_sam_smoke(args, smoke_sequence)
+        )
 
     for sequence in args.sequences:
-        started = time.perf_counter()
-        row: dict[str, Any] = {
-            "sequence": sequence,
-            "status": "INCOMPLETE",
-            "failed_stage": "",
-            "started_at_utc": utc_now(),
-            "finished_at_utc": "",
-            "elapsed_seconds": 0.0,
-        }
+        if sequence in successful:
+            continue
         if sequence in pose_missing:
-            row["failed_stage"] = "SAPIENS2"
-        elif not sam_smoke_ok:
-            row["failed_stage"] = "SAM_MODE_B_NUMERIC_SMOKE"
-        elif run(phase7_command(args, sequence)) != 0:
-            row["failed_stage"] = "PHASE7"
-        elif free_gib(args.sam_output_root) < args.minimum_free_gib:
-            row["failed_stage"] = "DISK_RESERVE"
-        elif run(sam_command(args, sequence)) != 0:
-            row["failed_stage"] = "SAM_MODE_B"
-        elif run(consolidate_command(args, sequence)) != 0:
-            row["failed_stage"] = "SAM_PRIOR_CONSOLIDATION"
-        elif run(fit_command(args, sequence)) != 0:
-            row["failed_stage"] = "BODY_FIT"
-        elif run(mode_c_assessment_command(args, sequence)) != 0:
-            row["failed_stage"] = "MODE_C_ASSESSMENT"
+            now = utc_now()
+            row = {
+                "sequence": sequence,
+                "status": "INCOMPLETE",
+                "failed_stage": "SAPIENS2",
+                "started_at_utc": now,
+                "finished_at_utc": now,
+                "elapsed_seconds": 0.0,
+            }
         else:
-            metadata_path = args.body_fit_root.resolve() / sequence / "metadata.json"
-            try:
-                body_status = json.loads(metadata_path.read_text(encoding="utf-8"))["qa"][
-                    "status"
-                ]
-                mode_c_status = json.loads(
-                    (
-                        args.sam_mode_c_review_root.resolve()
-                        / sequence
-                        / "mode_c_escalation.json"
-                    ).read_text(encoding="utf-8")
-                )["status"]
-                row["status"] = (
-                    "REVIEW"
-                    if str(body_status).startswith("REVIEW")
-                    or mode_c_status == "REVIEW_MODE_C_CANDIDATE"
-                    else "PASS"
-                )
-            except (OSError, KeyError, json.JSONDecodeError):
-                row["failed_stage"] = "BODY_FIT_VALIDATION"
-        row["finished_at_utc"] = utc_now()
-        row["elapsed_seconds"] = time.perf_counter() - started
-        rows.append(row)
-        atomic_csv(args.runtime_dir.resolve() / "autonomous_sequences.csv", rows)
+            row = run_sequence_pipeline(args, sequence, sam_smoke_ok)
+        upsert_row(rows, row)
+        atomic_csv(sequence_csv, rows)
         update_state(
             args,
             "SEQUENCE_PIPELINE",
             rows,
             active_sequence=sequence,
-            remaining_sequences=args.sequences[len(rows) :],
+            remaining_sequences=[
+                item
+                for item in args.sequences
+                if item not in {existing["sequence"] for existing in rows}
+            ],
             mode_b_default=True,
             mode_c_automatic=False,
             free_storage_gib=free_gib(args.sam_output_root),

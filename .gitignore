@@ -71,6 +71,7 @@ outputs/*
 reports/
 logs/
 *.log
+.runtime/
 
 # Location / archive / editor artifacts
 *.gpx

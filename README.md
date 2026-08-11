@@ -8,6 +8,11 @@
 payload는 공개하지 않습니다. 저장소에는 재현 가능한 코드, 방법론, QA 기준, 비식별
 수치 요약 및 synthetic schema example만 둡니다.
 
+장시간 generation을 이어받는 agent는 다른 문서보다 먼저
+[`HANDOFF.md`](HANDOFF.md)를 읽습니다. 실시간 private command/PID/progress는 Git에서 제외된
+`.runtime/handoff_state.json`에 30초 간격으로 atomic 저장되며, 살아 있는 inference를 중복
+실행하지 않는 startup 순서는 [`AGENTS.md`](AGENTS.md)에 고정했습니다.
+
 ## 프로젝트 목표
 
 고정된 3대의 카메라로 촬영한 운동 영상을 입력으로 받아 다음 정보를 신뢰도와 함께
@@ -65,7 +70,7 @@ camera calibration을 구분합니다.
 | 6-1A. Primary Target Selection | DONE | 9,732 frame, identity switch 0, ambiguity 7, crop 50.37% 감소 |
 | 6-2. Target-only Runtime Gate | RUNNING | full selector `GO_FULL_DATASET`; 78 view/65,595 frame, target 65,430, identity/integrity failure 0; 5B batch 16 실행 중 |
 | 7. Timestamp-aware Triangulation | RUNNING | pilot 4/4 final schema PASS; pose-complete sequence CPU streaming, NO_GO에만 held-out recovery |
-| 8. SAM Body Runtime Feasibility | PILOT DONE/REVIEW | 22.387 GiB integrity PASS, A/B/C 6-run 완료; Mode B full policy·numeric schema 동결 |
+| 8. SAM Body Runtime Feasibility | FULL RUNNING/REVIEW | 22.387 GiB integrity PASS, A/B/C 6-run 완료; Mode B sequence streaming, 첫 full camera completion PASS |
 | 9. Sequence Body Fitting | IMPLEMENTED/WAITING INPUT | geometry-dominant staged fit, MHR exact replay와 uncertainty schema 구현 |
 | 10–13 | IMPLEMENTED PARTIAL/WAITING INPUT | S0와 versioned private export/SHA 검증 구현; full input 후 QC/freeze gate 실행 |
 

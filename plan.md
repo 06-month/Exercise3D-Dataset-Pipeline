@@ -7,17 +7,20 @@
 
 - primary objective: correctness·provenance·identity consistency를 유지하면서 deadline까지
   end-to-end로 완결되고 freeze 가능한 sequence 수를 최대화
-- 2026-08-11 19:12 KST 기준 remaining wall-clock 65.79 h
+- 2026-08-11 20:35 KST 기준 remaining wall-clock 64.42 h
 - 최신 target-only Sapiens2 projection 79.09 GPUh와 SAM Mode B 16.35 h는 한 A100에서
   deadline 전 전량 순차 완료가 불가능하므로, sequence-complete streaming으로 변경
 - 이미 완료된 4개 pilot sequence output은 검증 후 재사용하고 재추론하지 않음
-- GPU priority: Sapiens2-5B target-only; CPU는 이전 완료 sequence의 triangulation/QC를 병행
+- GPU scheduling: Sapiens2-5B는 계속 실행하고, pose-complete sequence의 Mode B를 겹쳐
+  end-to-end 완결 sequence를 확보한다. 첫 full camera 병렬 peak 61,821 MiB와 completion PASS 확인
 - SAM policy: Mode B default, Mode C는 실제 failure/occlusion escalation evidence가 있는 경우만 REVIEW
 - long-run supervision: current 5B 종료 감시, 불완전 camera selection-bound resume, Phase 7→Mode B→
   consolidation→body fit→versioned private export를 sequence별 자동 진행
 - SAM full 직전 8-frame Mode B numeric smoke에서 source PTS/mesh/MHR compact schema exact gate 요구
 - deadline에 미완료된 sequence는 `INCOMPLETE_DEADLINE`로 명시하고 PASS로 위장하지 않음
 - Fit3D exhaustive tolerance/ablation은 final private dataset critical path를 방해하면 freeze 이후로 이동
+- persistent handoff: `HANDOFF.md` + ignored `.runtime/handoff_state.json` 30초 atomic checkpoint;
+  completion metadata/schema PASS item만 skip하고 incomplete/corrupt item만 resume
 
 ## 현재 Gate
 
@@ -30,7 +33,7 @@
 - Phase 6-1 multi-exercise pose pilot: `DONE`, all-person 결과는 baseline으로 보존
 - Phase 6-1A primary target selection: `DONE`, `GO_FULL_DATASET` 조건 충족
 - Phase 6-2 target-only runtime gate: `DONE`, autonomous full inference 승인·critical path 진입
-- Phase 8 runtime feasibility pilot: `PILOT_COMPLETE_REVIEW`, Mode B default / Mode C selective
+- Phase 8 runtime feasibility pilot: `PILOT_COMPLETE_REVIEW`, full Mode B `IN_PROGRESS`, Mode C selective
 
 ## Phase 0 — Dataset Inventory / Integrity
 
