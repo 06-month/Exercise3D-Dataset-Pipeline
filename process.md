@@ -231,6 +231,7 @@ Mode C는 여전히 selective evidence가 없는 전체 기본값으로 사용�
   모든 compact NPZ의 MHR required field set을 전수 검사한다.
 - 오래된 mesh-only/부분 numeric output은 full runner에서 즉시 `INCOMPLETE`가 되어 retry 대상이며,
   consolidation에서 뒤늦게 반복 실패하지 않는다. Schema mismatch 회귀 test 포함 전체 40개 PASS다.
+- Fit3D metric은 root joint 자체가 nonfinite인 frame을 제외하도록 보강했으며 전체 41개 test PASS다.
 
 ## 2026-08-09 — 초기 synchronization / derivative 구축 기록 이관
 

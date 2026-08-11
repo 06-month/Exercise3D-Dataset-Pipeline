@@ -30,6 +30,16 @@ class Fit3dMetricsTest(unittest.TestCase):
         self.assertGreater(result["n_mpjpe_mm"], 1.0)
         self.assertLess(result["pa_mpjpe_mm"], 1e-9)
 
+    def test_nonfinite_root_excludes_the_frame(self) -> None:
+        rng = np.random.default_rng(17)
+        target = rng.normal(size=(2, 17, 3))
+        prediction = target.copy()
+        prediction[1, 0] = np.nan
+        result = evaluate_metrics(
+            prediction, target, np.ones((2, 17), dtype=np.bool_), 0, 1000.0
+        )
+        self.assertEqual(result["evaluated_frame_count"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

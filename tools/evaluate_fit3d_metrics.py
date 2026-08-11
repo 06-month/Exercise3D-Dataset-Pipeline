@@ -81,7 +81,8 @@ def evaluate_metrics(
     if unit_to_mm <= 0:
         raise ValueError("unit conversion must be positive")
     finite = np.isfinite(prediction).all(axis=-1) & np.isfinite(target).all(axis=-1)
-    usable = valid & finite & valid[:, root_index : root_index + 1]
+    root_usable = valid[:, root_index : root_index + 1] & finite[:, root_index : root_index + 1]
+    usable = valid & finite & root_usable
     prediction_centered = root_center(prediction, root_index)
     target_centered = root_center(target, root_index)
     mpjpe_errors = []
