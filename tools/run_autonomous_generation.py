@@ -73,6 +73,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--poll-seconds", type=float, default=30.0)
     parser.add_argument("--deadline-utc", default="2026-08-14T04:00:00+00:00")
     parser.add_argument("--minimum-free-gib", type=float, default=20.0)
+    parser.add_argument("--expected-target-crops", type=int, default=65430)
+    parser.add_argument("--reused-target-crops", type=int, default=9725)
+    parser.add_argument("--expected-sam-hours", type=float, default=20.8)
     return parser
 
 
@@ -129,6 +132,92 @@ def sam_smoke_complete(output_dir: Path, expected_frames: int) -> bool:
         return False
 
 
+def sapiens_progress(args: argparse.Namespace) -> dict[str, Any]:
+    completed_crops = 0
+    complete_cameras = 0
+    complete_sequences = 0
+    new_camera_events: list[tuple[datetime, int]] = []
+    for sequence in args.sequences:
+        sequence_complete = True
+        for camera in CAMERAS.split(","):
+            camera_dir = args.pose_root.resolve() / sequence / camera
+            metadata_path = camera_dir / "metadata.json"
+            if metadata_path.is_file():
+                try:
+                    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                    camera_crops = int(metadata["qa"]["target_pose_count"])
+                    completed_crops += camera_crops
+                    complete_cameras += 1
+                    if metadata.get("pose_inference_performed_in_this_stage"):
+                        new_camera_events.append(
+                            (datetime.fromisoformat(metadata["created_at_utc"]), camera_crops)
+                        )
+                    continue
+                except (OSError, KeyError, ValueError, json.JSONDecodeError):
+                    pass
+            sequence_complete = False
+            for chunk in sorted((camera_dir / "chunks").glob("*.npz")):
+                try:
+                    with np.load(chunk, allow_pickle=False) as payload:
+                        completed_crops += int(payload["target_present"].sum())
+                except (OSError, KeyError, ValueError):
+                    continue
+        complete_sequences += int(sequence_complete)
+    inferred = max(0, completed_crops - args.reused_target_crops)
+    monitor_path = (
+        args.pose_root.resolve().parent
+        / "runtime"
+        / "phase6_full_target_inference"
+        / "target_only_pilot_gpu_utilization.csv"
+    )
+    # The standard layout above may not match an injected output root.
+    injected_monitor = args.runtime_dir.resolve().parent / "phase6_full_target_inference" / (
+        "target_only_pilot_gpu_utilization.csv"
+    )
+    if injected_monitor.is_file():
+        monitor_path = injected_monitor
+    started = None
+    if monitor_path.is_file():
+        try:
+            with monitor_path.open(newline="", encoding="utf-8") as handle:
+                first = next(csv.DictReader(handle))
+            started = datetime.fromisoformat(first["timestamp_utc"])
+        except (OSError, StopIteration, KeyError, ValueError):
+            started = None
+    now = datetime.now(timezone.utc)
+    elapsed = (now - started.astimezone(timezone.utc)).total_seconds() if started else 0.0
+    rate = inferred / elapsed if inferred > 0 and elapsed > 0 else 0.0
+    new_camera_events.sort()
+    recent_rate = 0.0
+    if len(new_camera_events) >= 2:
+        recent_elapsed = (
+            new_camera_events[-1][0] - new_camera_events[0][0]
+        ).total_seconds()
+        recent_crops = sum(event[1] for event in new_camera_events[1:])
+        recent_rate = recent_crops / recent_elapsed if recent_elapsed > 0 else 0.0
+    remaining = max(0, args.expected_target_crops - completed_crops)
+    projection_rate = recent_rate or rate
+    eta_hours = remaining / projection_rate / 3600.0 if projection_rate > 0 else None
+    return {
+        "expected_target_crops": args.expected_target_crops,
+        "completed_target_crops": completed_crops,
+        "remaining_target_crops": remaining,
+        "reused_target_crops": args.reused_target_crops,
+        "new_inferred_crops": inferred,
+        "effective_new_crops_per_second": rate,
+        "recent_completed_camera_crops_per_second": recent_rate or None,
+        "eta_projection_crops_per_second": projection_rate or None,
+        "complete_camera_count": complete_cameras,
+        "complete_sequence_count": complete_sequences,
+        "elapsed_hours": elapsed / 3600.0,
+        "estimated_remaining_sapiens_hours": eta_hours,
+        "estimated_sapiens_completion_utc": (
+            datetime.fromtimestamp(now.timestamp() + eta_hours * 3600, tz=timezone.utc).isoformat()
+            if eta_hours is not None
+            else None
+        ),
+        "downstream_expected_sam_hours": args.expected_sam_hours,
+    }
 def atomic_text(path: Path, value: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + f".{os.getpid()}.tmp")
@@ -338,7 +427,14 @@ def export_command(args: argparse.Namespace) -> list[str]:
 
 def main() -> int:
     args = build_parser().parse_args()
-    if args.poll_seconds <= 0 or args.sapiens_retries < 0 or args.minimum_free_gib <= 0:
+    if (
+        args.poll_seconds <= 0
+        or args.sapiens_retries < 0
+        or args.minimum_free_gib <= 0
+        or args.expected_target_crops <= 0
+        or args.reused_target_crops < 0
+        or args.expected_sam_hours <= 0
+    ):
         raise RuntimeError("invalid poll/retry configuration")
     rows: list[dict[str, Any]] = []
     if args.wait_sapiens_pid is not None:
@@ -348,6 +444,8 @@ def main() -> int:
                 "WAIT_RUNNING_SAPIENS2",
                 rows,
                 monitored_pid=args.wait_sapiens_pid,
+                sapiens_progress=sapiens_progress(args),
+                free_storage_gib=free_gib(args.sam_output_root),
             )
             time.sleep(args.poll_seconds)
 

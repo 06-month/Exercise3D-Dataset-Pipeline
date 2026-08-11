@@ -195,6 +195,18 @@ Mode C는 여전히 selective evidence가 없는 전체 기본값으로 사용�
   외형이나 learned shape로 identity를 추측하지 않는다. Freeze v1은 sequence-level S0를 생성하되
   `subject_id=null`, `SUBJECT_MAPPING_UNAVAILABLE`을 기록하고 cross-sequence shape fusion을 보류한다.
 
+### Sapiens2 full steady-state ETA 갱신
+
+- `barbellrow_0001/cam1`과 cam2는 각각 481/481 target crop, schema PASS로 완료됐다.
+- 두 camera completion timestamp 사이 steady-state rate는 `0.23323 crop/s`다. 2026-08-11
+  19:50 KST 기준 완료 pose 10,687/65,430, 남은 crop 54,743, complete camera 14/78이다.
+- recent-camera rate projection은 Sapiens 종료 `2026-08-14 13:02 KST`로 deadline과 사실상 동일하고
+  retry/QC reserve는 없다. Saved-chunk 기준 전체 effective rate는 current incomplete chunk 때문에
+  `0.216 crop/s`로 보수적으로 진동한다.
+- supervisor state에 current KST 대응 UTC, remaining wall, completed/remaining crop, recent/effective
+  throughput, camera/sequence 수, Sapiens ETA, SAM expected 20.8 h와 free storage를 30초마다 기록한다.
+- recent-camera ETA monitor 회귀 test를 포함한 전체 unit test 36개가 PASS했다.
+
 ## 2026-08-09 — 초기 synchronization / derivative 구축 기록 이관
 
 ### 수행
