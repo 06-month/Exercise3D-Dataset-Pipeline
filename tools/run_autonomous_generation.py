@@ -22,9 +22,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 try:
+    from tools.consolidate_sam_body_prior import REQUIRED_PRIOR_FIELDS
     from tools.run_phase7_streaming import sequence_ready
 except ModuleNotFoundError:
+    from consolidate_sam_body_prior import REQUIRED_PRIOR_FIELDS
     from run_phase7_streaming import sequence_ready
 
 
@@ -84,6 +88,44 @@ def free_gib(path: Path) -> float:
     while not existing.exists():
         existing = existing.parent
     return shutil.disk_usage(existing).free / (1024**3)
+
+
+def sam_smoke_complete(output_dir: Path, expected_frames: int) -> bool:
+    private = output_dir / "mode_b_private_output"
+    profile_path = output_dir / "mode_b_profile.json"
+    benchmark_path = output_dir / "sam_body_benchmark.csv"
+    provenance_path = private / "target_provenance.npz"
+    numeric = sorted((private / "mhr_numeric" / "1").glob("*.npz"))
+    meshes = sorted((private / "mesh_4d_individual" / "1").glob("*.ply"))
+    if (
+        not profile_path.is_file()
+        or not benchmark_path.is_file()
+        or not provenance_path.is_file()
+        or len(numeric) != expected_frames
+        or len(meshes) != expected_frames
+    ):
+        return False
+    try:
+        profile = json.loads(profile_path.read_text(encoding="utf-8"))
+        with benchmark_path.open(newline="", encoding="utf-8") as handle:
+            benchmark = list(csv.DictReader(handle))
+        with np.load(provenance_path, allow_pickle=False) as provenance:
+            provenance_ok = (
+                len(provenance["frame_names"]) == expected_frames
+                and len(provenance["timestamp_pts_seconds"]) == expected_frames
+            )
+        with np.load(numeric[0], allow_pickle=False) as payload:
+            numeric_ok = set(REQUIRED_PRIOR_FIELDS) <= set(payload.files)
+        return bool(
+            provenance_ok
+            and numeric_ok
+            and len(benchmark) == 1
+            and benchmark[0]["status"] == "PASS"
+            and int(profile["frames_processed"]) == expected_frames
+            and int(profile["target_seed_count"]) == 1
+        )
+    except (OSError, ValueError, KeyError, json.JSONDecodeError):
+        return False
 
 
 def atomic_text(path: Path, value: str) -> None:
@@ -216,6 +258,30 @@ def sam_command(args: argparse.Namespace, sequence: str) -> list[str]:
     ]
 
 
+def sam_smoke_command(
+    args: argparse.Namespace, sequence: str, camera: str, frame_count: int
+) -> list[str]:
+    exercise = sequence.rsplit("_", 1)[0]
+    frames = (
+        args.dataset_root.resolve() / "final_frame" / exercise / sequence / camera
+    )
+    selection = args.selection_root.resolve() / sequence / camera / "target_selection.npz"
+    return [
+        str(args.body4d_python.resolve()),
+        str(PROJECT_ROOT / "tools" / "benchmark_sam_body4d.py"),
+        "--mode", "B",
+        "--sam-body4d-root", str(args.sam_body4d_root.resolve()),
+        "--checkpoint-root", str(args.checkpoint_root.resolve()),
+        "--input-frames", str(frames),
+        "--target-selection", str(selection),
+        "--source-start-index", "0",
+        "--frame-count", str(frame_count),
+        "--output-dir", str(args.runtime_dir.resolve() / "sam_numeric_smoke"),
+        "--python", str(args.body4d_python.resolve()),
+        "--run",
+    ]
+
+
 def consolidate_command(args: argparse.Namespace, sequence: str) -> list[str]:
     return [
         sys.executable,
@@ -285,6 +351,23 @@ def main() -> int:
         run(sapiens_command(args))
     pose_missing = missing_pose_sequences(args)
 
+    smoke_frames = 8
+    smoke_dir = args.runtime_dir.resolve() / "sam_numeric_smoke"
+    sam_smoke_ok = False
+    if not pose_missing:
+        sam_smoke_ok = sam_smoke_complete(smoke_dir, smoke_frames)
+        if not sam_smoke_ok:
+            update_state(
+                args,
+                "SAM_MODE_B_NUMERIC_SMOKE",
+                rows,
+                smoke_sequence=args.sequences[0],
+                smoke_camera="cam1",
+                smoke_frames=smoke_frames,
+            )
+            run(sam_smoke_command(args, args.sequences[0], "cam1", smoke_frames))
+            sam_smoke_ok = sam_smoke_complete(smoke_dir, smoke_frames)
+
     for sequence in args.sequences:
         started = time.perf_counter()
         row: dict[str, Any] = {
@@ -297,6 +380,8 @@ def main() -> int:
         }
         if sequence in pose_missing:
             row["failed_stage"] = "SAPIENS2"
+        elif not sam_smoke_ok:
+            row["failed_stage"] = "SAM_MODE_B_NUMERIC_SMOKE"
         elif run(phase7_command(args, sequence)) != 0:
             row["failed_stage"] = "PHASE7"
         elif free_gib(args.sam_output_root) < args.minimum_free_gib:

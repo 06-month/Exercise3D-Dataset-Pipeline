@@ -182,6 +182,9 @@ Mode C는 여전히 selective evidence가 없는 전체 기본값으로 사용�
 - Mode C 자동 full 실행은 금지했다. candidate/acceptance는
   `configs/sam_mode_c_escalation.json`에 동결했으며, occlusion 단독으로 escalation하지 않는다.
 - supervisor process-alive/storage helper를 포함한 전체 unit test 32개가 PASS했다.
+- 5B 종료 직후 full SAM에 들어가기 전에 accepted target 8-frame Mode B smoke를 1회 실행한다.
+  source PTS provenance, mesh 8, compact numeric 8과 MHR required field 전체가 exact할 때만 full
+  camera run을 허용한다. 이 gate를 포함한 전체 unit test는 33개 PASS다.
 
 ## 2026-08-09 — 초기 synchronization / derivative 구축 기록 이관
 

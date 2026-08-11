@@ -99,7 +99,8 @@ INCOMPLETE 상태를 versioned manifest에 기록합니다.
 
 현재 장기 supervisor는 실행 중인 5B PID를 기다리고, 불완전 종료 시 동일 selection-bound 설정으로
 resume한 뒤 Phase 7 → SAM Mode B → prior consolidation → body fit → private export를 sequence별로
-이어갑니다. Mode C는 자동 full mode가 아니며
+이어갑니다. Full SAM 직전에는 8-frame Mode B smoke로 PTS/mesh/MHR numeric schema를 실제 GPU에서
+검사합니다. Mode C는 자동 full mode가 아니며
 [`configs/sam_mode_c_escalation.json`](configs/sam_mode_c_escalation.json)의 occlusion+failure/outlier
 조건과 B/C 개선 gate를 모두 통과할 때만 선택 후보입니다.
 
