@@ -191,6 +191,9 @@ Mode C는 여전히 selective evidence가 없는 전체 기본값으로 사용�
   실제 B/C 개선 gate 전에는 Mode B를 덮어쓰지 않는다. 전체 unit test 35개 PASS다.
 - private export file manifest에는 sequence payload뿐 아니라 immutable source inventory,
   temporal audit/frame mapping과 각 sequence manifest 자체의 byte count/SHA-256도 포함한다.
+- inventory가 피험자 수 3명 aggregate만 보존하고 sequence→subject mapping은 `UNKNOWN`으로 명시하므로,
+  외형이나 learned shape로 identity를 추측하지 않는다. Freeze v1은 sequence-level S0를 생성하되
+  `subject_id=null`, `SUBJECT_MAPPING_UNAVAILABLE`을 기록하고 cross-sequence shape fusion을 보류한다.
 
 ## 2026-08-09 — 초기 synchronization / derivative 구축 기록 이관
 

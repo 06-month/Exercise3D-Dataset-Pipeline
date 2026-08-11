@@ -262,12 +262,14 @@
 
 ## Phase 10 — Subject-Level Shape / Anthropometric Descriptor
 
-- 상태: `TODO`
+- 상태: `SEQUENCE_S0_IMPLEMENTED_SUBJECT_MAPPING_UNAVAILABLE`
 - 목적: subject 전체 sequence를 공동 사용한 shape와 scale-invariant descriptor `S0`
 - 입력: Phase 9 fits, optional A-pose initialization
 - 출력: body shape parameter와 별도 proportion descriptor
 - 주요 방법: femur/tibia/torso/shoulder/hip ratio, body beta와 `S0` 의미 분리
 - Acceptance: cross-sequence consistency와 scale provenance
+- 현재 제한: private inventory에 evidence-backed sequence→subject mapping이 없어 `subject_id=null`을
+  보존하고 외형/learned shape 기반 추측이나 cross-sequence fusion을 수행하지 않음
 - 다음 gate: pseudo-label reliability 통합
 
 ## Phase 11 — Pseudo-label Quality Control

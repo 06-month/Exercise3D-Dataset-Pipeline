@@ -324,6 +324,8 @@ def main() -> int:
         sequence_metadata = {
             "schema_version": 1,
             "sequence": sequence,
+            "subject_id": None,
+            "subject_mapping_status": "SUBJECT_MAPPING_UNAVAILABLE",
             "status": validation["status"],
             "source_rgb_included": False,
             "source_rgb_reference": "frame name/index/PTS only; immutable private source remains external",
@@ -355,6 +357,9 @@ def main() -> int:
         "git_commit": git_commit(),
         "private_dataset": True,
         "not_ground_truth": True,
+        "declared_subject_count": 3,
+        "subject_mapping_status": "SUBJECT_MAPPING_UNAVAILABLE",
+        "subject_id_policy": "null; no appearance/shape-based cross-sequence inference",
         "source_payload_modified": False,
         "source_rgb_included": False,
         "sequence_count": len(sequence_rows),
