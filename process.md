@@ -369,6 +369,26 @@
 - GPU는 100%, 62,823 MiB, OOM/retry/stall 0이다. Dashboard attention은 Sapiens deadline ETA
   약 2시간 21분 초과와 upper/p90-adjusted freeze coverage 25/26 경고뿐이며 acceptance failure는 없다.
 
+### SAM output storage reserve forecast
+
+- 정적 20 GiB disk threshold만으로는 Mode B 잔여 payload가 reserve를 침범하기 전에 경고할 수 없어,
+  dashboard에 완료 PASS camera benchmark의 `output_bytes/frame` nearest-rank p90 forecast를 추가했다.
+  현재 partial camera payload는 filesystem free에 이미 포함되므로 produced frame에만 더하고 byte sample은
+  atomic complete camera에서만 읽어 중복 차감을 방지한다.
+- 2026-08-12 12:45 KST 기준 sample 34 camera/22,114 frame/22,455,935,524 bytes,
+  p90 1,038,271.11 bytes/frame이다. Current partial 포함 produced 22,737 frame, remaining 42,858 frame의
+  예상 추가 payload는 41.44 GiB다. 현재 free 145.14 GiB에서 SAM 완료 후 103.70 GiB가 예상돼
+  20 GiB reserve margin은 83.70 GiB다.
+- Forecast는 Sapiens/downstream/checkpoint/unrelated write를 제외한다고 state에 명시한다. 예상 free가
+  reserve 아래로 내려가면 `DISK_FORECAST_RESERVE_AT_RISK` warning을 atomic dashboard state에 기록한다.
+- 전체 118 tests와 publication safety가 PASS했고 commit `b24f509`를 push했다. Exact argv/cwd/child 0인
+  CPU-only dashboard PID 1974702만 종료한 뒤 동일 argv로 PID 1992655를 시작했다. GPU inference,
+  SAM, supervisor에는 signal하지 않았다.
+- 새 daemon의 first snapshot에서 forecast/schema publish를 확인했다. 같은 시각 Sapiens rate는
+  0.223 crop/s, ETA는 deadline 3시간 25분 후이며 upper/p90-adjusted freeze coverage는 24/26,
+  첫 projected late sequence는 `deadlift_0002`다. Process alive, GPU saturation, retry/error 0이므로
+  frozen shortest-first order와 acceptance policy는 변경하지 않았다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화
