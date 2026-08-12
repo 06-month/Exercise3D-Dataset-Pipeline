@@ -572,6 +572,12 @@
   filesystem detail이므로 manifest에 포함하지 않는다.
 - Backdated post-cutoff source gate, ctime provenance rejection, existing mtime/identity/full contract
   regression을 포함한 전체 135 tests가 PASS했다. Cutoff 없는 predeadline checkpoint에는 영향이 없다.
+- Publication-safety PASS 후 implementation commit `6e802b1`을 push했다. Dashboard가 expected
+  `DEADLINE_SENTINEL_CODE_DRIFT`를 감지한 상태에서 sentinel PID 2068008의 exact argv/cwd/child 0/lock과
+  watchdog identity/restart budget을 확인하고 CPU-only sentinel만 TERM했다.
+- Watchdog은 3-cycle/final-rescan 후 PID 2076548을 동일 command로 복구했다. Runtime policy는 ctime-aware
+  boundary를 기록하며 loaded/current sentinel/exporter SHA가 모두 exact, dashboard drift 제거,
+  watchdog missing 0/attention false다. Sapiens/SAM/supervisor/dashboard에는 signal이나 restart가 없었다.
 
 ### Source-of-truth 재검증
 
