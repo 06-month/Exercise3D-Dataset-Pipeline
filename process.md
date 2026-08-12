@@ -734,6 +734,22 @@
   않았다. Current Sapiens/SAM/supervisor에는 signal/restart/duplicate launch가 없으며, 다음 새
   pose-complete sequence부터 current Phase 7 subprocess가 source-bound marker를 생성한다.
 
+### Source-bound Phase 11 quality resume
+
+- Quality builder의 기존 resume validation은 body frame/PTS와 output QA count만 비교해 selection, pose,
+  compact SAM prior, triangulation 또는 Mode C evidence가 바뀐 stale quality vector도 skip할 수 있었다.
+  Follower의 persisted `completed` fast path는 file existence만으로 validation 전체를 건너뛰었다.
+- 실제 계산 입력인 3-view selection/pose/prior NPZ, triangulated/canonical 3D와 metadata, body fit/metadata,
+  Mode C assessment와 builder code를 privacy-safe size/mtime_ns/ctime_ns SHA-256 signature로 묶어 quality
+  metadata에 저장한다. Build 전후 signature가 바뀌면 output을 publish하지 않고 bounded retry로 남긴다.
+- Newly signed completion은 follower fast path에서도 current signature와 exact-match해야 skip한다. 도입 전
+  persisted completion에 기록된 기존 12개 unsigned output은 grandfather해 재계산하지 않는다. Invalid/
+  truncated NPZ의 `EOFError`도 follower process를 죽이지 않고 sequence retry state에 기록한다.
+- Dependency drift/symlink, signed fast-path invalidation과 unsigned legacy preservation regression을 추가했다.
+  전체 161 tests, compile과 staged publication-safety가 PASS했고 implementation `533959e`를 push했다.
+- Current Sapiens/SAM/supervisor/quality follower에는 signal/restart/duplicate launch가 없었다. 다음 새
+  sequence의 supervisor quality subprocess부터 source-bound metadata가 자동 생성된다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화

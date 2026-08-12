@@ -39,6 +39,9 @@
   frame/PTS/joint/finite-NaN/evidence/confidence/current acceptance gate가 exact할 때만 resume skip
 - Mode C assessment terminal marker는 body/triangulation/3-view prior/policy/canonical signature와
   camera/signal/source-index/bounded-clip/threshold/selected-total/status 계약이 exact할 때만 timestamp 보존 skip
+- Phase 11 quality는 selection/pose/SAM prior/triangulation/body/Mode C/builder signature와 full output
+  schema가 exact할 때만 resume skip한다. 기존 persisted unsigned 12 sequence는 재계산하지 않고,
+  다음 signed completion부터 follower fast path도 source drift를 감지한다.
 - deadline에 미완료된 sequence는 `INCOMPLETE_DEADLINE`로 명시하고 PASS로 위장하지 않음
 - Fit3D exhaustive tolerance/ablation은 final private dataset critical path를 방해하면 freeze 이후로 이동
 - persistent handoff: `HANDOFF.md` + ignored `.runtime/handoff_state.json` 30초 atomic checkpoint;

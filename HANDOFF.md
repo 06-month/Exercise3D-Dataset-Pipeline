@@ -80,6 +80,13 @@
   canonical config의 size/mtime/ctime signature를 저장한다. Existing marker는 camera/count/signal/source-index/
   clip/threshold 및 selected-total↔PASS/REVIEW 결정을 검증한 뒤에만 timestamp를 보존해 skip한다. 기존
   `benchpress_0001` marker는 read-only audit에서 candidate 0 `PASS_MODE_B_FROZEN`으로 contract PASS했다.
+  Phase 11 quality output은 selection/pose/SAM prior, triangulation/body/Mode C artifacts와 quality builder의
+  privacy-safe size/mtime/ctime signature를 metadata에 저장한다. Exact signature와 full quality schema가
+  일치할 때만 skip하며 build 실행 전후 source가 바뀌면 publish하지 않고 retry한다. Source-bound 정책 전
+  완료되어 persisted completion에 기록된 기존 12개 unsigned quality는 grandfather하여 재계산하지 않는다.
+  새 signed completion은 follower fast path에서도 source drift를 확인하며 corrupt NPZ는 follower 종료 대신
+  bounded retry state로 전환한다. Live quality follower는 재시작하지 않았고 다음 supervisor quality
+  subprocess부터 current builder가 자동 적용된다.
 - GPU: A100 80GB, Sapiens-only dependency-wait snapshot 36,375 MiB/100%, 373.53 W;
   14:19 KST 단일 snapshot의 0% utilization은 다음 14:23 KST snapshot에서 100%로 복귀했고 stall attention은 없음;
   observed OOM/retry 없음
@@ -242,8 +249,8 @@ Public-safe Sapiens command 형태:
 5. 죽어 있으면 live process absence와 child 부재를 다시 확인한 뒤 `.runtime/handoff_state.json`의
    exact frozen resume command를 사용한다. Sapiens와 SAM runner는 PASS camera/chunk를 검증 후 skip하며,
    두 runner의 lifetime lock과 output-bound legacy/orphan process guard를 우회하지 않는다. SAM prior
-   Phase 7 triangulation, SAM prior consolidation, body-fit, Mode C assessment도 current source signature와
-   output/acceptance contract가 exact할 때만 materialization을 skip한다. Phase 7 marker가 없거나
+   Phase 7 triangulation, SAM prior consolidation, body-fit, Mode C assessment, Phase 11 quality도 current
+   source signature와 output/acceptance contract가 exact할 때만 materialization을 skip한다. Phase 7 marker가 없거나
    `IN_PROGRESS`/signature mismatch이면 해당 sequence가 실제 재호출될 때만 재삼각화한다.
 6. supervisor가 죽었으면 local state의 exact supervisor command로 재실행한다. `--overwrite`는 사용하지 않는다.
    단, `.runtime/supervisor_watchdog_state.json`의 watchdog이 정상이면 수동 launch하지 말고
@@ -321,7 +328,8 @@ tmux new-window -n exercise3d-dashboard \
 ## Git state
 
 - branch: `agent/phase-5-1-pushup-0003-recovery`
-- latest implementation commit: source-bound Phase 7 triangulation reuse `fadd5c7` + in-flight source-race
+- latest implementation commit: source-bound Phase 11 quality resume `533959e`; source-bound Phase 7
+  triangulation reuse `fadd5c7` + in-flight source-race
   guard `c55bc5c`; source-bound Mode C assessment resume `1c8046e`; source-bound body-fit
   resume `6cacff1`; source-bound SAM prior resume
   `e641bfa`; SAM single-target exact-tree
@@ -347,4 +355,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-12 14:29 KST
+- 2026-08-12 14:34 KST
