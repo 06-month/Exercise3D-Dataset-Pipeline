@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 from datetime import datetime, timezone
@@ -33,6 +34,22 @@ REQUIRED_PRIOR_FIELDS = (
     "pred_global_rots",
     "mhr_model_params",
 )
+REQUIRED_CONSOLIDATED_FIELDS = {
+    "frame_name",
+    "source_frame_name",
+    "source_frame_index",
+    "timestamp_pts_seconds",
+    "output_valid",
+    "accepted_prior",
+    "target_valid",
+    "target_selection_confidence",
+    "target_ambiguous",
+    "no_target",
+    "occlusion_risk",
+    "canonical_joint_names",
+    "canonical_local_3d",
+    "target_bbox_xyxy",
+}
 
 
 def utc_now() -> str:
@@ -139,6 +156,116 @@ def consecutive_delta(array: np.ndarray, valid: np.ndarray) -> dict[str, float |
     }
 
 
+def source_dependency_signature(sam_camera_dir: Path) -> str:
+    """Bind a consolidated prior to the current provenance/numeric inventory."""
+    private = sam_camera_dir / "mode_b_private_output"
+    paths = [private / "target_provenance.npz"]
+    paths.extend(sorted((private / "mhr_numeric" / "1").glob("*.npz")))
+    rows: list[tuple[str, int, int, int]] = []
+    for index, path in enumerate(paths):
+        if not path.is_file() or path.is_symlink():
+            raise RuntimeError("SAM prior dependency is missing or symlinked")
+        stat = path.stat()
+        label = "target_provenance.npz" if index == 0 else f"numeric/{path.name}"
+        rows.append((label, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns))
+    return hashlib.sha256(
+        json.dumps(rows, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def validate_existing_prior(
+    output_dir: Path,
+    provenance: dict[str, np.ndarray],
+    sequence: str,
+    camera: str,
+    mapping: dict[str, Any],
+    dependency_signature: str,
+) -> tuple[bool, dict[str, Any] | None]:
+    """Validate a source-bound PASS prior before allowing resume skip."""
+    archive_path = output_dir / "sam_body_prior.npz"
+    metadata_path = output_dir / "metadata.json"
+    frames_path = output_dir / "frames.csv"
+    if not archive_path.is_file() or not metadata_path.is_file() or not frames_path.is_file():
+        return False, None
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        qa = metadata["qa"]
+        if (
+            metadata.get("stage") != "SAM_BODY4D_MODE_B_PRIOR_CONSOLIDATION"
+            or metadata.get("sequence") != sequence
+            or metadata.get("camera") != camera
+            or metadata.get("source_dependency_signature") != dependency_signature
+            or metadata.get("canonical_mapping") != mapping
+            or qa.get("status") != "PASS"
+        ):
+            return False, None
+        with np.load(archive_path, allow_pickle=False) as payload:
+            if not REQUIRED_CONSOLIDATED_FIELDS <= set(payload.files):
+                return False, None
+            frame_count = len(provenance["frame_names"])
+            output_valid = payload["output_valid"].astype(np.bool_)
+            target_valid = provenance["target_valid"].astype(np.bool_)
+            accepted = payload["accepted_prior"].astype(np.bool_)
+            comparisons = (
+                np.array_equal(payload["frame_name"].astype(str), provenance["frame_names"].astype(str)),
+                np.array_equal(
+                    payload["source_frame_name"].astype(str),
+                    provenance["source_frame_names"].astype(str),
+                ),
+                np.array_equal(
+                    payload["source_frame_index"].astype(np.int32),
+                    provenance["source_frame_indices"].astype(np.int32),
+                ),
+                np.array_equal(
+                    payload["timestamp_pts_seconds"].astype(np.float64),
+                    provenance["timestamp_pts_seconds"].astype(np.float64),
+                ),
+                np.array_equal(payload["target_valid"].astype(np.bool_), target_valid),
+                np.array_equal(
+                    payload["target_ambiguous"].astype(np.bool_),
+                    provenance["target_ambiguous"].astype(np.bool_),
+                ),
+                np.array_equal(
+                    payload["no_target"].astype(np.bool_),
+                    provenance["no_target"].astype(np.bool_),
+                ),
+                np.array_equal(
+                    payload["occlusion_risk"].astype(np.bool_),
+                    provenance["occlusion_risk"].astype(np.bool_),
+                ),
+                np.array_equal(
+                    payload["target_selection_confidence"].astype(np.float32),
+                    provenance["target_selection_confidence"].astype(np.float32),
+                ),
+                np.array_equal(
+                    payload["target_bbox_xyxy"].astype(np.float32),
+                    provenance["target_bboxes_xyxy"].astype(np.float32),
+                    equal_nan=True,
+                ),
+            )
+            if (
+                len(output_valid) != frame_count
+                or not output_valid.all()
+                or not np.array_equal(accepted, target_valid)
+                or not all(comparisons)
+                or not np.isfinite(payload["canonical_local_3d"][output_valid]).all()
+            ):
+                return False, None
+        with frames_path.open(newline="", encoding="utf-8") as handle:
+            frame_rows = list(csv.DictReader(handle))
+        if (
+            len(frame_rows) != frame_count
+            or int(qa.get("frame_count", -1)) != frame_count
+            or int(qa.get("output_valid_count", -1)) != frame_count
+            or int(qa.get("accepted_prior_count", -1)) != int(target_valid.sum())
+            or not bool(qa.get("finite_valid_payload"))
+        ):
+            return False, None
+        return True, qa
+    except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError):
+        return False, None
+
+
 def consolidate_camera(
     sam_camera_dir: Path,
     output_dir: Path,
@@ -166,6 +293,17 @@ def consolidate_camera(
     missing_provenance = required_provenance - set(provenance)
     if missing_provenance:
         raise RuntimeError(f"missing SAM target provenance: {sorted(missing_provenance)}")
+    dependency_signature = source_dependency_signature(sam_camera_dir)
+    existing_valid, existing_qa = validate_existing_prior(
+        output_dir,
+        provenance,
+        sequence,
+        camera,
+        mapping,
+        dependency_signature,
+    )
+    if existing_valid and existing_qa is not None:
+        return {**existing_qa, "resume_skipped": True}
     frame_names = provenance["frame_names"].astype(str)
     frame_count = len(frame_names)
     first_path = numeric_dir / f"{Path(frame_names[0]).stem}.npz"
@@ -277,6 +415,7 @@ def consolidate_camera(
         "stage": "SAM_BODY4D_MODE_B_PRIOR_CONSOLIDATION",
         "not_ground_truth": True,
         "source_mode": "B (completion disabled)",
+        "source_dependency_signature": dependency_signature,
         "source_numeric_dir": str(numeric_dir),
         "coordinate_semantics": {
             "mhr_keypoints_local_3d": "MHR body prior before pred_cam_t",
@@ -290,7 +429,7 @@ def consolidate_camera(
         output_dir / "metadata.json",
         json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
     )
-    return qa
+    return {**qa, "resume_skipped": False}
 
 
 def main() -> int:

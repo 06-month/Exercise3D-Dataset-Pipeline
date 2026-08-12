@@ -77,6 +77,7 @@ class ConsolidateSamBodyPriorTest(unittest.TestCase):
             )
 
             self.assertEqual(qa["status"], "PASS")
+            self.assertFalse(qa["resume_skipped"])
             self.assertEqual(qa["output_valid_count"], 2)
             self.assertEqual(qa["accepted_prior_count"], 1)
             with np.load(output / "sam_body_prior.npz", allow_pickle=False) as payload:
@@ -85,6 +86,55 @@ class ConsolidateSamBodyPriorTest(unittest.TestCase):
                 self.assertEqual(payload["canonical_local_3d"].shape, (2, 26, 3))
             metadata = json.loads((output / "metadata.json").read_text(encoding="utf-8"))
             self.assertTrue(metadata["not_ground_truth"])
+
+            created_at = metadata["created_at_utc"]
+            resumed = consolidate_camera(
+                root / "sam" / "sequence" / "cam1",
+                output,
+                "sequence",
+                "cam1",
+                mapping,
+            )
+            self.assertTrue(resumed["resume_skipped"])
+            self.assertEqual(
+                json.loads((output / "metadata.json").read_text(encoding="utf-8"))[
+                    "created_at_utc"
+                ],
+                created_at,
+            )
+
+            with np.load(output / "sam_body_prior.npz", allow_pickle=False) as payload:
+                corrupted = {key: payload[key].copy() for key in payload.files}
+            corrupted["accepted_prior"][1] = True
+            np.savez_compressed(output / "sam_body_prior.npz", **corrupted)
+            repaired = consolidate_camera(
+                root / "sam" / "sequence" / "cam1",
+                output,
+                "sequence",
+                "cam1",
+                mapping,
+            )
+            self.assertFalse(repaired["resume_skipped"])
+            with np.load(output / "sam_body_prior.npz", allow_pickle=False) as payload:
+                np.testing.assert_array_equal(payload["accepted_prior"], [True, False])
+
+            np.savez_compressed(
+                numeric / "00000000.npz",
+                **{
+                    key: np.full(shape, 9, dtype=np.float32)
+                    for key, shape in shapes.items()
+                },
+            )
+            rebuilt = consolidate_camera(
+                root / "sam" / "sequence" / "cam1",
+                output,
+                "sequence",
+                "cam1",
+                mapping,
+            )
+            self.assertFalse(rebuilt["resume_skipped"])
+            with np.load(output / "sam_body_prior.npz", allow_pickle=False) as payload:
+                self.assertTrue(np.all(payload["mhr_keypoints_local_3d"][0] == 9))
 
 
 if __name__ == "__main__":
