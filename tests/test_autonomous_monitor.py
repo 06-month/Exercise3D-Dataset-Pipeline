@@ -16,11 +16,47 @@ from tools.monitor_autonomous_generation import (
     metadata_statuses,
     observed_post_sam_overhead,
     quality_progress,
+    sam_output_storage_forecast,
     selection_workloads,
 )
 
 
 class AutonomousMonitorTest(unittest.TestCase):
+    def test_sam_storage_forecast_uses_nearest_rank_p90(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for camera, output_bytes in (("cam1", 1_000), ("cam2", 2_000)):
+                path = root / "one" / camera / "sam_body_benchmark.csv"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with path.open("w", newline="", encoding="utf-8") as handle:
+                    writer = csv.DictWriter(
+                        handle,
+                        fieldnames=["frames_processed", "output_bytes", "status"],
+                    )
+                    writer.writeheader()
+                    writer.writerow(
+                        {
+                            "frames_processed": 10,
+                            "output_bytes": output_bytes,
+                            "status": "PASS",
+                        }
+                    )
+            forecast = sam_output_storage_forecast(
+                root,
+                ["one/cam1", "one/cam2"],
+                total_frames=100,
+                produced_frames=30,
+                free_gib=1.0,
+                minimum_free_gib=0.25,
+            )
+            self.assertTrue(forecast["available"])
+            self.assertEqual(forecast["sample_count"], 2)
+            self.assertEqual(forecast["median_bytes_per_frame"], 150)
+            self.assertEqual(forecast["p90_bytes_per_frame"], 200)
+            self.assertEqual(forecast["remaining_frames"], 70)
+            self.assertEqual(forecast["projected_remaining_output_bytes"], 14_000)
+            self.assertGreater(forecast["projected_reserve_margin_gib"], 0)
+
     def test_selection_workloads_validate_small_summary_inventory(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

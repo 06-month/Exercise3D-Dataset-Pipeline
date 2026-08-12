@@ -201,6 +201,105 @@ def observed_post_sam_overhead(
     }
 
 
+def sam_output_storage_forecast(
+    sam_root: Path,
+    completed_cameras: Iterable[str],
+    *,
+    total_frames: int,
+    produced_frames: int,
+    free_gib: float | None,
+    minimum_free_gib: float,
+) -> dict[str, Any]:
+    """Estimate remaining Mode-B payload with observed per-camera output bytes.
+
+    The filesystem's current free-space value already includes every durable
+    partial artifact.  Therefore ``produced_frames`` includes the current
+    partial camera, while bytes/frame samples come only from atomic PASS camera
+    benchmarks.  A nearest-rank p90 is deliberately used instead of the mean.
+    """
+    samples: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for identity in sorted(set(completed_cameras)):
+        try:
+            sequence, camera = identity.split("/", 1)
+        except ValueError:
+            errors.append(f"invalid_camera_identity:{identity}")
+            continue
+        path = sam_root / sequence / camera / "sam_body_benchmark.csv"
+        try:
+            with path.open(newline="", encoding="utf-8") as handle:
+                rows = list(csv.DictReader(handle))
+            row = rows[0] if len(rows) == 1 else None
+            frames = int(row["frames_processed"]) if row else 0
+            output_bytes = int(row["output_bytes"]) if row else -1
+            valid = bool(
+                row
+                and row.get("status") == "PASS"
+                and frames > 0
+                and output_bytes >= 0
+            )
+        except (OSError, KeyError, TypeError, ValueError, csv.Error):
+            valid = False
+            frames = 0
+            output_bytes = -1
+        if not valid:
+            errors.append(f"invalid_sam_storage_sample:{identity}:{path}")
+            continue
+        samples.append(
+            {
+                "camera": identity,
+                "frames": frames,
+                "output_bytes": output_bytes,
+                "bytes_per_frame": output_bytes / frames,
+            }
+        )
+    if not samples:
+        return {
+            "available": False,
+            "kind": "SAM_MODE_B_P90_OUTPUT_BYTES",
+            "sample_count": 0,
+            "errors": errors,
+        }
+
+    values = sorted(float(row["bytes_per_frame"]) for row in samples)
+    p90_index = max(0, math.ceil(0.9 * len(values)) - 1)
+    p90_bytes_per_frame = values[p90_index]
+    bounded_total = max(0, int(total_frames))
+    bounded_produced = min(bounded_total, max(0, int(produced_frames)))
+    remaining_frames = max(0, bounded_total - bounded_produced)
+    projected_bytes = p90_bytes_per_frame * remaining_frames
+    gib = float(1024**3)
+    projected_gib = projected_bytes / gib
+    projected_free = free_gib - projected_gib if free_gib is not None else None
+    return {
+        "available": True,
+        "kind": "SAM_MODE_B_P90_OUTPUT_BYTES",
+        "sample_count": len(samples),
+        "sampled_frames": sum(int(row["frames"]) for row in samples),
+        "sampled_output_bytes": sum(int(row["output_bytes"]) for row in samples),
+        "median_bytes_per_frame": statistics.median(values),
+        "p90_bytes_per_frame": p90_bytes_per_frame,
+        "produced_frames_including_partial": bounded_produced,
+        "remaining_frames": remaining_frames,
+        "projected_remaining_output_bytes": int(math.ceil(projected_bytes)),
+        "projected_remaining_output_gib": projected_gib,
+        "projected_free_after_sam_gib": projected_free,
+        "minimum_free_gib": minimum_free_gib,
+        "projected_reserve_margin_gib": (
+            projected_free - minimum_free_gib
+            if projected_free is not None
+            else None
+        ),
+        "assumptions": [
+            "completed PASS camera benchmark output_bytes are representative",
+            "nearest-rank p90 bytes/frame remains constant",
+            "current free space already accounts for partial-camera payload",
+            "Sapiens, downstream, checkpoint, and unrelated future writes excluded",
+        ],
+        "errors": errors,
+    }
+
+
 def deadline_freeze_upper_bound(
     workloads: list[dict[str, Any]],
     *,
@@ -907,6 +1006,14 @@ def build_dashboard(
             "total_gib": None,
             "minimum_free_gib": args.minimum_free_gib,
         }
+    disk["sam_output_forecast"] = sam_output_storage_forecast(
+        args.sam_output_root,
+        sam_completed,
+        total_frames=sam_total,
+        produced_frames=sam_done + current_sam_frames,
+        free_gib=safe_float(disk.get("free_gib")),
+        minimum_free_gib=args.minimum_free_gib,
+    )
 
     counters = {
         "sapiens_crops": sapiens_done,
@@ -1269,6 +1376,21 @@ def build_dashboard(
         attention(
             "DISK_RESERVE_LOW",
             f"Disk free space {free_gib:.2f} GiB is below {args.minimum_free_gib:.2f} GiB.",
+        )
+    storage_forecast = disk.get("sam_output_forecast", {})
+    projected_free_gib = safe_float(
+        storage_forecast.get("projected_free_after_sam_gib")
+    )
+    if (
+        storage_forecast.get("available")
+        and projected_free_gib is not None
+        and projected_free_gib < args.minimum_free_gib
+    ):
+        attention(
+            "DISK_FORECAST_RESERVE_AT_RISK",
+            f"SAM Mode B p90 output forecast leaves {projected_free_gib:.2f} GiB, "
+            f"below the {args.minimum_free_gib:.2f} GiB reserve.",
+            severity="WARNING",
         )
     gpu_last_success = parse_datetime(gpu.get("last_success_at"))
     if (
@@ -1705,12 +1827,15 @@ def render_rich(state: dict[str, Any], console: Any | None = None) -> Any:
     )
     gpu = state["gpu"]
     disk = state["disk"]
+    storage_forecast = disk.get("sam_output_forecast", {})
     telemetry_suffix = " (cached)" if not gpu.get("telemetry_fresh", True) else ""
     system = (
         f"GPU {cell(gpu.get('utilization_pct'), '%')}{telemetry_suffix} | "
         f"VRAM {cell(gpu.get('memory_used_mib'))}/{cell(gpu.get('memory_total_mib'))} MiB | "
         f"Power {cell(gpu.get('power_draw_w'))} W | Temp {cell(gpu.get('temperature_c'))} C\n"
-        f"Disk free {cell(disk.get('free_gib'))} GiB | Last progress {state['last_progress_timestamp']} | "
+        f"Disk free {cell(disk.get('free_gib'))} GiB | SAM-final forecast "
+        f"{cell(storage_forecast.get('projected_free_after_sam_gib'))} GiB | "
+        f"Last progress {state['last_progress_timestamp']} | "
         f"Last event {state['last_event']}\n"
         f"Supervisor PID {state['supervisor']['pid'] or '-'} | "
         f"watchdog PID {state['supervisor_watchdog']['pid'] or '-'} "
