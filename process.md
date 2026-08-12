@@ -29,6 +29,21 @@
   없으며 warning-free regression을 추가했다. Monitor/state/attention regression을 포함한 전체
   56개 unit test가 PASS했고 30초 state-only dashboard monitor를 시작했다.
 
+### Deadline freeze atomic publication hardening
+
+- Deadline sentinel/export 경로를 요구사항별로 감사했다. 기존 file/manifest write는 atomic이었지만
+  build directory가 생성 중에도 final path에 노출되고 direct rerun이 같은 build ID를 갱신할 수 있어,
+  immutable snapshot 경계가 충분히 강하지 않았다.
+- Export는 hidden `.<build_id>.inprogress` root에서 partial copy를 checksum-resume하고,
+  manifest-listed 34-file 기존 smoke를 포함해 byte/SHA-256, safe relative path, duplicate path,
+  sequence status/count, freeze eligibility, privacy/source-mutation flag를 검증하도록 보강했다.
+- 검증 PASS 뒤 directory rename으로 final build를 한 번에 publish한다. Final manifest가 이미 있으면
+  전체 integrity PASS에서 read-only reuse만 하며 corrupt/incomplete final root를 같은 ID로 덮어쓰지 않는다.
+- Sentinel도 parseable manifest만으로 COMPLETE 처리하지 않고 integrity verifier를 통과해야 한다.
+  현재 살아 있는 sentinel은 deadline에 새 exporter subprocess를 호출하므로 restart하지 않았다.
+- 기존 `exercise3d-streaming-smoke-v1`을 read-only 전수 검증해 34 files/28,960,929 bytes,
+  mismatch 0을 확인했고 focused regression 7개와 전체 59개 unit test가 PASS했다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화

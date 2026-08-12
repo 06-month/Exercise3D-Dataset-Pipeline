@@ -35,6 +35,8 @@
 - deadline snapshot sentinel PID 607755: 2026-08-14 13:00 KST에 completed sequence와
   `INCOMPLETE` 목록을 별도 versioned private build로 export; local state는
   `.runtime/deadline_snapshot_state.json`, 현재 `WAITING_DEADLINE`
+  Exporter는 hidden `.<build_id>.inprogress`에서 checksum-resume한 뒤 전수 integrity PASS 시 final
+  directory로 atomic rename한다. Existing final manifest는 검증 후 reuse하며 같은 ID를 덮어쓰지 않는다.
 - dashboard monitor: `tools/monitor_autonomous_generation.py`; atomic state는
   `.runtime/dashboard_state.json`. `--once`는 snapshot, 기본은 Rich live, `--quiet`는 state-only daemon이다.
 

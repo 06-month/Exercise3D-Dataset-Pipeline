@@ -3,6 +3,12 @@
 Phase 13 freeze candidate는 versioned directory와 SHA-256 manifest로 구성한다. 원본 RGB/video를
 복제하지 않고 source frame name/index/PTS만 logical reference로 저장한다.
 
+Build는 `<output>/.<build_id>.inprogress`에서 camera/sequence payload checksum을 재사용하며
+구축한다. `sequence_status.csv`, 모든 manifest-listed file의 byte/SHA-256, status count와 privacy
+flag를 전수 검증한 뒤에만 directory rename으로 `<output>/<build_id>`를 한 번에 publish한다.
+최종 manifest가 존재하는 build ID는 immutable하며, 재실행은 전수 integrity PASS일 때 read-only
+reuse만 허용한다. Corrupt/불일치 final build를 같은 ID로 덮어쓰지 않는다.
+
 ```text
 <build_id>/
 ├── dataset_manifest.json

@@ -4,7 +4,12 @@ import unittest
 from argparse import Namespace
 from pathlib import Path
 
-from tools.run_deadline_snapshot import atomic_json, export_command, read_manifest
+from tools.run_deadline_snapshot import (
+    atomic_json,
+    export_command,
+    read_manifest,
+    verified_manifest,
+)
 
 
 class DeadlineSnapshotTest(unittest.TestCase):
@@ -34,6 +39,25 @@ class DeadlineSnapshotTest(unittest.TestCase):
             self.assertEqual(read_manifest(path)["status"], "WAITING_DEADLINE")
             path.write_text("partial", encoding="utf-8")
             self.assertIsNone(read_manifest(path))
+
+    def test_parseable_but_unverified_manifest_is_not_complete(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "deadline-build"
+            root.mkdir()
+            path = root / "dataset_manifest.json"
+            atomic_json(
+                path,
+                {
+                    "build_id": "deadline-build",
+                    "private_dataset": True,
+                    "source_rgb_included": False,
+                    "source_payload_modified": False,
+                    "files": [],
+                },
+            )
+            manifest, errors = verified_manifest(path, "deadline-build")
+            self.assertIsNone(manifest)
+            self.assertTrue(errors)
 
 
 if __name__ == "__main__":

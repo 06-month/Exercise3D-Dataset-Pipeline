@@ -17,7 +17,7 @@ import os
 import shutil
 import subprocess
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import numpy as np
@@ -63,7 +63,10 @@ def sha256(path: Path) -> str:
 def atomic_text(path: Path, value: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + f".{os.getpid()}.tmp")
-    temporary.write_text(value, encoding="utf-8")
+    with temporary.open("w", encoding="utf-8") as handle:
+        handle.write(value)
+        handle.flush()
+        os.fsync(handle.fileno())
     os.replace(temporary, path)
 
 
@@ -77,7 +80,162 @@ def atomic_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
         writer.writerows(rows)
+        handle.flush()
+        os.fsync(handle.fileno())
     os.replace(temporary, path)
+
+
+def read_json(path: Path) -> dict[str, Any] | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def validate_path_component(value: str, label: str) -> None:
+    if not value or value in {".", ".."} or Path(value).name != value:
+        raise RuntimeError(f"{label} must be one non-empty path component")
+
+
+def verify_frozen_build(
+    build_root: Path, expected_build_id: str | None = None
+) -> dict[str, Any]:
+    """Verify a published/staged build without mutating it."""
+    root = build_root.resolve()
+    errors: list[str] = []
+    manifest = read_json(root / "dataset_manifest.json")
+    if manifest is None:
+        return {"valid": False, "errors": ["missing_or_invalid:dataset_manifest.json"], "manifest": None}
+    if expected_build_id is not None and manifest.get("build_id") != expected_build_id:
+        errors.append("build_id_mismatch")
+    if manifest.get("private_dataset") is not True:
+        errors.append("private_dataset_flag_invalid")
+    if manifest.get("source_rgb_included") is not False:
+        errors.append("source_rgb_policy_invalid")
+    if manifest.get("source_payload_modified") is not False:
+        errors.append("source_mutation_policy_invalid")
+
+    records = manifest.get("files")
+    if not isinstance(records, list):
+        records = []
+        errors.append("files_manifest_invalid")
+    listed_paths: set[str] = set()
+    verified_bytes = 0
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            errors.append(f"file_record_invalid:{index}")
+            continue
+        value = record.get("path")
+        if not isinstance(value, str):
+            errors.append(f"file_path_invalid:{index}")
+            continue
+        relative = PurePosixPath(value)
+        if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+            errors.append(f"unsafe_file_path:{value}")
+            continue
+        normalized = relative.as_posix()
+        if normalized in listed_paths:
+            errors.append(f"duplicate_file_path:{normalized}")
+            continue
+        listed_paths.add(normalized)
+        path = root.joinpath(*relative.parts)
+        if path.is_symlink() or not path.is_file():
+            errors.append(f"missing_or_symlink:{normalized}")
+            continue
+        try:
+            expected_bytes = int(record["bytes"])
+            expected_digest = str(record["sha256"])
+        except (KeyError, TypeError, ValueError):
+            errors.append(f"file_identity_invalid:{normalized}")
+            continue
+        actual_bytes = path.stat().st_size
+        if actual_bytes != expected_bytes:
+            errors.append(f"byte_mismatch:{normalized}")
+            continue
+        if sha256(path) != expected_digest:
+            errors.append(f"sha256_mismatch:{normalized}")
+            continue
+        verified_bytes += actual_bytes
+
+    try:
+        expected_file_count = int(manifest.get("file_count"))
+        expected_total_bytes = int(manifest.get("total_payload_bytes"))
+    except (TypeError, ValueError):
+        expected_file_count = -1
+        expected_total_bytes = -1
+        errors.append("file_totals_invalid")
+    if expected_file_count != len(records):
+        errors.append("file_count_mismatch")
+    if expected_total_bytes != verified_bytes:
+        errors.append("total_payload_bytes_mismatch")
+
+    status_path = root / "sequence_status.csv"
+    try:
+        with status_path.open(newline="", encoding="utf-8") as handle:
+            status_rows = list(csv.DictReader(handle))
+    except (OSError, csv.Error):
+        status_rows = []
+        errors.append("missing_or_invalid:sequence_status.csv")
+    sequence_ids = [str(row.get("sequence", "")) for row in status_rows]
+    if any(not sequence for sequence in sequence_ids) or len(set(sequence_ids)) != len(sequence_ids):
+        errors.append("sequence_status_identity_invalid")
+    allowed = {"PASS", "REVIEW", "FAIL", "INCOMPLETE"}
+    statuses = [str(row.get("status", "")) for row in status_rows]
+    if any(status not in allowed for status in statuses):
+        errors.append("sequence_status_value_invalid")
+    calculated = {
+        "sequence_count": len(status_rows),
+        "pass_count": statuses.count("PASS"),
+        "review_count": statuses.count("REVIEW"),
+        "fail_count": statuses.count("FAIL"),
+        "incomplete_count": statuses.count("INCOMPLETE"),
+    }
+    for key, value in calculated.items():
+        try:
+            if int(manifest.get(key)) != value:
+                errors.append(f"{key}_mismatch")
+        except (TypeError, ValueError):
+            errors.append(f"{key}_invalid")
+    freeze_eligible = bool(status_rows) and all(
+        status in {"PASS", "REVIEW"} for status in statuses
+    )
+    if manifest.get("freeze_eligible") is not freeze_eligible:
+        errors.append("freeze_eligible_mismatch")
+    for row in status_rows:
+        if row.get("status") not in {"PASS", "REVIEW"}:
+            continue
+        sequence = str(row["sequence"])
+        sequence_manifest = f"sequences/{sequence}/sequence_manifest.json"
+        if sequence_manifest not in listed_paths:
+            errors.append(f"sequence_manifest_unlisted:{sequence}")
+            continue
+        metadata = read_json(root / sequence_manifest)
+        if metadata is None or metadata.get("status") != row.get("status"):
+            errors.append(f"sequence_manifest_status_mismatch:{sequence}")
+    return {
+        "valid": not errors,
+        "errors": errors,
+        "manifest": manifest,
+        "verified_file_count": len(records),
+        "verified_payload_bytes": verified_bytes,
+        "sequence_count": len(status_rows),
+    }
+
+
+def publish_staged_build(
+    staging_root: Path, final_root: Path, expected_build_id: str
+) -> dict[str, Any]:
+    integrity = verify_frozen_build(staging_root, expected_build_id)
+    if not integrity["valid"]:
+        raise RuntimeError(
+            "staged build failed integrity verification: "
+            + ";".join(integrity["errors"])
+        )
+    if final_root.exists():
+        raise RuntimeError("final build appeared during staging; refusing to overwrite it")
+    os.replace(staging_root, final_root)
+    return integrity
 
 
 def copy_exact(source: Path, destination: Path) -> dict[str, Any]:
@@ -264,11 +422,44 @@ def git_commit() -> str | None:
 
 def main() -> int:
     args = build_parser().parse_args()
-    if "/" in args.build_id or args.build_id in {".", ".."}:
-        raise RuntimeError("build id must be one path component")
-    build_root = args.output_root.resolve() / args.build_id
-    if build_root.exists() and not build_root.is_dir():
+    validate_path_component(args.build_id, "build id")
+    for sequence in args.sequences:
+        validate_path_component(sequence, "sequence id")
+    output_root = args.output_root.resolve()
+    output_root.mkdir(parents=True, exist_ok=True)
+    final_root = output_root / args.build_id
+    final_manifest = final_root / "dataset_manifest.json"
+    if final_root.exists() and not final_root.is_dir():
         raise RuntimeError("build output exists and is not a directory")
+    if final_manifest.is_file():
+        existing = verify_frozen_build(final_root, args.build_id)
+        if not existing["valid"]:
+            raise RuntimeError(
+                "immutable build exists but failed integrity verification: "
+                + ";".join(existing["errors"])
+            )
+        manifest = existing["manifest"]
+        print(
+            json.dumps(
+                {
+                    "build_id": args.build_id,
+                    "status": "IMMUTABLE_BUILD_REUSED",
+                    "freeze_eligible": manifest["freeze_eligible"],
+                    "verified_file_count": existing["verified_file_count"],
+                    "verified_payload_bytes": existing["verified_payload_bytes"],
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+        return 0 if manifest["freeze_eligible"] else 2
+    if final_root.exists():
+        raise RuntimeError(
+            "final build directory exists without a manifest; preserve it and use a new build id"
+        )
+    build_root = output_root / f".{args.build_id}.inprogress"
+    if build_root.exists() and not build_root.is_dir():
+        raise RuntimeError("staging build output exists and is not a directory")
     provenance_sources = {
         "provenance/source_inventory.json": args.dataset_root.resolve()
         / "reports"
@@ -381,6 +572,7 @@ def main() -> int:
         build_root / "dataset_manifest.json",
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
     )
+    publish_staged_build(build_root, final_root, args.build_id)
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
     return 0 if manifest["freeze_eligible"] else 2
 

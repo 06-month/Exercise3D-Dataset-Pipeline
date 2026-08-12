@@ -13,6 +13,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+try:
+    from tools.export_private_dataset import verify_frozen_build
+except ModuleNotFoundError:
+    from export_private_dataset import verify_frozen_build
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -61,6 +66,18 @@ def read_manifest(path: Path) -> dict[str, Any] | None:
         return None
 
 
+def verified_manifest(
+    path: Path, expected_build_id: str
+) -> tuple[dict[str, Any] | None, list[str]]:
+    manifest = read_manifest(path)
+    if manifest is None:
+        return None, []
+    result = verify_frozen_build(path.parent, expected_build_id)
+    if not result["valid"]:
+        return None, list(result["errors"])
+    return result["manifest"], []
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset-root", type=Path, required=True)
@@ -88,7 +105,22 @@ def main() -> int:
     manifest_path = args.output_root.resolve() / args.build_id / "dataset_manifest.json"
     while True:
         now = datetime.now(timezone.utc)
-        manifest = read_manifest(manifest_path)
+        manifest, integrity_errors = verified_manifest(manifest_path, args.build_id)
+        if integrity_errors:
+            atomic_json(
+                args.runtime_state.resolve(),
+                {
+                    "schema_version": 1,
+                    "status": "EXISTING_BUILD_INVALID",
+                    "updated_at_utc": now.isoformat(),
+                    "deadline_utc": deadline.isoformat(),
+                    "build_id": args.build_id,
+                    "manifest": str(manifest_path),
+                    "integrity_errors": integrity_errors,
+                    "recovery": "preserve immutable build and choose a new build id",
+                },
+            )
+            return 2
         if manifest is not None:
             atomic_json(
                 args.runtime_state.resolve(),
@@ -137,12 +169,18 @@ def main() -> int:
             },
         )
         process = subprocess.run(command, cwd=PROJECT_ROOT)
-        manifest = read_manifest(manifest_path)
+        manifest, integrity_errors = verified_manifest(manifest_path, args.build_id)
         atomic_json(
             args.runtime_state.resolve(),
             {
                 "schema_version": 1,
-                "status": "COMPLETE" if manifest is not None else "EXPORT_FAILED",
+                "status": (
+                    "COMPLETE"
+                    if manifest is not None
+                    else "EXPORT_INTEGRITY_FAILED"
+                    if integrity_errors
+                    else "EXPORT_FAILED"
+                ),
                 "updated_at_utc": utc_now(),
                 "deadline_utc": deadline.isoformat(),
                 "build_id": args.build_id,
@@ -150,6 +188,7 @@ def main() -> int:
                 "manifest": str(manifest_path),
                 "freeze_eligible": manifest.get("freeze_eligible") if manifest else False,
                 "incomplete_count": manifest.get("incomplete_count") if manifest else None,
+                "integrity_errors": integrity_errors,
             },
         )
         return 0 if manifest is not None else 2
