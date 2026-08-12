@@ -14,6 +14,8 @@ payload는 공개하지 않습니다. 저장소에는 재현 가능한 코드, �
 실행하지 않는 startup 순서는 [`AGENTS.md`](AGENTS.md)에 고정했습니다.
 사람용 live dashboard와 machine-readable attention state는
 `tools/monitor_autonomous_generation.py`가 `.runtime/dashboard_state.json`에 atomic 저장합니다.
+Top-level `last_completed_event`는 polling state 갱신 시각이 아니라 atomic camera/sequence output과
+immutable build manifest 중 가장 최근 durable completion을 구조화해 기록합니다.
 Dashboard는 frozen selector summary의 exact crop/frame workload와 live measured stage rate를 결합해
 deadline까지 terminal 가능 sequence 수의 `OPTIMISTIC_UPPER_BOUND`도 표시합니다. 이 값은
 triangulation/body-fit/quality/export overhead를 제외한 ceiling이며 완료 약속으로 해석하지 않습니다.

@@ -30,7 +30,8 @@
   overhead-free deadline sequence upper bound 및 completed provenance의 post-SAM p90-adjusted schedule을
   별도 표시; dashboard/handoff monitor는 lifetime lock + exact-identity capped recovery watchdog으로
   유지; verified checkpoint manifest 기반 cumulative immutable build/final snapshot storage를 SAM
-  forecast와 합산해 reserve risk를 미리 감지하며 정상 generation은 AI polling 금지
+  forecast와 합산해 reserve risk를 미리 감지; polling timestamp를 제외한 durable artifact에서
+  top-level latest completion event를 산출하며 정상 generation은 AI polling 금지
 - remaining order gate: pose-incomplete 14 sequence의 selector target crops/SAM frames pairwise
   dominance inversion 0, measured combined-cost inversion 0; global optimum으로 과장하지 않고
   명백한 shorter-workload command drift만 attention 처리

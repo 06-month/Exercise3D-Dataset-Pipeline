@@ -475,6 +475,19 @@
   24개 시나리오 8.23 GiB, 모든 26개 관측-max 시나리오 10.25 GiB다. Remaining SAM과 합친 projected
   free는 95.20/93.17 GiB, 20 GiB reserve margin은 75.20/73.17 GiB여서 storage attention은 없다.
 
+### Durable last-completion event monitoring
+
+- 기존 top-level `last_event`는 supervisor의 현재 stage만 반복해 마지막 완료 산출물을 식별하지 못했다.
+  Dashboard가 Sapiens/SAM camera terminal metadata, triangulation/body/Mode-C/quality atomic output과
+  immutable export manifest의 provenance timestamp를 비교해 `last_completed_event`를 구조화하도록 했다.
+- Watchdog/follower의 주기적 state `updated_at`은 후보에서 제외한다. Sequence output은 required payload
+  marker가 함께 있을 때만 완료로 인정하며 partial metadata가 더 최신이어도 선택하지 않는다.
+  Supervisor stage는 `current_operational_event`로 별도 유지한다.
+- 실제 one-shot integration은 최신 event를 12-sequence build
+  `exercise3d-predeadline-auto-012-77ac2165e283`의 `DURABLE_CHECKPOINT_PUBLISHED`,
+  `FREEZE_ELIGIBLE`, 2026-08-12 13:06:55 KST로 산출했다. GPU/supervisor에는 signal이나 launch를
+  수행하지 않았으며 전체 126 regression이 PASS했다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화

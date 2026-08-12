@@ -929,6 +929,7 @@ def export_progress(root: Path, target_build_id: str | None = None) -> dict[str,
             "completed_sequences": 0,
             "status_counts": empty_counts,
             "freeze_eligible": False,
+            "created_at_utc": None,
             "durable_checkpoint": checkpoint,
         }
     selected = (
@@ -946,6 +947,7 @@ def export_progress(root: Path, target_build_id: str | None = None) -> dict[str,
         "completed_sequences": counts["PASS"] + counts["REVIEW"],
         "status_counts": counts,
         "freeze_eligible": bool(manifest.get("freeze_eligible", False)),
+        "created_at_utc": manifest.get("created_at_utc"),
         "durable_checkpoint": checkpoint,
     }
 
@@ -1046,6 +1048,170 @@ def latest_mtime(paths: Iterable[Path]) -> datetime | None:
             continue
         latest = modified if latest is None else max(latest, modified)
     return datetime.fromtimestamp(latest, tz=timezone.utc) if latest is not None else None
+
+
+def latest_durable_completion_event(
+    *,
+    sequences: list[str],
+    pose_root: Path,
+    pose_completed: Iterable[str],
+    sam_root: Path,
+    sam_completed: Iterable[str],
+    triangulation_root: Path,
+    body_fit_root: Path,
+    mode_c_root: Path,
+    quality_root: Path,
+    export: dict[str, Any],
+) -> dict[str, Any]:
+    """Return the newest timestamped, durable completion artifact.
+
+    Polling state timestamps are deliberately excluded: watchdog/follower state
+    is refreshed even while no work completes.  Only atomic camera/sequence
+    outputs and immutable export manifests are eligible.
+    """
+    candidates: list[tuple[datetime, int, dict[str, Any]]] = []
+    ordinal = 0
+
+    def add(
+        timestamp: Any,
+        *,
+        stage: str,
+        sequence: str | None = None,
+        camera: str | None = None,
+        status: Any = None,
+        build_id: str | None = None,
+    ) -> None:
+        nonlocal ordinal
+        parsed = parse_datetime(timestamp)
+        if parsed is None:
+            return
+        ordinal += 1
+        subject = "/".join(value for value in (sequence, camera) if value)
+        if build_id:
+            subject = build_id
+        normalized_status = str(status) if status else None
+        description = f"{stage}: {subject or '-'}"
+        if normalized_status:
+            description += f" [{normalized_status}]"
+        candidates.append(
+            (
+                parsed,
+                ordinal,
+                {
+                    "available": True,
+                    "stage": stage,
+                    "sequence": sequence,
+                    "camera": camera,
+                    "build_id": build_id,
+                    "status": normalized_status,
+                    "timestamp_utc": parsed.isoformat(),
+                    "timestamp_kst": parsed.astimezone(KST).isoformat(),
+                    "description": description,
+                },
+            )
+        )
+
+    for identity in sorted(set(pose_completed)):
+        try:
+            sequence, camera = identity.split("/", 1)
+        except ValueError:
+            continue
+        metadata = read_json(pose_root / sequence / camera / "metadata.json")
+        qa = metadata.get("qa", {})
+        qa = qa if isinstance(qa, dict) else {}
+        add(
+            metadata.get("created_at_utc"),
+            stage="SAPIENS_CAMERA_COMPLETED",
+            sequence=sequence,
+            camera=camera,
+            status=metadata.get("status") or qa.get("status"),
+        )
+
+    for identity in sorted(set(sam_completed)):
+        try:
+            sequence, camera = identity.split("/", 1)
+        except ValueError:
+            continue
+        rows = load_sequence_rows(
+            sam_root / sequence / camera / "sam_body_benchmark.csv"
+        )
+        row = rows[0] if len(rows) == 1 else {}
+        add(
+            row.get("created_at_utc"),
+            stage="SAM_CAMERA_COMPLETED",
+            sequence=sequence,
+            camera=camera,
+            status=row.get("status"),
+        )
+
+    for sequence in sequences:
+        for root, filename, required, stage in (
+            (
+                triangulation_root,
+                "metadata.json",
+                "canonical_3d.npz",
+                "TRIANGULATION_COMPLETED",
+            ),
+            (body_fit_root, "metadata.json", "body_fit.npz", "BODY_FIT_COMPLETED"),
+            (
+                mode_c_root,
+                "mode_c_escalation.json",
+                "mode_c_escalation.json",
+                "MODE_C_ASSESSMENT_COMPLETED",
+            ),
+            (
+                quality_root,
+                "metadata.json",
+                "quality_vector.npz",
+                "QUALITY_CONTROL_COMPLETED",
+            ),
+        ):
+            if not (root / sequence / required).is_file():
+                continue
+            metadata = read_json(root / sequence / filename)
+            qa = metadata.get("qa", {})
+            qa = qa if isinstance(qa, dict) else {}
+            add(
+                metadata.get("created_at_utc"),
+                stage=stage,
+                sequence=sequence,
+                status=(
+                    qa.get("sequence_status")
+                    or qa.get("quality_status")
+                    or metadata.get("status")
+                    or metadata.get("decision")
+                ),
+            )
+
+    checkpoint = export.get("durable_checkpoint", {})
+    if checkpoint.get("status") == "AVAILABLE":
+        add(
+            checkpoint.get("created_at_utc"),
+            stage="DURABLE_CHECKPOINT_PUBLISHED",
+            status="FREEZE_ELIGIBLE" if checkpoint.get("freeze_eligible") else None,
+            build_id=checkpoint.get("build_id"),
+        )
+    if export.get("status") != "NOT_STARTED" and export.get("latest_build_id"):
+        add(
+            export.get("created_at_utc"),
+            stage="DEADLINE_SNAPSHOT_PUBLISHED",
+            status=export.get("status"),
+            build_id=export.get("latest_build_id"),
+        )
+
+    if not candidates:
+        return {
+            "available": False,
+            "stage": None,
+            "sequence": None,
+            "camera": None,
+            "build_id": None,
+            "status": None,
+            "timestamp_utc": None,
+            "timestamp_kst": None,
+            "description": None,
+        }
+    return max(candidates, key=lambda row: (row[0], row[1]))[2]
 
 
 def progress_artifacts(
@@ -1894,7 +2060,20 @@ def build_dashboard(
 
     stage = str(supervisor.get("stage", "UNKNOWN"))
     active_sequence = supervisor.get("active_sequence")
-    last_event = f"{stage}: {active_sequence}" if active_sequence else stage
+    operational_event = f"{stage}: {active_sequence}" if active_sequence else stage
+    last_completed_event = latest_durable_completion_event(
+        sequences=sequences,
+        pose_root=args.pose_root,
+        pose_completed=pose_completed,
+        sam_root=args.sam_output_root,
+        sam_completed=sam_completed,
+        triangulation_root=args.triangulation_root,
+        body_fit_root=args.body_fit_root,
+        mode_c_root=args.sam_mode_c_review_root,
+        quality_root=args.quality_root,
+        export=export,
+    )
+    last_event = last_completed_event.get("description") or operational_event
     stalled_jobs = [
         reason["code"]
         for reason in reasons
@@ -2124,6 +2303,8 @@ def build_dashboard(
         "disk": disk,
         "last_progress_timestamp": last_progress.isoformat(),
         "last_event": last_event,
+        "last_completed_event": last_completed_event,
+        "current_operational_event": operational_event,
         "errors": errors,
         "stalled_jobs": stalled_jobs,
         "monitoring": {
@@ -2248,6 +2429,8 @@ def render_rich(state: dict[str, Any], console: Any | None = None) -> Any:
     disk = state["disk"]
     storage_forecast = disk.get("sam_output_forecast", {})
     combined_forecast = disk.get("combined_output_forecast", {})
+    last_completed = state.get("last_completed_event", {})
+    last_completed_timestamp = last_completed.get("timestamp_kst") or "-"
     telemetry_suffix = " (cached)" if not gpu.get("telemetry_fresh", True) else ""
     system = (
         f"GPU {cell(gpu.get('utilization_pct'), '%')}{telemetry_suffix} | "
@@ -2259,7 +2442,8 @@ def render_rich(state: dict[str, Any], console: Any | None = None) -> Any:
         f"{cell(combined_forecast.get('projected_deadline_free_gib'))}/"
         f"{cell(combined_forecast.get('all_sequence_observed_max_free_gib'))} GiB | "
         f"Last progress {state['last_progress_timestamp']} | "
-        f"Last event {state['last_event']}\n"
+        f"Last completion {state['last_event']} @ {last_completed_timestamp} | "
+        f"Current {state.get('current_operational_event', '-')}\n"
         f"Supervisor PID {state['supervisor']['pid'] or '-'} | "
         f"watchdog PID {state['supervisor_watchdog']['pid'] or '-'} "
         f"({state['supervisor_watchdog']['status']})\n"

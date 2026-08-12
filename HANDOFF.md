@@ -80,6 +80,9 @@
   남은 14 sequence의 exact selector workload audit은 target crops와 SAM frames 양쪽 모두
   `PARETO_NONDECREASING`, dominance/combined-cost inversion 0이다. 이는 global optimum 증명이 아니라
   뒤 sequence가 두 GPU workload 모두 더 작은 명백한 order 오류가 없다는 지속 gate다.
+  Top-level `last_completed_event`는 polling state timestamp를 제외하고 atomic camera/sequence payload와
+  immutable manifest 중 최신 durable completion의 stage/sequence/camera/build/status/UTC·KST 시각을
+  구조화하며 `current_operational_event`와 분리한다.
 - Monitoring-plane watchdog PID 2009359: dashboard/handoff monitor의 live/resume exact argv SHA를
   각각 pin하며 restart 0, attention false다. 두 monitor와 watchdog의 lifetime lock은 모두 held다.
   3회 연속 absence + 2초 final rescan 후 target별 최대 3회/시간 detached recovery하고 live process는

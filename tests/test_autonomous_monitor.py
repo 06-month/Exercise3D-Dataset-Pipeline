@@ -15,6 +15,7 @@ from tools.monitor_autonomous_generation import (
     deadline_freeze_upper_bound,
     export_progress,
     first_incomplete_camera,
+    latest_durable_completion_event,
     metadata_statuses,
     observed_post_sam_overhead,
     quality_progress,
@@ -25,6 +26,69 @@ from tools.monitor_autonomous_generation import (
 
 
 class AutonomousMonitorTest(unittest.TestCase):
+    def test_latest_completed_event_uses_durable_artifact_not_poll_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pose = root / "pose"
+            sam = root / "sam"
+            triangulation = root / "triangulation"
+            body = root / "body"
+            mode_c = root / "mode_c"
+            quality = root / "quality"
+            base = datetime(2026, 8, 12, tzinfo=timezone.utc)
+            atomic_json(
+                pose / "one" / "cam1" / "metadata.json",
+                {
+                    "created_at_utc": base.isoformat(),
+                    "sequence": "one",
+                    "camera": "cam1",
+                    "status": "PASS",
+                },
+            )
+            atomic_json(
+                quality / "one" / "metadata.json",
+                {
+                    "created_at_utc": (base + timedelta(seconds=10)).isoformat(),
+                    "qa": {"sequence_status": "REVIEW"},
+                },
+            )
+            (quality / "one" / "quality_vector.npz").touch()
+            atomic_json(
+                body / "one" / "metadata.json",
+                {
+                    "created_at_utc": (base + timedelta(seconds=30)).isoformat(),
+                    "status": "REVIEW",
+                },
+            )
+            event = latest_durable_completion_event(
+                sequences=["one"],
+                pose_root=pose,
+                pose_completed=["one/cam1"],
+                sam_root=sam,
+                sam_completed=[],
+                triangulation_root=triangulation,
+                body_fit_root=body,
+                mode_c_root=mode_c,
+                quality_root=quality,
+                export={
+                    "status": "NOT_STARTED",
+                    "durable_checkpoint": {
+                        "status": "AVAILABLE",
+                        "build_id": "checkpoint-001",
+                        "created_at_utc": (base + timedelta(seconds=20)).isoformat(),
+                        "freeze_eligible": True,
+                    },
+                },
+            )
+            self.assertTrue(event["available"])
+            self.assertEqual(event["stage"], "DURABLE_CHECKPOINT_PUBLISHED")
+            self.assertEqual(event["build_id"], "checkpoint-001")
+            self.assertEqual(event["status"], "FREEZE_ELIGIBLE")
+            self.assertEqual(
+                event["timestamp_utc"],
+                (base + timedelta(seconds=20)).isoformat(),
+            )
+
     def test_remaining_schedule_audit_detects_two_stage_dominance(self) -> None:
         workloads = [
             {"sequence": "done", "target_crops": 30, "frames": 30},
