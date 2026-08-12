@@ -352,6 +352,23 @@
   연결했다. 실제 live PID 1819560 one-shot identity pin은 expected/resume SHA exact-match,
   missing/restart 0, attention false였다. 전체 117 tests가 PASS했다.
 
+### Quality follower/watchdog persistent activation
+
+- Publication-safety PASS 후 implementation commit `4600dff`를 push했다. 기존 CPU-only quality
+  follower PID 1819560은 exact cwd/argv, child 0, `WAITING_FOR_BODY_FIT`, failure 0을 확인한 뒤에만
+  종료했고 GPU inference/supervisor에는 signal하지 않았다.
+- 동일 frozen argv를 새 code로 재개한 quality follower PID는 1973073이다. Lifetime lock
+  `.runtime/quality_follower.lock`이 held임을 별도 non-mutating probe로 확인했고, 기존 complete 11
+  sequence는 materialize/recompute 없이 revalidation했다.
+- Persistent quality follower watchdog PID 1973668은 expected/live/resume command SHA exact-match,
+  restart 0, attention false다. Exact resume command는 `.runtime/handoff_state.json`에 보존된다.
+- 새 watchdog state를 읽도록 exact cwd/argv, child 0인 CPU-only dashboard/handoff monitor만
+  PID 1974702/1974706으로 교체했다. 2026-08-12 12:34 KST atomic snapshot은 Sapiens 36/78 camera와
+  23,708/65,430 crop, SAM Mode B 34/78 camera와 22,114/65,595 frame, triangulation 12/26,
+  body fit/quality/freeze-ready 11/26을 기록했다.
+- GPU는 100%, 62,823 MiB, OOM/retry/stall 0이다. Dashboard attention은 Sapiens deadline ETA
+  약 2시간 21분 초과와 upper/p90-adjusted freeze coverage 25/26 경고뿐이며 acceptance failure는 없다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화
