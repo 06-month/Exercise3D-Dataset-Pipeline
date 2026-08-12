@@ -365,6 +365,9 @@
 - single-descriptor source snapshot smoke: clean commit `f1b701e`에서 REVIEW 1,
   36 files/28,993,437 bytes, contract/order/tree/hash error 0, dirty false,
   freeze eligible true, immutable reuse PASS
+- predeadline durable checkpoint: current freeze-ready 11 sequence 전체, REVIEW 11/FAIL 0/
+  INCOMPLETE 0, 366 files/344,922,733 bytes, contract/order/tree/hash error 0,
+  dirty false, freeze eligible true, immutable reuse PASS
 - 다음 gate: downstream 연구 사용 승인
 
 ## Phase별 Git Definition of Done

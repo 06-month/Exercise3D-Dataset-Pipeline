@@ -227,6 +227,16 @@
   dirty false, freeze eligible true다. 동일 build ID 재실행은 `IMMUTABLE_BUILD_REUSED`로
   copy/publish 없이 36 files/28,993,437 bytes를 재검증했다.
 
+### 11-sequence predeadline durable checkpoint
+
+- Deadline sentinel을 기다리는 동안 이미 freeze-ready인 11 sequence 전체를 final deadline
+  build과 다른 immutable build ID로 미리 보존했다. GPU inference/supervisor는 건드리지 않았다.
+- Contract v2 result는 REVIEW 11/FAIL 0/INCOMPLETE 0, 366 files/344,922,733 bytes,
+  requested order exact, tree/ownership/SHA error 0, dirty false, freeze eligible true다.
+- 동일 build ID를 재호출해 `IMMUTABLE_BUILD_REUSED`와 366-file/344,922,733-byte
+  전수 재검증을 확인했다. 남은 sequence generation과 deadline point-in-time snapshot은
+  기존 autonomous process에서 계속한다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화

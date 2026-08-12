@@ -111,6 +111,11 @@ Public-safe Sapiens command 형태:
   36 files/28,993,437 bytes, contract v2 requested order exact, verifier error 0,
   `git_worktree_dirty=false`, `freeze_eligible=true`; same build ID rerun은
   `IMMUTABLE_BUILD_REUSED`로 copy 없이 전수 검증
+- current valid predeadline checkpoint: build `exercise3d-predeadline-checkpoint-20260812T1140KST`,
+  completed/freeze-ready 11 sequence를 모두 보존. REVIEW 11/FAIL 0/INCOMPLETE 0,
+  366 files/344,922,733 bytes, requested order/tree/ownership/SHA error 0,
+  `git_worktree_dirty=false`, `freeze_eligible=true`; immutable reuse 재검증 PASS.
+  이 build는 final deadline build ID와 별도이며 남은 generation은 계속한다.
 - completed Sapiens 34 camera와 SAM 33 camera의 `run_provenance.json` materialize PASS;
   model/checkpoint/config/source/selection/tool/exact-resume identity 포함
 - `latpulldown_0003`: 662×26, coverage/alignment 1.0, prior-only/missing 0,
@@ -202,7 +207,8 @@ tmux new-window -n exercise3d-dashboard \
 ## Git state
 
 - branch: `agent/phase-5-1-pushup-0003-recovery`
-- latest implementation commit: freeze source byte snapshot `f1b701e`; 현재 exact `HEAD`는
+- latest implementation commit: freeze source byte snapshot `f1b701e`; latest durable checkpoint
+  record `54a8d2c`; 현재 exact `HEAD`는
   `git rev-parse HEAD`와 local state의 `git_commit`으로 확인
 - Draft PR: #1 (`https://github.com/06-month/Exercise3D-Dataset-Pipeline/pull/1`)
 - pushed: handoff/streaming supervisor와 문서 milestone remote 동기화 완료
@@ -210,4 +216,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-12 11:39 KST
+- 2026-08-12 11:42 KST
