@@ -362,6 +362,9 @@
 - deadline contract v2 partial smoke: clean commit `7b54214`에서 requested 2-sequence
   universe/order exact bind, REVIEW 1/INCOMPLETE 1, 36 files/28,993,641 bytes,
   verifier error 0, dirty false, freeze eligible false
+- single-descriptor source snapshot smoke: clean commit `f1b701e`에서 REVIEW 1,
+  36 files/28,993,437 bytes, contract/order/tree/hash error 0, dirty false,
+  freeze eligible true, immutable reuse PASS
 - 다음 gate: downstream 연구 사용 승인
 
 ## Phase별 Git Definition of Done

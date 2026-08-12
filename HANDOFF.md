@@ -107,6 +107,10 @@ Public-safe Sapiens command 형태:
   `barbellrow_0000,benchpress_0001` exact bind, REVIEW 1/INCOMPLETE 1,
   36 files/28,993,641 bytes, verifier error 0, `git_worktree_dirty=false`,
   `freeze_eligible=false` (의도된 truthful partial snapshot)
+- single-descriptor source snapshot smoke: clean commit `f1b701e`, REVIEW 1,
+  36 files/28,993,437 bytes, contract v2 requested order exact, verifier error 0,
+  `git_worktree_dirty=false`, `freeze_eligible=true`; same build ID rerun은
+  `IMMUTABLE_BUILD_REUSED`로 copy 없이 전수 검증
 - completed Sapiens 34 camera와 SAM 33 camera의 `run_provenance.json` materialize PASS;
   model/checkpoint/config/source/selection/tool/exact-resume identity 포함
 - `latpulldown_0003`: 662×26, coverage/alignment 1.0, prior-only/missing 0,
@@ -198,7 +202,7 @@ tmux new-window -n exercise3d-dashboard \
 ## Git state
 
 - branch: `agent/phase-5-1-pushup-0003-recovery`
-- latest implementation commit: deadline recovery race guard `195d52a`; 현재 exact `HEAD`는
+- latest implementation commit: freeze source byte snapshot `f1b701e`; 현재 exact `HEAD`는
   `git rev-parse HEAD`와 local state의 `git_commit`으로 확인
 - Draft PR: #1 (`https://github.com/06-month/Exercise3D-Dataset-Pipeline/pull/1`)
 - pushed: handoff/streaming supervisor와 문서 milestone remote 동기화 완료
@@ -206,4 +210,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-12 11:34 KST
+- 2026-08-12 11:39 KST

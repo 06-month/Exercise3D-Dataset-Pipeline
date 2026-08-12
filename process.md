@@ -220,6 +220,12 @@
   in-place mutation이나 mixed byte stream을 reject한다.
 - Copied file/temp metadata의 fsync 후 parent directory를 fsync하고, verified staging을 final build로
   rename한 뒤 output root도 fsync해 crash/power-loss 내구성을 보강했다.
+- Source symlink/identity-change/temp cleanup regression을 포함한 전체 98 tests와 publication-safety가
+  PASS했고 clean code checkpoint `f1b701e`를 push했다.
+- Clean commit에서 `barbellrow_0000` 실제 private smoke를 새 build ID로 publish했다.
+  Contract v2 REVIEW 1, 36 files/28,993,437 bytes, requested order/tree/ownership/SHA error 0,
+  dirty false, freeze eligible true다. 동일 build ID 재실행은 `IMMUTABLE_BUILD_REUSED`로
+  copy/publish 없이 36 files/28,993,437 bytes를 재검증했다.
 
 ### Source-of-truth 재검증
 
