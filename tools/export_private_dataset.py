@@ -17,6 +17,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -120,6 +121,37 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def fsync_directory(path: Path) -> None:
+    flags = os.O_RDONLY | os.O_CLOEXEC
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    descriptor = os.open(path, flags)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def source_descriptor_identity(descriptor: int) -> tuple[int, int, int, int, int]:
+    value = os.fstat(descriptor)
+    if not stat.S_ISREG(value.st_mode):
+        raise RuntimeError("freeze source is not a regular file")
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
+
+
+def hash_file_handle(handle: BinaryIO) -> str:
+    digest = hashlib.sha256()
+    for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
 def sequence_order_sha256(sequences: list[str]) -> str:
     return hashlib.sha256(
         json.dumps(sequences, ensure_ascii=False, separators=(",", ":")).encode(
@@ -175,6 +207,7 @@ def atomic_text(path: Path, value: str) -> None:
         handle.flush()
         os.fsync(handle.fileno())
     os.replace(temporary, path)
+    fsync_directory(path.parent)
 
 
 def atomic_csv(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -190,6 +223,7 @@ def atomic_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         handle.flush()
         os.fsync(handle.fileno())
     os.replace(temporary, path)
+    fsync_directory(path.parent)
 
 
 def read_json(path: Path) -> dict[str, Any] | None:
@@ -719,30 +753,74 @@ def publish_staged_build(
     if final_root.exists():
         raise RuntimeError("final build appeared during staging; refusing to overwrite it")
     os.replace(staging_root, final_root)
+    fsync_directory(final_root.parent)
     return integrity
 
 
 def copy_exact(source: Path, destination: Path) -> dict[str, Any]:
+    if source.is_symlink():
+        raise RuntimeError(f"freeze source must not be a symlink: {source}")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    source_digest = sha256(source)
-    if destination.is_file() and sha256(destination) == source_digest:
-        return {
-            "path": str(destination),
-            "bytes": destination.stat().st_size,
-            "sha256": source_digest,
-            "resume_skipped": True,
-        }
+    if destination.is_symlink():
+        raise RuntimeError(f"freeze destination must not be a symlink: {destination}")
+    flags = os.O_RDONLY | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(source, flags)
     temporary = destination.with_name(destination.name + f".{os.getpid()}.tmp")
-    shutil.copyfile(source, temporary)
-    copied_digest = sha256(temporary)
-    if copied_digest != source_digest or temporary.stat().st_size != source.stat().st_size:
+    try:
+        with os.fdopen(descriptor, "rb", closefd=True) as source_handle:
+            initial_identity = source_descriptor_identity(source_handle.fileno())
+            source_digest = hash_file_handle(source_handle)
+            if source_descriptor_identity(source_handle.fileno()) != initial_identity:
+                raise RuntimeError(f"freeze source changed while hashing: {source}")
+            if destination.is_file() and sha256(destination) == source_digest:
+                if source_descriptor_identity(source_handle.fileno()) != initial_identity:
+                    raise RuntimeError(
+                        f"freeze source changed during resume verification: {source}"
+                    )
+                return {
+                    "path": str(destination),
+                    "bytes": initial_identity[2],
+                    "sha256": source_digest,
+                    "resume_skipped": True,
+                }
+            source_handle.seek(0)
+            copied_digest = hashlib.sha256()
+            copied_bytes = 0
+            temporary.unlink(missing_ok=True)
+            temporary_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC
+            if hasattr(os, "O_NOFOLLOW"):
+                temporary_flags |= os.O_NOFOLLOW
+            temporary_descriptor = os.open(temporary, temporary_flags, 0o600)
+            with os.fdopen(
+                temporary_descriptor, "wb", buffering=0, closefd=True
+            ) as destination_handle:
+                for chunk in iter(
+                    lambda: source_handle.read(8 * 1024 * 1024), b""
+                ):
+                    destination_handle.write(chunk)
+                    copied_digest.update(chunk)
+                    copied_bytes += len(chunk)
+                destination_handle.flush()
+                os.fsync(destination_handle.fileno())
+            copied_digest_value = copied_digest.hexdigest()
+            if (
+                source_descriptor_identity(source_handle.fileno())
+                != initial_identity
+                or copied_bytes != initial_identity[2]
+                or copied_digest_value != source_digest
+            ):
+                raise RuntimeError(f"freeze source changed while copying: {source}")
+        os.replace(temporary, destination)
+        fsync_directory(destination.parent)
+    except BaseException:
         temporary.unlink(missing_ok=True)
-        raise RuntimeError(f"byte-integrity mismatch while copying {source}")
-    os.replace(temporary, destination)
+        raise
     return {
         "path": str(destination),
         "bytes": destination.stat().st_size,
-        "sha256": copied_digest,
+        "sha256": copied_digest_value,
         "resume_skipped": False,
     }
 

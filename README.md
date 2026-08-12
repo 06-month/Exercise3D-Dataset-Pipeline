@@ -34,6 +34,8 @@ Deadline sentinel과 build ID별 exporter는 각각 lifetime/advisory lock을 �
 race에서도 동일 snapshot staging/copy/publish를 중복 실행하지 않습니다. Sentinel
 watchdog은 exact persisted command identity와 연속 process absence를 확인한 뒤에만 제한된
 자동 recovery를 수행합니다.
+Freeze copy는 source symlink를 거부하고 single open descriptor의 inode/size/time identity를
+hash·copy 전후로 검증하며, file과 final directory rename을 fsync한 뒤만 publish합니다.
 
 ## 프로젝트 목표
 

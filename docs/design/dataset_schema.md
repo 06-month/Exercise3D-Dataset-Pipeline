@@ -10,6 +10,10 @@ flag를 전수 검증한 뒤에만 directory rename으로 `<output>/<build_id>`�
 non-blocking advisory lock하며, lock을 얻지 못한 caller는 hidden staging을 건드리기 전에
 exit code 75로 종료한다. Deadline sentinel 자체도 별도 lifetime lock으로 single instance를
 강제하고 watchdog recovery launch race를 차단한다.
+각 source payload는 symlink를 거부하고 `O_NOFOLLOW`로 한 regular-file descriptor를 연 뒤,
+device/inode/size/mtime/ctime identity를 hash·copy 전후로 재검증한다. 즉 path가 atomic
+replacement되거나 file이 in-place mutation되는 동안 섞인 byte stream은 publish하지 않는다.
+Copied file, metadata file, staging→final directory rename 후에는 해당 directory를 fsync한다.
 최종 manifest가 존재하는 build ID는 immutable하며, 재실행은 전수 integrity PASS일 때 read-only
 reuse만 허용한다. Corrupt/불일치 final build를 같은 ID로 덮어쓰지 않는다.
 Resume staging에 이전 시도의 temp/unlisted payload가 남아 있으면 final manifest tree에 없는

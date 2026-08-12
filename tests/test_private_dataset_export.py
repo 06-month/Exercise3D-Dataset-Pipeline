@@ -26,6 +26,7 @@ from tools.export_private_dataset import (
     sequence_order_sha256,
     sequence_dependencies,
     sha256,
+    source_descriptor_identity,
     validate_path_component,
     verify_frozen_build,
     verify_deadline_marker_mtimes,
@@ -262,6 +263,40 @@ class PrivateDatasetExportTest(unittest.TestCase):
             self.assertEqual(sha256(source), sha256(destination))
             self.assertFalse(first["resume_skipped"])
             self.assertTrue(second["resume_skipped"])
+
+    def test_copy_rejects_source_symlink_without_touching_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "private.bin"
+            target.write_bytes(b"private")
+            link = root / "source.bin"
+            link.symlink_to(target)
+            destination = root / "freeze" / "payload.bin"
+            with self.assertRaises(RuntimeError):
+                copy_exact(link, destination)
+            self.assertFalse(destination.exists())
+            self.assertEqual(target.read_bytes(), b"private")
+
+    def test_copy_rejects_source_identity_change_and_removes_temp(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source.bin"
+            destination = root / "freeze" / "payload.bin"
+            source.write_bytes(b"stable source")
+            descriptor = os.open(source, os.O_RDONLY)
+            try:
+                real_identity = source_descriptor_identity(descriptor)
+            finally:
+                os.close(descriptor)
+            changed_identity = (*real_identity[:3], real_identity[3] + 1, real_identity[4] + 1)
+            with patch(
+                "tools.export_private_dataset.source_descriptor_identity",
+                side_effect=[real_identity, changed_identity],
+            ):
+                with self.assertRaisesRegex(RuntimeError, "changed while hashing"):
+                    copy_exact(source, destination)
+            self.assertFalse(destination.exists())
+            self.assertEqual(list((root / "freeze").glob("*.tmp")), [])
 
     def test_finite_nan_contract_separates_invalid_payload(self) -> None:
         points = np.asarray([[[1.0, 2.0, 3.0]], [[np.nan, np.nan, np.nan]]])

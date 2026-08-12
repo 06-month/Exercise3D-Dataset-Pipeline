@@ -211,6 +211,16 @@
   보존됐다. Dashboard attention은 `DEADLINE_ETA_AT_RISK` warning 하나뿐이며
   GPU inference/SAM/autonomous supervisor는 중단·재시작하지 않았다.
 
+### Freeze source byte-snapshot/durability hardening
+
+- 기존 `copy_exact()`은 source hash와 copied hash mismatch를 검출했지만 source path를 hash/copy에서
+  두 번 다시 열어 concurrent atomic replacement의 point-in-time semantics가 명시적이지 않았다.
+- Source symlink를 거부하고 `O_NOFOLLOW` regular-file descriptor 하나를 통해 hash와 copy를
+  수행한다. Device/inode/size/mtime/ctime을 hash·resume-check·copy 전후에 비교하여
+  in-place mutation이나 mixed byte stream을 reject한다.
+- Copied file/temp metadata의 fsync 후 parent directory를 fsync하고, verified staging을 final build로
+  rename한 뒤 output root도 fsync해 crash/power-loss 내구성을 보강했다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화
