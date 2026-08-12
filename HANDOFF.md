@@ -38,12 +38,12 @@
   사용해 300초 backoff 뒤 1회만 재시도한다. Backoff 중에는 다른 ready sequence를 진행하고
   retry attempt/UTC를 atomic supervisor state에 남긴다. 현재 live PID는 이 변경 전 시작했으므로
   활성화를 위해 restart하지 않았으며, 향후 watchdog recovery가 current entrypoint를 load할 때 적용된다.
-- 2026-08-12 14:10 KST dashboard snapshot: `benchpress_0001` Mode B/body fit/Mode C/quality/freeze-ready와
+- 2026-08-12 14:14 KST dashboard snapshot: `benchpress_0001` Mode B/body fit/Mode C/quality/freeze-ready와
   12-sequence immutable checkpoint가 완료됐고 supervisor는 다음 3-view pose dependency를
   `WAIT_RUNNING_SAPIENS2`로 대기 중
 - Sapiens durable 38/78 camera, current partial 포함 25,074/65,430 crop; PID 373049 alive,
   current `benchpress_0002/cam3`
-- Sapiens recent-completed-camera throughput 0.227 crop/s; projected ETA는 deadline 약 2시간 28분 후 risk.
+- Sapiens recent-completed-camera throughput 0.227 crop/s; projected ETA는 deadline 약 2시간 35분 후 risk.
   OOM/retry/stall은 없음
 - SAM durable 36/78 camera, 23,460/65,595 frame, 12/26 full sequence; aggregate 0.584 frame/s.
   현재 SAM child는 없으며 `benchpress_0002` 3-view pose 완료 후 cam1부터 자동 재개한다.
@@ -64,6 +64,11 @@
   accepted-prior/finite payload/QA와 signature가 모두 일치할 때만 skip하고 source/output drift는 atomic
   rebuild한다. 기존 12 completed sequence는 supervisor successful-row gate로 호출 자체를 skip하며,
   다음 새 sequence부터 signature가 생성된다.
+  Sequence body-fit은 canonical triangulation/metadata, 3-view compact prior/metadata, gate config와 모든
+  fitting parameter의 privacy-safe size/mtime/ctime signature를 저장한다. Existing PASS/REVIEW output은
+  source identity, frame/PTS/joint convention, finite/NaN/evidence/confidence schema, QA count와 current
+  acceptance gate 재평가가 모두 exact할 때만 skip한다. 기존 `benchpress_0001` 673-frame REVIEW output은
+  signature를 요구하지 않는 read-only schema/gate audit에서 PASS했으며 기존 12 sequence는 재계산하지 않았다.
 - GPU: A100 80GB, Sapiens-only dependency-wait snapshot 36,375 MiB/100%, 366.59 W, 56°C;
   observed OOM/retry 없음
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
@@ -104,12 +109,12 @@
   build progress와 contract-v2 best durable checkpoint progress를 별도로 보존한다. Selector
   exact workload와 measured rate를 사용한 overhead-free deadline upper bound는 현재 25/26이며,
   첫 late sequence는 `squat_0003`다. 완료 12 sequence의 post-SAM terminal latency p90
-  1,399.83초를 적용한 empirical schedule도 25/26이며, upper/adjusted all-sequence terminal은
-  각각 2026-08-14 17:15/17:38 KST projection이다. 완료 PASS camera 34개의 Mode B
+  1,399.83초를 적용한 empirical schedule은 24/26, 첫 late sequence `deadlift_0002`이며,
+  upper/adjusted all-sequence terminal은 각각 2026-08-14 17:24/17:47 KST projection이다. 완료 PASS camera 34개의 Mode B
   `output_bytes/frame` nearest-rank p90 기반 SAM 완료 후 예상 free는 약 103.40 GiB다. Verified
-  12-sequence checkpoint의 sequence별 관측 최대 bytes/frame을 적용하면 deadline 예상 25개까지
-  남은 누적 immutable checkpoint + final snapshot은 9.21 GiB, 모든 26개 관측-max 시나리오는
-  10.25 GiB다. SAM과 합친 예상 free는 94.19/93.15 GiB, reserve margin은 74.19/73.15 GiB로
+  12-sequence checkpoint의 sequence별 관측 최대 bytes/frame을 적용하면 empirical deadline 예상 24개까지
+  남은 누적 immutable checkpoint + final snapshot은 8.23 GiB, 모든 26개 관측-max 시나리오는
+  10.25 GiB다. SAM과 합친 예상 free는 95.18/93.15 GiB, reserve margin은 75.18/73.15 GiB로
   현재 storage attention은 없다.
   남은 14 sequence의 exact selector workload audit은 target crops와 SAM frames 양쪽 모두
   `PARETO_NONDECREASING`, dominance/combined-cost inversion 0이다. 이는 global optimum 증명이 아니라
@@ -225,7 +230,8 @@ Public-safe Sapiens command 형태:
 5. 죽어 있으면 live process absence와 child 부재를 다시 확인한 뒤 `.runtime/handoff_state.json`의
    exact frozen resume command를 사용한다. Sapiens와 SAM runner는 PASS camera/chunk를 검증 후 skip하며,
    두 runner의 lifetime lock과 output-bound legacy/orphan process guard를 우회하지 않는다. SAM prior
-   consolidation도 current source signature와 output contract가 exact할 때만 materialization을 skip한다.
+   consolidation과 body-fit도 current source signature와 output/acceptance contract가 exact할 때만
+   materialization을 skip한다.
 6. supervisor가 죽었으면 local state의 exact supervisor command로 재실행한다. `--overwrite`는 사용하지 않는다.
    단, `.runtime/supervisor_watchdog_state.json`의 watchdog이 정상이면 수동 launch하지 말고
    자동 recovery 결과를 사용한다. `ATTENTION`/재시도 소진일 때만 수동 개입한다.
@@ -288,11 +294,11 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Runtime estimates
 
-- 2026-08-12 14:10 KST snapshot: Sapiens recent-completed-camera rate 0.227 crop/s,
-  streaming ETA는 deadline 약 2시간 28분 후. Downstream overhead를 제외한 sequence schedule
-  upper bound와 empirical p90-adjusted estimate는 deadline까지 25/26이며 `squat_0003`가
-  첫 projected late sequence
-- deadline margin: Sapiens 전량 기준 약 -2.47 h; 대신 Mode B complete sequence와
+- 2026-08-12 14:14 KST snapshot: Sapiens recent-completed-camera rate 0.227 crop/s,
+  streaming ETA는 deadline 약 2시간 35분 후. Downstream overhead를 제외한 sequence schedule
+  upper bound는 deadline까지 25/26(`squat_0003` first late), empirical p90-adjusted estimate는
+  24/26(`deadlift_0002` first late)
+- deadline margin: Sapiens 전량 기준 약 -2.58 h; 대신 Mode B complete sequence와
   deadline snapshot을 내구적으로 확보
 - concurrent SAM Mode B aggregate 23,460 frame, measured 0.584 frame/s;
   standalone expected 20.80 h projection은
@@ -302,7 +308,8 @@ tmux new-window -n exercise3d-dashboard \
 ## Git state
 
 - branch: `agent/phase-5-1-pushup-0003-recovery`
-- latest implementation commit: source-bound SAM prior resume `e641bfa`; SAM single-target exact-tree
+- latest implementation commit: source-bound body-fit resume `6cacff1`; source-bound SAM prior resume
+  `e641bfa`; SAM single-target exact-tree
   gate `d3fc911`; SAM provenance completion
   gate `11a91ca`; streaming transient retry
   `0412590`; SAM duplicate-resume/orphan guard
@@ -325,4 +332,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-12 14:12 KST
+- 2026-08-12 14:17 KST

@@ -682,6 +682,23 @@
   재계산하지 않는다. Current GPU/supervisor에는 signal/restart가 없으며 다음 새 sequence의 child부터
   source-bound metadata가 생성된다.
 
+### Source-bound sequence body-fit resume
+
+- `fit_sequence_body.py`도 recovered supervisor가 downstream failure를 retry하면 valid body-fit을 다시
+  계산했다. Body-fit은 triangulation, 3-view prior, gate config와 fitting parameter에 모두 의존하므로
+  단순 file-exists skip은 stale acceptance를 재사용할 위험이 있었다.
+- Canonical triangulation NPZ/metadata, 세 camera의 compact prior NPZ/metadata, gate config file의
+  privacy-safe size/mtime_ns/ctime_ns inventory와 max-gap/alignment/geometry/SAM/temporal parameter를 SHA-256
+  signature로 묶는다. Existing output은 signature, frame index/PTS/joint convention, source valid/quality,
+  fitted finite/invalid-NaN, confidence range, evidence code/count, shape/scale finite, frames CSV와 QA를
+  검사하고 current gate config로 PASS/REVIEW 및 reason을 다시 산출한 뒤 exact할 때만 skip한다.
+- Signature source-drift, output nonfinite, acceptance-gate regression을 추가했다. 전체 152 tests, compile과
+  publication-safety가 PASS했고 기존 `benchpress_0001` 673-frame REVIEW body-fit은 signature를 요구하지
+  않는 read-only output/gate audit에서 PASS했다.
+- Implementation commit `6cacff1`을 push했다. 기존 12 completed sequence는 supervisor successful-row
+  gate로 호출하지 않아 재계산하지 않으며, current GPU/supervisor에는 signal/restart가 없었다. 다음
+  새 sequence body-fit부터 source-bound metadata가 자동 생성된다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화
