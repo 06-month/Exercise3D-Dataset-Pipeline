@@ -310,6 +310,11 @@
   checkpoint보다 크면 follower/watchdog 사망을 숨기지 않는다.
 - 실제 live follower PID 1916854에 대한 one-shot은 expected/resume command SHA exact-match,
   missing 0, launch/restart 0, attention false로 identity pin을 완료했다. 전체 111 tests가 PASS했다.
+- Publication-safety PASS 후 commit `16fd41f`를 push하고 watchdog PID 1944186을 persistent mode로
+  시작했다. Follower PID 1916854 exact-match, restart 0, attention false를 확인했다.
+- 새 marker/state를 load하도록 exact argv/cwd/child 0인 CPU-only dashboard/handoff monitor만
+  PID 1945200/1945203으로 교체했다. Handoff에는 watchdog exact resume command가 저장됐고,
+  dashboard attention은 기존 deadline ETA/coverage warning 두 개뿐이다. GPU job은 건드리지 않았다.
 
 ### Source-of-truth 재검증
 

@@ -30,16 +30,16 @@
   resume command digest가 exact-match하며 restart 0, attention false다. 3회 연속 absence +
   2초 final rescan 후에만 최대 3회/시간 내에서 detached resume하고 live process는
   절대 signal하지 않는다. Exact watchdog PID와 command은 runtime/dashboard state가 source of truth다.
-- 2026-08-12 12:08 KST dashboard snapshot: `benchpress_0001` pose 3-view 완료 후
+- 2026-08-12 12:15 KST dashboard snapshot: `benchpress_0001` pose 3-view 완료 후
   supervisor는 `STREAM_SEQUENCE_PIPELINE`; 해당 sequence Mode B를 자동 실행 중
 - Sapiens durable 36/78 camera, current partial 포함 23,452/65,430 crop; PID 373049 alive,
   current `benchpress_0002/cam1`
-- Sapiens recent-chunk throughput 0.234 crop/s; projected ETA는 deadline 약 57분 후 risk
+- Sapiens recent-chunk throughput 0.234 crop/s; projected ETA는 deadline 약 1시간 5분 후 risk
 - SAM durable 33/78 camera, 21,441/65,595 frame, 11/26 full sequence; aggregate 0.585 frame/s;
-  PID 1930239가 `benchpress_0001/cam1` Mode B 실행 중
+  PID 1930239가 `benchpress_0001/cam1` Mode B 실행 중이며 durable numeric 162 frame까지 진행
 - GPU: A100 80GB, current combined snapshot 45,224 MiB/100%; observed OOM/retry 없음
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
-- handoff monitor PID 1917827: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
+- handoff monitor PID 1945203: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
   `updated_at_utc` 증가와 exact active/resume command/stage count 보존 확인 완료
 - deadline snapshot sentinel PID 1882473: 2026-08-14 13:00 KST에 completed sequence와
   `INCOMPLETE` 목록을 별도 versioned private build로 export; local state는
@@ -61,7 +61,7 @@
   Sentinel lifetime lock은 별도 process probe에서 held로 확인했고 exporter는 build ID별
   lock을 staging mutation 전에 취득한다.
 - dashboard monitor: `tools/monitor_autonomous_generation.py`; atomic state는
-  `.runtime/dashboard_state.json`. Quiet daemon PID 1932669이며 `--once`는 snapshot,
+  `.runtime/dashboard_state.json`. Quiet daemon PID 1945200이며 `--once`는 snapshot,
   기본은 Rich live, `--quiet`는 state-only daemon이다. Export section은 final deadline
   build progress와 contract-v2 best durable checkpoint progress를 별도로 보존한다. Selector
   exact workload와 measured rate를 사용한 overhead-free deadline upper bound는 현재 25/26이며,
@@ -77,6 +77,10 @@
   `WAITING_FOR_NEW_FREEZE_READY_SEQUENCE`, attention false다. State와 exact command는
   `.runtime/predeadline_checkpoint_follower_state.json`; final deadline sentinel과 별도 build prefix/lock을
   사용하고 deadline 도달 시 정상 종료한다.
+- Checkpoint follower watchdog PID 1944186: live/persisted command SHA exact-match,
+  missing/restart 0, attention false. 3회 연속 absence + 2초 final rescan 후에만 최대 3회/시간
+  detached recovery하며 follower lifetime lock이 launch race를 차단한다. State는
+  `.runtime/predeadline_checkpoint_follower_watchdog_state.json`; deadline 이후에는 restart하지 않는다.
 
 Public-safe Sapiens command 형태:
 
@@ -167,10 +171,12 @@ Public-safe Sapiens command 형태:
 11. `freeze_readiness.failures`는 completed quality의 export validation failure이다. 5분 유예 후
     누락 sidecar가 지속되거나 FAIL이면 dashboard `FREEZE_READINESS_FAILED`를 보고한다.
     Quality/acceptance threshold를 낮추지 말고 reason의 source stage만 recovery한다.
-12. deadline 전 checkpoint follower가 없으면 dashboard/state에서 exact process absence를 확인하고
-    `.runtime/predeadline_checkpoint_follower_state.json`의 command로 복구한다. 기존 exporter child나
-    동일 process가 있으면 launch하지 않는다. Ready 집합이 기존 checkpoint와 같을 때
-    `attempted_build_id=null`이어야 하며, deadline 후 follower 종료는 정상이다.
+12. deadline 전 checkpoint follower가 없으면 먼저
+    `.runtime/predeadline_checkpoint_follower_watchdog_state.json`을 확인한다. Watchdog이 RUNNING이면
+    수동 launch하지 말고 3-cycle automatic recovery를 사용한다. Watchdog ATTENTION/restart exhaustion일
+    때만 exact absence와 exporter child 부재를 재확인해 handoff resume command로 복구한다.
+    Ready 집합이 기존 checkpoint와 같을 때 `attempted_build_id=null`이어야 하며, deadline 후
+    follower/watchdog 종료는 정상이다.
 
 Dashboard 사용:
 
@@ -220,7 +226,8 @@ tmux new-window -n exercise3d-dashboard \
 ## Git state
 
 - branch: `agent/phase-5-1-pushup-0003-recovery`
-- latest implementation commit: deadline freeze coverage forecast `8b55df7`; autonomous
+- latest implementation commit: checkpoint follower recovery watchdog `16fd41f`; deadline freeze
+  coverage forecast `8b55df7`; autonomous
   predeadline checkpoint follower `711d4fd`; durable
   checkpoint dashboard `80f48ab`; predeadline checkpoint manifest source commit `54a8d2c`; exact `HEAD`는
   `git rev-parse HEAD`와 local state의 `git_commit`으로 확인
@@ -230,4 +237,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-12 12:08 KST
+- 2026-08-12 12:15 KST
