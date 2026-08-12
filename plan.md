@@ -13,8 +13,8 @@
 - 이미 완료된 4개 pilot sequence output은 검증 후 재사용하고 재추론하지 않음
 - GPU scheduling: Sapiens2-5B는 계속 실행하고, pose-complete sequence의 Mode B를 겹쳐
   end-to-end 완결 sequence를 확보한다. 첫 full camera 병렬 peak 61,821 MiB와 completion PASS 확인
-- current projection: 2026-08-12 13:01 KST Sapiens current partial 포함 24,135/65,430 crop,
-  recent 0.218 crop/s, 전량 ETA 2026-08-14 17:39 KST; 약 -4.65 h deadline margin을
+- current projection: 2026-08-12 13:06 KST Sapiens current partial 포함 24,135/65,430 crop,
+  recent 0.218 crop/s, 전량 ETA 2026-08-14 17:44 KST; 약 -4.74 h deadline margin을
   end-to-end complete sequence 확보와
   명시적 INCOMPLETE provenance로 관리
 - SAM policy: Mode B default, Mode C는 실제 failure/occlusion escalation evidence가 있는 경우만 REVIEW
@@ -31,6 +31,9 @@
   별도 표시; dashboard/handoff monitor는 lifetime lock + exact-identity capped recovery watchdog으로
   유지; verified checkpoint manifest 기반 cumulative immutable build/final snapshot storage를 SAM
   forecast와 합산해 reserve risk를 미리 감지하며 정상 generation은 AI polling 금지
+- remaining order gate: pose-incomplete 14 sequence의 selector target crops/SAM frames pairwise
+  dominance inversion 0, measured combined-cost inversion 0; global optimum으로 과장하지 않고
+  명백한 shorter-workload command drift만 attention 처리
 - expensive camera output별 atomic `run_provenance.json`: checkpoint/config/source/selection/tool/command
   identity를 보존하며 기존 PASS output에는 재추론 없이 sidecar만 materialize
 - deadline sentinel: 2026-08-14 13:00 KST에 별도 immutable build ID로 private snapshot/export를

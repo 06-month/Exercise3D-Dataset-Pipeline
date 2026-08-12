@@ -17,7 +17,7 @@
 - RUNNING: Phase 11 quality/freeze-readiness 11/26 sequence; CPU follower/watchdog + exporter fallback 연결
 - TODO: remaining triangulation, SAM prior consolidation, body fitting/QC, deadline private export/freeze
 - BLOCKED: 없음
-- REVIEW/FAIL: camera PASS 11/REVIEW 15/FAIL 0; body fit REVIEW 11/FAIL 0
+- REVIEW/FAIL: camera PASS 11/REVIEW 15/FAIL 0; body fit REVIEW 12/FAIL 0
 
 ## Active job
 
@@ -30,16 +30,16 @@
   resume command digest가 exact-match하며 restart 0, attention false다. 3회 연속 absence +
   2초 final rescan 후에만 최대 3회/시간 내에서 detached resume하고 live process는
   절대 signal하지 않는다. Exact watchdog PID와 command은 runtime/dashboard state가 source of truth다.
-- 2026-08-12 13:01 KST dashboard snapshot: `benchpress_0001` pose 3-view 완료 후
-  supervisor는 `STREAM_SEQUENCE_PIPELINE`; 해당 sequence Mode B를 자동 실행 중
+- 2026-08-12 13:06 KST dashboard snapshot: `benchpress_0001` Mode B/body fit/Mode C/quality sidecar가
+  완료됐고 supervisor는 다음 3-view pose dependency를 `WAIT_RUNNING_SAPIENS2`로 대기 중
 - Sapiens durable 37/78 camera, current partial 포함 24,135/65,430 crop; PID 373049 alive,
   current `benchpress_0002/cam2`
-- Sapiens recent-completed-camera throughput 0.218 crop/s; projected ETA는 deadline 약 4시간 39분 후 risk.
+- Sapiens recent-completed-camera throughput 0.218 crop/s; projected ETA는 deadline 약 4시간 44분 후 risk.
   이전 snapshot들보다 악화돼 `DEADLINE_ETA_WORSENED` warning을 기록했지만
   OOM/retry/stall은 없음
-- SAM durable 35/78 camera, 22,787/65,595 frame, 11/26 full sequence; aggregate 0.584 frame/s;
-  PID 1930239가 `benchpress_0001/cam3` Mode B 실행 중이며 snapshot numeric 449 frame까지 진행
-- GPU: A100 80GB, current combined snapshot 62,823 MiB/100%, 362.08 W, 56°C;
+- SAM durable 36/78 camera, 23,460/65,595 frame, 12/26 full sequence; aggregate 0.584 frame/s.
+  현재 SAM child는 없으며 `benchpress_0002` 3-view pose 완료 후 cam1부터 자동 재개한다.
+- GPU: A100 80GB, Sapiens-only dependency-wait snapshot 36,375 MiB/100%, 366.59 W, 56°C;
   observed OOM/retry 없음
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
 - handoff monitor PID 2006909: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
@@ -64,7 +64,7 @@
   Sentinel lifetime lock은 별도 process probe에서 held로 확인했고 exporter는 build ID별
   lock을 staging mutation 전에 취득한다.
 - dashboard monitor: `tools/monitor_autonomous_generation.py`; atomic state는
-  `.runtime/dashboard_state.json`. Quiet daemon PID 2019834이며 `--once`는 snapshot,
+  `.runtime/dashboard_state.json`. Quiet daemon PID 2026797이며 `--once`는 snapshot,
   기본은 Rich live, `--quiet`는 state-only daemon이다. Export section은 final deadline
   build progress와 contract-v2 best durable checkpoint progress를 별도로 보존한다. Selector
   exact workload와 measured rate를 사용한 overhead-free deadline upper bound는 현재 24/26이며,
@@ -76,6 +76,9 @@
   누적 immutable checkpoint 13개 + final snapshot은 8.58 GiB, 모든 26개 관측-max 시나리오는
   10.61 GiB다. SAM과 합친 예상 free는 95.08/93.05 GiB, reserve margin은 75.08/73.05 GiB로
   현재 storage attention은 없다.
+  남은 14 sequence의 exact selector workload audit은 target crops와 SAM frames 양쪽 모두
+  `PARETO_NONDECREASING`, dominance/combined-cost inversion 0이다. 이는 global optimum 증명이 아니라
+  뒤 sequence가 두 GPU workload 모두 더 작은 명백한 order 오류가 없다는 지속 gate다.
 - Monitoring-plane watchdog PID 2009359: dashboard/handoff monitor의 live/resume exact argv SHA를
   각각 pin하며 restart 0, attention false다. 두 monitor와 watchdog의 lifetime lock은 모두 held다.
   3회 연속 absence + 2초 final rescan 후 target별 최대 3회/시간 detached recovery하고 live process는
@@ -149,19 +152,24 @@ Public-safe Sapiens command 형태:
   366 files/344,922,733 bytes, requested order/tree/ownership/SHA error 0,
   `git_worktree_dirty=false`, `freeze_eligible=true`; immutable reuse 재검증 PASS.
   이 build는 final deadline build ID와 별도이며 남은 generation은 계속한다.
-- completed Sapiens 37 camera와 SAM 35 camera의 `run_provenance.json` materialize PASS;
+- completed Sapiens 37 camera와 SAM 36 camera의 `run_provenance.json` materialize PASS;
   model/checkpoint/config/source/selection/tool/exact-resume identity 포함
 - `latpulldown_0003`: 662×26, coverage/alignment 1.0, prior-only/missing 0,
   displacement p95 0.07748 + camera uncertainty로 REVIEW; Mode C candidate 79, 실행/채택 0
-- Phase 11: body-fit complete 11 sequence/7,147 reference frame, REVIEW 11/FAIL 0;
-  frame PASS 1,019/REVIEW 6,128/FAIL 0, target abstention/SAM rejection view 8/8,
-  missing/prior-only joint frame 0, freeze-ready 11/11
+- Body fit complete 12 sequence/7,820 reference frame, REVIEW 12/FAIL 0. Materialized quality는
+  frame PASS 1,692/REVIEW 6,128/FAIL 0, target abstention/SAM rejection view 8/8,
+  missing/prior-only joint frame 0이다. Quality follower validated freeze-ready는 11/11이며 새
+  `benchpress_0001`은 다음 follower cycle pending이다.
+- `benchpress_0001`: SAM 3-view 2,019/2,019 frame PASS; body fit 673×26, coverage/alignment 1.0,
+  prior-only/missing 0, displacement p95 0.10771 + camera uncertainty로 REVIEW; Mode C candidate 0
+  `PASS_MODE_B_FROZEN`; quality REVIEW sidecar materialized. Quality follower의 freeze-readiness 검증과
+  12-sequence checkpoint publish는 다음 CPU atomic cycle pending이며 기존 output을 재계산하지 않는다.
 
 ## Remaining work
 
 - Sapiens2: 41/78 camera, current partial 포함 41,295 target crops
 - Phase 7 이후: `latpulldown_0003` 및 이후 pose-complete sequence
-- SAM full: 35/78 camera PASS, full-complete sequence 11/26; `benchpress_0001/cam3` Mode B 실행 중
+- SAM full: 36/78 camera PASS, full-complete sequence 12/26; 다음 `benchpress_0002` 3-view pose 대기
 - critical path: pose-complete sequence → Phase 7 gate → Mode B → compact prior → body fit → Mode C candidate QA → export
 - Phase 11은 body fit/Mode C 뒤 CPU-only로 생성하며 deadline exporter가 누락 output을 자동 materialize한다.
 
@@ -238,11 +246,11 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Runtime estimates
 
-- 2026-08-12 13:01 KST snapshot: Sapiens recent-completed-camera rate 0.218 crop/s,
-  streaming ETA는 deadline 약 4시간 39분 후. Downstream overhead를 제외한 sequence schedule
+- 2026-08-12 13:06 KST snapshot: Sapiens recent-completed-camera rate 0.218 crop/s,
+  streaming ETA는 deadline 약 4시간 44분 후. Downstream overhead를 제외한 sequence schedule
   upper bound와 empirical p90-adjusted estimate는 deadline까지 24/26이며 `deadlift_0002`가
   첫 projected late sequence
-- deadline margin: Sapiens 전량 기준 약 -4.65 h; 대신 Mode B complete sequence와
+- deadline margin: Sapiens 전량 기준 약 -4.74 h; 대신 Mode B complete sequence와
   deadline snapshot을 내구적으로 확보
 - concurrent SAM Mode B aggregate 19,455 frame/33,159.28초 = 0.58671 frame/s;
   standalone expected 20.80 h projection은
@@ -252,7 +260,8 @@ tmux new-window -n exercise3d-dashboard \
 ## Git state
 
 - branch: `agent/phase-5-1-pushup-0003-recovery`
-- latest implementation commit: immutable freeze storage forecast `5bb9c4c`; monitoring-plane recovery
+- latest implementation commit: remaining deadline order audit `f8f603b`; immutable freeze storage
+  forecast `5bb9c4c`; monitoring-plane recovery
   watchdog `16a8600` + default-path validation
   fix `5c93d4e`; SAM output storage forecast `b24f509`; quality follower recovery
   watchdog `4600dff`; empirical downstream
@@ -268,4 +277,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-12 13:01 KST
+- 2026-08-12 13:06 KST

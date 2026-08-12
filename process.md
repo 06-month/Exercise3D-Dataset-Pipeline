@@ -436,6 +436,27 @@
   24,135 crop이며 cam2로 진행했다. SAM은 35/78 camera, cam3 partial 449 frame이고
   OOM/retry/stall 0이다.
 
+### Remaining deadline sequence-order dominance audit
+
+- Deadline projection 24/26에서 process restart/order 변경이 completion count를 개선할 수 있는지
+  private frame 없이 selector aggregate workload로 감사했다. 남은 14 sequence는 target crop과 SAM
+  frame 수가 모두 같은 오름차순이며, measured-rate combined cost 순서도 동일하다.
+- Dashboard에 `REMAINING_TWO_STAGE_WORKLOAD_DOMINANCE`를 추가했다. 완료 pose sequence를 제외한
+  모든 earlier/later pair를 비교해 later item이 crops/frames 모두 이하이고 하나 이상 strict-smaller면
+  `DEADLINE_SEQUENCE_ORDER_DOMINANCE_INVERSION` warning을 기록한다.
+- Live snapshot은 `PARETO_NONDECREASING`, dominance inversion 0, weighted inversion 0이다. 이는
+  global two-machine flow-shop optimum 증명이 아니라 명백한 component-wise order 오류가 없다는
+  evidence이며 frozen command를 변경하거나 GPU process를 재시작하지 않았다.
+- Helper/attention integration과 전체 125 tests, publication safety가 PASS했고 implementation
+  commit `f8f603b`를 push했다. Exact CPU-only dashboard PID 2019834만 동일 argv PID 2026797로
+  교체했다. Lock held, monitoring watchdog exact identity/restart 0이며 transient observation warning은
+  다음 atomic refresh에서 제거돼 deadline warning 두 건만 남았다.
+- Activation 중 `benchpress_0001/cam3`가 durable PASS로 완료됐다. SAM 36/78 camera, 23,460 frame,
+  body fit 673×26 REVIEW, Mode C candidate 0 `PASS_MODE_B_FROZEN`, quality REVIEW sidecar까지 정상
+  materialize됐다. Supervisor는 `WAIT_RUNNING_SAPIENS2`; 다음 `benchpress_0002` 3-view pose 완료를
+  기다리며 SAM child 부재는 정상이다. Quality follower/freeze checkpoint의 다음 CPU cycle은 자동으로
+  처리하도록 두고 수동 duplicate materialization은 수행하지 않았다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화
