@@ -62,7 +62,7 @@
   Sentinel lifetime lock은 별도 process probe에서 held로 확인했고 exporter는 build ID별
   lock을 staging mutation 전에 취득한다.
 - dashboard monitor: `tools/monitor_autonomous_generation.py`; atomic state는
-  `.runtime/dashboard_state.json`. Quiet daemon PID 1883591이며 `--once`는 snapshot,
+  `.runtime/dashboard_state.json`. Quiet daemon PID 1900669이며 `--once`는 snapshot,
   기본은 Rich live, `--quiet`는 state-only daemon이다. Export section은 final deadline
   build progress와 contract-v2 best durable checkpoint progress를 별도로 보존한다.
 - Phase 11 CPU follower PID 1819560: complete body-fit/Mode-C dependency만 감지해 quality를
@@ -208,7 +208,7 @@ tmux new-window -n exercise3d-dashboard \
 ## Git state
 
 - branch: `agent/phase-5-1-pushup-0003-recovery`
-- latest implementation commit: freeze source byte snapshot `f1b701e`; predeadline checkpoint
+- latest implementation commit: durable checkpoint dashboard `80f48ab`; predeadline checkpoint
   manifest source commit `54a8d2c`; 현재 exact `HEAD`는
   `git rev-parse HEAD`와 local state의 `git_commit`으로 확인
 - Draft PR: #1 (`https://github.com/06-month/Exercise3D-Dataset-Pipeline/pull/1`)
@@ -217,4 +217,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-12 11:42 KST
+- 2026-08-12 11:46 KST

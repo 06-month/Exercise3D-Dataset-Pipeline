@@ -241,6 +241,10 @@
 - Export state에 `durable_checkpoint`를 별도 추가했다. Contract v2 requested/status count/privacy
   consistency와 FAIL/INCOMPLETE 0, freeze eligible를 확인한 build 중 completed sequence 수가 가장
   큰 build를 선택하며, final deadline progress 0과 checkpoint 11을 섞지 않고 모두 표시한다.
+- 전체 99 tests와 publication-safety PASS 후 code checkpoint `80f48ab`를 push했다.
+  CPU-only quiet dashboard daemon만 exact command/child 0을 확인한 뒤 PID 1900669로 교체했다.
+  Persistent state에서 deadline 0, checkpoint 11, REVIEW 11, 366 files/344,922,733 bytes,
+  contract consistent/freeze true, 다른 attention 없음을 확인했다.
 
 ### Source-of-truth 재검증
 
