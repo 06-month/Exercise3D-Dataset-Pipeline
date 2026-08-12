@@ -364,10 +364,20 @@ def process_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]:
         )
         initial = read_triangulation(args.initial_output_root.resolve(), sequence)
         if initial is not None:
+            completed_identity = triangulation_source_identity(
+                args, sequence, args.camera_root
+            )
+            if (
+                completed_identity["dependency_signature_sha256"]
+                != initial_identity["dependency_signature_sha256"]
+            ):
+                raise RuntimeError(
+                    f"Phase 7 dependencies changed during initial triangulation: {sequence}"
+                )
             write_triangulation_source_identity(
                 args.initial_output_root.resolve(),
                 sequence,
-                initial_identity,
+                completed_identity,
                 "PHASE5_BACKGROUND_BA",
             )
             initial = read_triangulation(
@@ -413,10 +423,20 @@ def process_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]:
         )
         final = read_triangulation(args.final_output_root.resolve(), sequence)
         if final is not None:
+            completed_identity = triangulation_source_identity(
+                args, sequence, selected_camera_root
+            )
+            if (
+                completed_identity["dependency_signature_sha256"]
+                != final_identity["dependency_signature_sha256"]
+            ):
+                raise RuntimeError(
+                    f"Phase 7 dependencies changed during final triangulation: {sequence}"
+                )
             write_triangulation_source_identity(
                 args.final_output_root.resolve(),
                 sequence,
-                final_identity,
+                completed_identity,
                 camera_source,
             )
             final = read_triangulation(
