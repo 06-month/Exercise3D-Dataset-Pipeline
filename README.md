@@ -30,6 +30,10 @@ Cutoff-eligible sequence의 derived sidecar가 순간적으로 누락된 경우 
 최종 시도에도 불완전하면 INCOMPLETE를 숨기지 않고 immutable snapshot을 publish합니다.
 Freeze contract v2는 요청한 26-sequence universe/order와 필수 payload set을 manifest에 bind하여
 INCOMPLETE row나 quality/provenance file을 누락한 build을 integrity PASS로 인정하지 않습니다.
+Deadline sentinel과 build ID별 exporter는 각각 lifetime/advisory lock을 유지하여 recovery
+race에서도 동일 snapshot staging/copy/publish를 중복 실행하지 않습니다. Sentinel
+watchdog은 exact persisted command identity와 연속 process absence를 확인한 뒤에만 제한된
+자동 recovery를 수행합니다.
 
 ## 프로젝트 목표
 

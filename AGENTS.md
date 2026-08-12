@@ -18,7 +18,10 @@
    Watchdog이 없거나 attention/retry exhaustion일 때만 live process absence와 child 부재를
    재확인한 뒤 local handoff state의 exact command와 `HANDOFF.md` resume 절차로 재개한다.
 9. resume는 completion metadata/checksum/schema가 PASS인 item을 건너뛰고 incomplete/corrupt item만 다시 계산해야 한다.
-10. 정상 상태는 AI가 반복 polling하지 않는다. deadline-first autonomous execution을 계속하며
+10. deadline sentinel이 죽었으면 sentinel watchdog state를 먼저 확인한다. Watchdog이
+    정상이면 수동 duplicate launch하지 않고 exact-identity recovery에 맡긴다. Sentinel과
+    exporter는 각각 lifetime/build-ID lock을 취득한 process만 stage를 실행한다.
+11. 정상 상태는 AI가 반복 polling하지 않는다. deadline-first autonomous execution을 계속하며
     실제 attention/recovery/milestone에서만 개입하고 `HANDOFF.md`, `plan.md`, `process.md`를 갱신한다.
 
 원본·synchronized video·working frame은 immutable이다. Private frame, checkpoint, mesh,

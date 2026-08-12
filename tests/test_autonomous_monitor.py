@@ -190,6 +190,7 @@ class AutonomousMonitorTest(unittest.TestCase):
                 self._process(4, "deadline_sentinel"),
                 self._process(5, "quality_follower"),
                 self._process(6, "supervisor_watchdog"),
+                self._process(7, "deadline_sentinel_watchdog"),
             ]
             args = self._args(root)
             atomic_json(
@@ -200,6 +201,16 @@ class AutonomousMonitorTest(unittest.TestCase):
                     "attention_required": False,
                     "attention_reasons": [],
                     "last_event": "SUPERVISOR_OBSERVED",
+                },
+            )
+            atomic_json(
+                args.deadline_watchdog_state,
+                {
+                    "updated_at_utc": now.isoformat(),
+                    "status": "RUNNING",
+                    "attention_required": False,
+                    "attention_reasons": [],
+                    "last_event": "DEADLINE_SENTINEL_OBSERVED",
                 },
             )
             state = build_dashboard(
@@ -303,6 +314,7 @@ class AutonomousMonitorTest(unittest.TestCase):
             handoff_state=root / "handoff.json",
             supervisor_state=root / "supervisor.json",
             supervisor_watchdog_state=root / "supervisor_watchdog.json",
+            deadline_watchdog_state=root / "deadline_watchdog.json",
             deadline_state=root / "deadline.json",
             quality_follower_state=root / "quality_follower.json",
             sequence_status=root / "sequences.csv",

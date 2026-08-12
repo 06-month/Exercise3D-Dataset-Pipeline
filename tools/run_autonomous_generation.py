@@ -104,7 +104,11 @@ def process_alive(pid: int) -> bool:
 def acquire_instance_lock(path: Path) -> BinaryIO | None:
     """Acquire and retain the singleton lock; return None when already held."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    handle = path.open("a+b")
+    flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    handle = os.fdopen(descriptor, "r+b", buffering=0)
     try:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:

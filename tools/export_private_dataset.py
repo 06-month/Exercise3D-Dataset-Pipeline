@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import fcntl
 import hashlib
 import json
 import os
@@ -19,7 +20,7 @@ import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, BinaryIO
 
 import numpy as np
 
@@ -47,6 +48,32 @@ def parse_list(value: str) -> list[str]:
     if len(set(result)) != len(result):
         raise argparse.ArgumentTypeError("sequence list contains duplicates")
     return result
+
+
+def acquire_build_lock(output_root: Path, build_id: str) -> BinaryIO | None:
+    """Hold an advisory lock for one immutable build ID until export exits."""
+    validate_path_component(build_id, "build id")
+    lock_root = output_root.resolve() / ".locks"
+    lock_root.mkdir(parents=True, exist_ok=True)
+    if lock_root.is_symlink() or not lock_root.is_dir() or os.path.ismount(lock_root):
+        raise RuntimeError("export lock root must be a real non-mount directory")
+    lock_path = lock_root / f"{build_id}.lock"
+    flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(lock_path, flags, 0o600)
+    handle = os.fdopen(descriptor, "r+b", buffering=0)
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        return None
+    handle.seek(0)
+    handle.truncate()
+    handle.write(f"{os.getpid()}\n".encode("ascii"))
+    handle.flush()
+    os.fsync(handle.fileno())
+    return handle
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -941,6 +968,20 @@ def main() -> int:
     output_root = args.output_root.resolve()
     deadline_cutoff = effective_deadline_cutoff(args)
     output_root.mkdir(parents=True, exist_ok=True)
+    # Retain this descriptor for all staging/copy/verify/publish operations.
+    # Concurrent callers for the same build ID exit before touching staging.
+    build_lock = acquire_build_lock(output_root, args.build_id)
+    if build_lock is None:
+        print(
+            json.dumps(
+                {
+                    "build_id": args.build_id,
+                    "status": "BUILD_ALREADY_IN_PROGRESS",
+                }
+            ),
+            flush=True,
+        )
+        return 75
     final_root = output_root / args.build_id
     final_manifest = final_root / "dataset_manifest.json"
     if final_root.exists() and not final_root.is_dir():

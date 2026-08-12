@@ -33,6 +33,7 @@ PROCESS_MARKERS = {
     "quality_follower": {"run_quality_control_follower.py"},
     "handoff_monitor": {"checkpoint_handoff_state.py"},
     "deadline_sentinel": {"run_deadline_snapshot.py"},
+    "deadline_sentinel_watchdog": {"run_deadline_sentinel_watchdog.py"},
 }
 
 
@@ -451,6 +452,7 @@ def build_dashboard(
     supervisor = read_json(args.supervisor_state)
     supervisor_watchdog_state = read_json(args.supervisor_watchdog_state)
     deadline_state = read_json(args.deadline_state)
+    deadline_watchdog_state = read_json(args.deadline_watchdog_state)
     quality_follower_state = read_json(args.quality_follower_state)
     freeze_readiness = dict(quality_follower_state.get("freeze_readiness", {}))
     previous = read_json(args.output)
@@ -608,6 +610,12 @@ def build_dashboard(
         attention("HANDOFF_MONITOR_DEAD", "Persistent handoff checkpoint monitor is not alive.")
     if remaining_seconds > 0 and not roots["deadline_sentinel"]:
         attention("DEADLINE_SENTINEL_DEAD", "Deadline snapshot sentinel is not alive.")
+    snapshot_complete = deadline_snapshot_status == "COMPLETE"
+    if not snapshot_complete and not roots["deadline_sentinel_watchdog"]:
+        attention(
+            "DEADLINE_SENTINEL_WATCHDOG_DEAD",
+            "Deadline snapshot is incomplete but its recovery watchdog is not alive.",
+        )
     if incomplete_quality and not roots["quality_follower"]:
         attention(
             "QUALITY_FOLLOWER_DEAD",
@@ -643,6 +651,40 @@ def build_dashboard(
             attention(
                 "SUPERVISOR_WATCHDOG_ATTENTION",
                 "Supervisor watchdog requested attention without a structured reason.",
+            )
+    deadline_watchdog_updated = parse_datetime(
+        deadline_watchdog_state.get("updated_at_utc")
+    )
+    if (
+        not snapshot_complete
+        and roots["deadline_sentinel_watchdog"]
+        and (
+            deadline_watchdog_updated is None
+            or (now - deadline_watchdog_updated).total_seconds()
+            > args.state_stale_seconds
+        )
+    ):
+        age = (
+            "unknown"
+            if deadline_watchdog_updated is None
+            else human_duration((now - deadline_watchdog_updated).total_seconds())
+        )
+        attention(
+            "DEADLINE_SENTINEL_WATCHDOG_STATE_STALE",
+            f"deadline_sentinel_watchdog_state.json age is {age}.",
+        )
+    if deadline_watchdog_state.get("attention_required"):
+        watchdog_reasons = deadline_watchdog_state.get("attention_reasons", [])
+        if watchdog_reasons:
+            for reason in watchdog_reasons:
+                attention(
+                    str(reason.get("code", "DEADLINE_SENTINEL_WATCHDOG_ATTENTION")),
+                    str(reason.get("message", reason)),
+                )
+        else:
+            attention(
+                "DEADLINE_SENTINEL_WATCHDOG_ATTENTION",
+                "Deadline sentinel watchdog requested attention without a structured reason.",
             )
     quality_follower_updated = parse_datetime(quality_follower_state.get("updated_at_utc"))
     if (
@@ -698,6 +740,7 @@ def build_dashboard(
         "handoff_monitor",
         "deadline_sentinel",
         "supervisor_watchdog",
+        "deadline_sentinel_watchdog",
     ):
         if len(roots[group]) > 1:
             attention(
@@ -923,6 +966,23 @@ def build_dashboard(
             "pid": roots["deadline_sentinel"][0]["pid"] if roots["deadline_sentinel"] else None,
             "status": deadline_state.get("status", "UNKNOWN"),
         },
+        "deadline_sentinel_watchdog": {
+            "alive": bool(roots["deadline_sentinel_watchdog"]),
+            "pid": (
+                roots["deadline_sentinel_watchdog"][0]["pid"]
+                if roots["deadline_sentinel_watchdog"]
+                else None
+            ),
+            "status": deadline_watchdog_state.get("status", "UNKNOWN"),
+            "updated_at": deadline_watchdog_state.get("updated_at_utc"),
+            "last_event": deadline_watchdog_state.get("last_event"),
+            "restart_count_in_window": int(
+                deadline_watchdog_state.get("restart_count_in_window", 0) or 0
+            ),
+            "attention_reasons": deadline_watchdog_state.get(
+                "attention_reasons", []
+            ),
+        },
         "gpu": gpu,
         "disk": disk,
         "last_progress_timestamp": last_progress.isoformat(),
@@ -1033,7 +1093,10 @@ def render_rich(state: dict[str, Any], console: Any | None = None) -> Any:
         f"Last event {state['last_event']}\n"
         f"Supervisor PID {state['supervisor']['pid'] or '-'} | "
         f"watchdog PID {state['supervisor_watchdog']['pid'] or '-'} "
-        f"({state['supervisor_watchdog']['status']})"
+        f"({state['supervisor_watchdog']['status']})\n"
+        f"Deadline sentinel PID {state['deadline_sentinel']['pid'] or '-'} | "
+        f"watchdog PID {state['deadline_sentinel_watchdog']['pid'] or '-'} "
+        f"({state['deadline_sentinel_watchdog']['status']})"
     )
     parts: list[Any] = [Panel(title), table, Panel(system, title="System")]
     if attention:
@@ -1066,6 +1129,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--deadline-state",
         type=Path,
         default=PROJECT_ROOT / ".runtime/deadline_snapshot_state.json",
+    )
+    parser.add_argument(
+        "--deadline-watchdog-state",
+        type=Path,
+        default=PROJECT_ROOT
+        / ".runtime"
+        / "deadline_sentinel_watchdog_state.json",
     )
     parser.add_argument(
         "--quality-follower-state",

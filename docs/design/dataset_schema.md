@@ -6,6 +6,10 @@ Phase 13 freeze candidate는 versioned directory와 SHA-256 manifest로 구성�
 Build는 `<output>/.<build_id>.inprogress`에서 camera/sequence payload checksum을 재사용하며
 구축한다. `sequence_status.csv`, 모든 manifest-listed file의 byte/SHA-256, status count와 privacy
 flag를 전수 검증한 뒤에만 directory rename으로 `<output>/<build_id>`를 한 번에 publish한다.
+동일 build ID의 exporter는 `<output>/.locks/<build_id>.lock`을 process lifetime 동안
+non-blocking advisory lock하며, lock을 얻지 못한 caller는 hidden staging을 건드리기 전에
+exit code 75로 종료한다. Deadline sentinel 자체도 별도 lifetime lock으로 single instance를
+강제하고 watchdog recovery launch race를 차단한다.
 최종 manifest가 존재하는 build ID는 immutable하며, 재실행은 전수 integrity PASS일 때 read-only
 reuse만 허용한다. Corrupt/불일치 final build를 같은 ID로 덮어쓰지 않는다.
 Resume staging에 이전 시도의 temp/unlisted payload가 남아 있으면 final manifest tree에 없는

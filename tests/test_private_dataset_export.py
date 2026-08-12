@@ -13,6 +13,7 @@ from unittest.mock import patch
 import numpy as np
 
 from tools.export_private_dataset import (
+    acquire_build_lock,
     copy_exact,
     deadline_eligibility,
     finite_nan_contract,
@@ -32,6 +33,34 @@ from tools.export_private_dataset import (
 
 
 class PrivateDatasetExportTest(unittest.TestCase):
+    def test_build_lock_is_scoped_by_build_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first = acquire_build_lock(root, "build-a")
+            self.assertIsNotNone(first)
+            self.assertIsNone(acquire_build_lock(root, "build-a"))
+            independent = acquire_build_lock(root, "build-b")
+            self.assertIsNotNone(independent)
+            assert first is not None and independent is not None
+            first.close()
+            independent.close()
+            recovered = acquire_build_lock(root, "build-a")
+            self.assertIsNotNone(recovered)
+            assert recovered is not None
+            recovered.close()
+
+    def test_build_lock_refuses_symlink_without_touching_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            lock_root = root / ".locks"
+            lock_root.mkdir()
+            target = root / "keep.txt"
+            target.write_text("keep", encoding="utf-8")
+            (lock_root / "build-a.lock").symlink_to(target)
+            with self.assertRaises(OSError):
+                acquire_build_lock(root, "build-a")
+            self.assertEqual(target.read_text(encoding="utf-8"), "keep")
+
     def build_contract_v2(
         self, root: Path, *, omit_sequence_path: str | None = None
     ) -> Path:

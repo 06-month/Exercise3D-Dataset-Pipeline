@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import subprocess
@@ -11,7 +12,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 try:
     from tools.export_private_dataset import verify_frozen_build
@@ -40,6 +41,27 @@ def parse_list(value: str) -> list[str]:
     if len(set(result)) != len(result):
         raise argparse.ArgumentTypeError("sequence list contains duplicates")
     return result
+
+
+def acquire_sentinel_lock(path: Path) -> BinaryIO | None:
+    """Hold a lifetime lock so only one deadline sentinel owns a state file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    handle = os.fdopen(descriptor, "r+b", buffering=0)
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        return None
+    handle.seek(0)
+    handle.truncate()
+    handle.write(f"{os.getpid()}\n".encode("ascii"))
+    handle.flush()
+    os.fsync(handle.fileno())
+    return handle
 
 
 def export_command(
@@ -112,6 +134,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--poll-seconds", type=float, default=30.0)
     parser.add_argument("--export-retries", type=int, default=3)
     parser.add_argument("--retry-seconds", type=float, default=30.0)
+    parser.add_argument(
+        "--instance-lock",
+        type=Path,
+        default=PROJECT_ROOT / ".runtime" / "deadline_snapshot.lock",
+    )
     return parser
 
 
@@ -193,6 +220,19 @@ def main() -> int:
             "deadline must be timezone-aware, intervals positive, and retries nonnegative"
         )
     deadline = deadline.astimezone(timezone.utc)
+    sentinel_lock = acquire_sentinel_lock(args.instance_lock.resolve())
+    if sentinel_lock is None:
+        print(
+            json.dumps(
+                {
+                    "status": "DUPLICATE_DEADLINE_SENTINEL_REFUSED",
+                    "instance_lock": str(args.instance_lock),
+                    "pid": os.getpid(),
+                }
+            ),
+            flush=True,
+        )
+        return 3
     manifest_path = args.output_root.resolve() / args.build_id / "dataset_manifest.json"
     while True:
         now = datetime.now(timezone.utc)

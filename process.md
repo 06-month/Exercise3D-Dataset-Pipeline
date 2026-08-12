@@ -189,6 +189,18 @@
 - Persistent dashboard에서 watchdog RUNNING/restart 0이며 전체 attention은 기존
   `DEADLINE_ETA_AT_RISK` warning 하나뿐이다. GPU inference/supervisor는 중단·재시작하지 않았다.
 
+### Deadline sentinel/export single-instance recovery hardening
+
+- Deadline build의 hidden staging/atomic rename은 이미 강했지만 동일 build ID exporter 두 개가
+  동시 시작하면 staging copy/prune/publish를 경쟁할 process-level lock이 없었다.
+- Exporter에 build-ID-scoped non-blocking advisory lock을 추가했다. Lock loser는 staging을
+  수정하기 전 `BUILD_ALREADY_IN_PROGRESS`/exit 75로 종료하고 sentinel retry path가 재검증한다.
+- Deadline sentinel에도 lifetime lock을 추가해 동시 recovery launch를 stage 실행 전
+  거부한다. `run_deadline_sentinel_watchdog.py`는 live/persisted exact argv digest를 pin하고,
+  3회 연속 absence + 2초 final rescan + 1시간 3회 cap을 통과한 때만 detached recovery한다.
+- One-shot identity gate에서 live sentinel PID 1846229와 persisted command digest exact-match,
+  launch/restart 0, attention false, snapshot state `WAITING_DEADLINE`를 확인했다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화

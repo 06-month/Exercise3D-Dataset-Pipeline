@@ -57,10 +57,12 @@ def command_sha256(argv: list[str]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def supervisor_script_from_argv(argv: list[str], cwd: Path) -> Path | None:
+def script_from_argv(
+    argv: list[str], cwd: Path, expected_script: Path
+) -> Path | None:
     for token in argv[1:]:
         candidate = Path(token)
-        if candidate.name != SUPERVISOR_SCRIPT.name:
+        if candidate.name != expected_script.name:
             continue
         try:
             return (candidate if candidate.is_absolute() else cwd / candidate).resolve()
@@ -69,8 +71,14 @@ def supervisor_script_from_argv(argv: list[str], cwd: Path) -> Path | None:
     return None
 
 
-def valid_resume_argv(argv: list[str], cwd: Path = PROJECT_ROOT) -> bool:
-    if len(argv) < 2 or supervisor_script_from_argv(argv, cwd) != SUPERVISOR_SCRIPT:
+def supervisor_script_from_argv(argv: list[str], cwd: Path) -> Path | None:
+    return script_from_argv(argv, cwd, SUPERVISOR_SCRIPT)
+
+
+def valid_script_resume_argv(
+    argv: list[str], expected_script: Path, cwd: Path = PROJECT_ROOT
+) -> bool:
+    if len(argv) < 2 or script_from_argv(argv, cwd, expected_script) != expected_script:
         return False
     executable = Path(argv[0])
     if executable.is_absolute():
@@ -78,11 +86,17 @@ def valid_resume_argv(argv: list[str], cwd: Path = PROJECT_ROOT) -> bool:
     return shutil.which(argv[0]) is not None
 
 
-def resume_argv(handoff_state: Path) -> tuple[list[str] | None, str | None]:
+def valid_resume_argv(argv: list[str], cwd: Path = PROJECT_ROOT) -> bool:
+    return valid_script_resume_argv(argv, SUPERVISOR_SCRIPT, cwd)
+
+
+def persisted_resume_argv(
+    handoff_state: Path, expected_script: Path
+) -> tuple[list[str] | None, str | None]:
     command = (
         read_json(handoff_state)
         .get("resume_commands", {})
-        .get(SUPERVISOR_SCRIPT.name)
+        .get(expected_script.name)
     )
     if not isinstance(command, str) or not command.strip():
         return None, "persisted supervisor resume command is missing"
@@ -90,13 +104,21 @@ def resume_argv(handoff_state: Path) -> tuple[list[str] | None, str | None]:
         argv = shlex.split(command)
     except ValueError as error:
         return None, f"persisted supervisor resume command is not parseable: {error}"
-    if not valid_resume_argv(argv):
-        return None, "persisted resume command does not resolve to the repository supervisor"
+    if not valid_script_resume_argv(argv, expected_script):
+        return None, (
+            "persisted resume command does not resolve to the expected repository script"
+        )
     return argv, None
 
 
-def supervisor_processes(
-    proc_root: Path = Path("/proc"), project_root: Path = PROJECT_ROOT
+def resume_argv(handoff_state: Path) -> tuple[list[str] | None, str | None]:
+    return persisted_resume_argv(handoff_state, SUPERVISOR_SCRIPT)
+
+
+def script_processes(
+    expected_script: Path,
+    proc_root: Path = Path("/proc"),
+    project_root: Path = PROJECT_ROOT,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     try:
@@ -118,7 +140,7 @@ def supervisor_processes(
             fields = (entry / "stat").read_text(encoding="utf-8").split()
             if fields[2] == "Z" or cwd != project_root.resolve():
                 continue
-            if supervisor_script_from_argv(argv, cwd) != SUPERVISOR_SCRIPT:
+            if script_from_argv(argv, cwd, expected_script) != expected_script:
                 continue
             rows.append(
                 {
@@ -132,6 +154,12 @@ def supervisor_processes(
         except (OSError, IndexError, ValueError):
             continue
     return sorted(rows, key=lambda row: row["pid"])
+
+
+def supervisor_processes(
+    proc_root: Path = Path("/proc"), project_root: Path = PROJECT_ROOT
+) -> list[dict[str, Any]]:
+    return script_processes(SUPERVISOR_SCRIPT, proc_root, project_root)
 
 
 def supervisor_complete(state: dict[str, Any]) -> bool:
@@ -149,7 +177,11 @@ def supervisor_complete(state: dict[str, Any]) -> bool:
 
 def acquire_singleton_lock(path: Path) -> BinaryIO | None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    handle = path.open("a+b")
+    flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    handle = os.fdopen(descriptor, "r+b", buffering=0)
     try:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:

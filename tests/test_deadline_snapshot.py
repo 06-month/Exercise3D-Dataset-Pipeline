@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tools.run_deadline_snapshot import (
+    acquire_sentinel_lock,
     atomic_json,
     export_command,
     read_manifest,
@@ -17,6 +18,30 @@ from tools.run_deadline_snapshot import (
 
 
 class DeadlineSnapshotTest(unittest.TestCase):
+    def test_sentinel_lifetime_lock_refuses_duplicate(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "sentinel.lock"
+            first = acquire_sentinel_lock(path)
+            self.assertIsNotNone(first)
+            self.assertIsNone(acquire_sentinel_lock(path))
+            assert first is not None
+            first.close()
+            recovered = acquire_sentinel_lock(path)
+            self.assertIsNotNone(recovered)
+            assert recovered is not None
+            recovered.close()
+
+    def test_sentinel_lock_refuses_symlink_without_touching_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "keep.txt"
+            target.write_text("keep", encoding="utf-8")
+            link = root / "sentinel.lock"
+            link.symlink_to(target)
+            with self.assertRaises(OSError):
+                acquire_sentinel_lock(link)
+            self.assertEqual(target.read_text(encoding="utf-8"), "keep")
+
     def test_command_uses_separate_versioned_build(self) -> None:
         root = Path("/private")
         args = Namespace(

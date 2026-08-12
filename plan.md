@@ -353,6 +353,8 @@
   provenance와 complete sequence 33-file required set; sentinel expected 26-sequence binding
 - supervisor continuity: live/resume argv digest pin + 3-cycle absence confirmation + final rescan +
   capped detached recovery watchdog; recovered supervisor lifetime lock으로 duplicate launch 거부
+- deadline continuity: sentinel exact-identity watchdog + sentinel lifetime lock + build-ID-scoped exporter
+  lock; concurrent recovery/export caller는 staging mutation 전에 중복 실행 거부
 - first smoke: complete `barbellrow_0000`만 사용해 REVIEW 1/FAIL 0/INCOMPLETE 0,
   34 files, payload 28,960,929 bytes, SHA/size mismatch 0, freeze-eligible 확인
 - quality/exact-tree smoke: clean commit `250ee73`에서 REVIEW 1/FAIL 0/INCOMPLETE 0,
