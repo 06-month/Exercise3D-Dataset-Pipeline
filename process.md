@@ -457,6 +457,24 @@
   기다리며 SAM child 부재는 정상이다. Quality follower/freeze checkpoint의 다음 CPU cycle은 자동으로
   처리하도록 두고 수동 duplicate materialization은 수행하지 않았다.
 
+### Automatic 12-sequence durable checkpoint
+
+- Quality follower가 `benchpress_0001`의 673-frame quality vector와 exporter preflight를 검증해
+  quality/freeze-ready를 12/26 REVIEW로 증가시켰다. Failure/dependency reason은 0이며 GPU work나
+  기존 sequence recomputation은 수행하지 않았다.
+- Predeadline checkpoint follower가 readiness strict superset을 감지해 build
+  `exercise3d-predeadline-auto-012-77ac2165e283`를 자동 publish했다. Contract v2 결과는
+  REVIEW 12/FAIL 0/INCOMPLETE 0, 399 files/377,238,045 bytes, freeze eligible true다.
+- Follower 자체 검증은 manifest file/byte count 399/377,238,045와 verified count가 exact-match했고,
+  별도 read-only `verify_frozen_build`도 valid true, errors 0, requested order/tree/ownership/SHA와
+  status count 일치를 재확인했다. 이 immutable build는 재-export하지 않는다.
+- 2026-08-12 13:09 KST dashboard는 durable checkpoint 12, body fit/quality/freeze-ready 12/26,
+  supervisor `WAIT_RUNNING_SAPIENS2`, OOM/retry/stall 0을 기록했다. 기존 11-sequence checkpoint도
+  삭제하지 않으며 final deadline sentinel은 별도 build ID로 계속 대기한다.
+- 12-sequence 관측치를 반영한 remaining immutable checkpoint + final snapshot forecast는 deadline
+  24개 시나리오 8.23 GiB, 모든 26개 관측-max 시나리오 10.25 GiB다. Remaining SAM과 합친 projected
+  free는 95.20/93.17 GiB, 20 GiB reserve margin은 75.20/73.17 GiB여서 storage attention은 없다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화

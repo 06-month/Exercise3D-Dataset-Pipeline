@@ -14,7 +14,7 @@
 
 - DONE: Phase 0–5, Phase 6 pilot/target selector, Phase 8 A/B/C pilot와 checkpoint integrity
 - RUNNING: Phase 6 full 5B inference, pose-complete sequence의 Phase 7→SAM Mode B→Phase 9 streaming
-- RUNNING: Phase 11 quality/freeze-readiness 11/26 sequence; CPU follower/watchdog + exporter fallback 연결
+- RUNNING: Phase 11 quality/freeze-readiness 12/26 sequence; CPU follower/watchdog + exporter fallback 연결
 - TODO: remaining triangulation, SAM prior consolidation, body fitting/QC, deadline private export/freeze
 - BLOCKED: 없음
 - REVIEW/FAIL: camera PASS 11/REVIEW 15/FAIL 0; body fit REVIEW 12/FAIL 0
@@ -30,11 +30,12 @@
   resume command digest가 exact-match하며 restart 0, attention false다. 3회 연속 absence +
   2초 final rescan 후에만 최대 3회/시간 내에서 detached resume하고 live process는
   절대 signal하지 않는다. Exact watchdog PID와 command은 runtime/dashboard state가 source of truth다.
-- 2026-08-12 13:06 KST dashboard snapshot: `benchpress_0001` Mode B/body fit/Mode C/quality sidecar가
-  완료됐고 supervisor는 다음 3-view pose dependency를 `WAIT_RUNNING_SAPIENS2`로 대기 중
+- 2026-08-12 13:09 KST dashboard snapshot: `benchpress_0001` Mode B/body fit/Mode C/quality/freeze-ready와
+  12-sequence immutable checkpoint가 완료됐고 supervisor는 다음 3-view pose dependency를
+  `WAIT_RUNNING_SAPIENS2`로 대기 중
 - Sapiens durable 37/78 camera, current partial 포함 24,135/65,430 crop; PID 373049 alive,
   current `benchpress_0002/cam2`
-- Sapiens recent-completed-camera throughput 0.218 crop/s; projected ETA는 deadline 약 4시간 44분 후 risk.
+- Sapiens recent-completed-camera throughput 0.218 crop/s; projected ETA는 deadline 약 4시간 47분 후 risk.
   이전 snapshot들보다 악화돼 `DEADLINE_ETA_WORSENED` warning을 기록했지만
   OOM/retry/stall은 없음
 - SAM durable 36/78 camera, 23,460/65,595 frame, 12/26 full sequence; aggregate 0.584 frame/s.
@@ -72,9 +73,9 @@
   1,399.83초를 적용한 empirical schedule도 24/26이며, upper/adjusted all-sequence terminal은
   각각 2026-08-14 18:14/18:37 KST projection이다. 완료 PASS camera 34개의 Mode B
   `output_bytes/frame` nearest-rank p90 기반 SAM 완료 후 예상 free는 약 103.66 GiB다. Verified
-  11-sequence checkpoint의 sequence별 관측 최대 bytes/frame을 적용하면 deadline 예상 24개까지
-  누적 immutable checkpoint 13개 + final snapshot은 8.58 GiB, 모든 26개 관측-max 시나리오는
-  10.61 GiB다. SAM과 합친 예상 free는 95.08/93.05 GiB, reserve margin은 75.08/73.05 GiB로
+  12-sequence checkpoint의 sequence별 관측 최대 bytes/frame을 적용하면 deadline 예상 24개까지
+  남은 누적 immutable checkpoint + final snapshot은 8.23 GiB, 모든 26개 관측-max 시나리오는
+  10.25 GiB다. SAM과 합친 예상 free는 95.20/93.17 GiB, reserve margin은 75.20/73.17 GiB로
   현재 storage attention은 없다.
   남은 14 sequence의 exact selector workload audit은 target crops와 SAM frames 양쪽 모두
   `PARETO_NONDECREASING`, dominance/combined-cost inversion 0이다. 이는 global optimum 증명이 아니라
@@ -87,9 +88,9 @@
 - Phase 11 CPU follower PID 1973073: complete body-fit/Mode-C dependency만 감지해 quality를
   atomic materialize/validate한다. Final exporter와 동일 sequence validation도 미리 수행해
   `freeze-ready`를 출력한다. Lifetime lock `.runtime/quality_follower.lock`은 held로 검증했다.
-  State는 `.runtime/quality_follower_state.json`; 2026-08-12 12:34 KST
-  quality 11/26 REVIEW, freeze-ready 11/26 REVIEW, failure/reason 0, remaining 15는 dependency wait.
-  Exact resume command/cwd도 같은 state에 보존하며 재시작 시 기존 11 sequence는 materialize/recompute
+  State는 `.runtime/quality_follower_state.json`; 2026-08-12 13:08 KST
+  quality 12/26 REVIEW, freeze-ready 12/26 REVIEW, failure/reason 0, remaining 14는 dependency wait.
+  Exact resume command/cwd도 같은 state에 보존하며 재시작 시 기존 12 sequence는 materialize/recompute
   없이 revalidation했다. GPU work는 하지 않는다.
 - Quality follower watchdog PID 1973668: live/persisted exact command SHA가 일치하며 restart 0,
   attention false다. 3회 연속 absence + 2초 final rescan 후에만 최대 3회/시간 detached recovery하고
@@ -97,7 +98,7 @@
   follower lifetime lock이 manual/watchdog launch race를 차단한다.
 - CPU-only predeadline checkpoint follower PID 1916854: `.runtime/quality_follower_state.json`의
   freeze-ready가 largest byte-verified durable checkpoint의 strict superset일 때만 새 deterministic
-  immutable build를 export한다. 현재 ready 11 = best checkpoint 11이므로 child/export 없이
+  immutable build를 export한다. 현재 ready 12 = best checkpoint 12이므로 child/export 없이
   `WAITING_FOR_NEW_FREEZE_READY_SEQUENCE`, attention false다. State와 exact command는
   `.runtime/predeadline_checkpoint_follower_state.json`; final deadline sentinel과 별도 build prefix/lock을
   사용하고 deadline 도달 시 정상 종료한다.
@@ -147,10 +148,10 @@ Public-safe Sapiens command 형태:
   36 files/28,993,437 bytes, contract v2 requested order exact, verifier error 0,
   `git_worktree_dirty=false`, `freeze_eligible=true`; same build ID rerun은
   `IMMUTABLE_BUILD_REUSED`로 copy 없이 전수 검증
-- current valid predeadline checkpoint: build `exercise3d-predeadline-checkpoint-20260812T1140KST`,
-  completed/freeze-ready 11 sequence를 모두 보존. REVIEW 11/FAIL 0/INCOMPLETE 0,
-  366 files/344,922,733 bytes, requested order/tree/ownership/SHA error 0,
-  `git_worktree_dirty=false`, `freeze_eligible=true`; immutable reuse 재검증 PASS.
+- current valid predeadline checkpoint: build `exercise3d-predeadline-auto-012-77ac2165e283`,
+  completed/freeze-ready 12 sequence를 모두 보존. REVIEW 12/FAIL 0/INCOMPLETE 0,
+  399 files/377,238,045 bytes, requested order/tree/ownership/SHA error 0,
+  `freeze_eligible=true`; independent verifier가 file/byte count exact와 integrity PASS를 재확인했다.
   이 build는 final deadline build ID와 별도이며 남은 generation은 계속한다.
 - completed Sapiens 37 camera와 SAM 36 camera의 `run_provenance.json` materialize PASS;
   model/checkpoint/config/source/selection/tool/exact-resume identity 포함
@@ -158,12 +159,11 @@ Public-safe Sapiens command 형태:
   displacement p95 0.07748 + camera uncertainty로 REVIEW; Mode C candidate 79, 실행/채택 0
 - Body fit complete 12 sequence/7,820 reference frame, REVIEW 12/FAIL 0. Materialized quality는
   frame PASS 1,692/REVIEW 6,128/FAIL 0, target abstention/SAM rejection view 8/8,
-  missing/prior-only joint frame 0이다. Quality follower validated freeze-ready는 11/11이며 새
-  `benchpress_0001`은 다음 follower cycle pending이다.
+  missing/prior-only joint frame 0이다. Quality follower validated freeze-ready는 12/12다.
 - `benchpress_0001`: SAM 3-view 2,019/2,019 frame PASS; body fit 673×26, coverage/alignment 1.0,
   prior-only/missing 0, displacement p95 0.10771 + camera uncertainty로 REVIEW; Mode C candidate 0
-  `PASS_MODE_B_FROZEN`; quality REVIEW sidecar materialized. Quality follower의 freeze-readiness 검증과
-  12-sequence checkpoint publish는 다음 CPU atomic cycle pending이며 기존 output을 재계산하지 않는다.
+  `PASS_MODE_B_FROZEN`; quality REVIEW sidecar와 freeze-readiness 검증을 완료했다. Checkpoint follower가
+  새 12-sequence immutable build를 자동 publish·검증했으며 기존 output을 재계산하지 않았다.
 
 ## Remaining work
 
@@ -246,11 +246,11 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Runtime estimates
 
-- 2026-08-12 13:06 KST snapshot: Sapiens recent-completed-camera rate 0.218 crop/s,
-  streaming ETA는 deadline 약 4시간 44분 후. Downstream overhead를 제외한 sequence schedule
+- 2026-08-12 13:09 KST snapshot: Sapiens recent-completed-camera rate 0.218 crop/s,
+  streaming ETA는 deadline 약 4시간 47분 후. Downstream overhead를 제외한 sequence schedule
   upper bound와 empirical p90-adjusted estimate는 deadline까지 24/26이며 `deadlift_0002`가
   첫 projected late sequence
-- deadline margin: Sapiens 전량 기준 약 -4.74 h; 대신 Mode B complete sequence와
+- deadline margin: Sapiens 전량 기준 약 -4.79 h; 대신 Mode B complete sequence와
   deadline snapshot을 내구적으로 확보
 - concurrent SAM Mode B aggregate 19,455 frame/33,159.28초 = 0.58671 frame/s;
   standalone expected 20.80 h projection은
@@ -277,4 +277,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-12 13:06 KST
+- 2026-08-12 13:09 KST

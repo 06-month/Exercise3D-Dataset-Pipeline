@@ -13,8 +13,8 @@
 - 이미 완료된 4개 pilot sequence output은 검증 후 재사용하고 재추론하지 않음
 - GPU scheduling: Sapiens2-5B는 계속 실행하고, pose-complete sequence의 Mode B를 겹쳐
   end-to-end 완결 sequence를 확보한다. 첫 full camera 병렬 peak 61,821 MiB와 completion PASS 확인
-- current projection: 2026-08-12 13:06 KST Sapiens current partial 포함 24,135/65,430 crop,
-  recent 0.218 crop/s, 전량 ETA 2026-08-14 17:44 KST; 약 -4.74 h deadline margin을
+- current projection: 2026-08-12 13:09 KST Sapiens current partial 포함 24,135/65,430 crop,
+  recent 0.218 crop/s, 전량 ETA 2026-08-14 17:47 KST; 약 -4.79 h deadline margin을
   end-to-end complete sequence 확보와
   명시적 INCOMPLETE provenance로 관리
 - SAM policy: Mode B default, Mode C는 실제 failure/occlusion escalation evidence가 있는 경우만 REVIEW
@@ -315,8 +315,8 @@
 
 ## Phase 11 — Pseudo-label Quality Control
 
-- 상태: `IN_PROGRESS_STREAMING`; 완료 body-fit 11 sequence/7,147 frame materialize,
-  REVIEW 11/FAIL 0, exporter preflight freeze-ready 11/11
+- 상태: `IN_PROGRESS_STREAMING`; 완료 body-fit 12 sequence/7,820 frame materialize,
+  REVIEW 12/FAIL 0, exporter preflight freeze-ready 12/12
 - 목적: label과 reliability를 함께 저장
 - 입력: camera, temporal, teacher, triangulation, fitting diagnostics
 - 출력: frame/sequence quality vector와 overall policy
@@ -385,9 +385,10 @@
 - single-descriptor source snapshot smoke: clean commit `f1b701e`에서 REVIEW 1,
   36 files/28,993,437 bytes, contract/order/tree/hash error 0, dirty false,
   freeze eligible true, immutable reuse PASS
-- predeadline durable checkpoint: current freeze-ready 11 sequence 전체, REVIEW 11/FAIL 0/
-  INCOMPLETE 0, 366 files/344,922,733 bytes, contract/order/tree/hash error 0,
-  dirty false, freeze eligible true, immutable reuse PASS
+- predeadline durable checkpoint: current freeze-ready 12 sequence 전체, build
+  `exercise3d-predeadline-auto-012-77ac2165e283`, REVIEW 12/FAIL 0/INCOMPLETE 0,
+  399 files/377,238,045 bytes, contract/order/tree/hash error 0, freeze eligible true,
+  independent verifier file/byte exact PASS
 - 다음 gate: downstream 연구 사용 승인
 
 ## Phase별 Git Definition of Done
