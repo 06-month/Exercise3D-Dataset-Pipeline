@@ -14,6 +14,8 @@ from tools.run_autonomous_generation import (
     acquire_instance_lock,
     free_gib,
     load_successful_rows,
+    next_stream_sequence,
+    pending_stream_retries,
     process_alive,
     quality_command,
     sam_smoke_complete,
@@ -48,6 +50,70 @@ class AutonomousGenerationTest(unittest.TestCase):
             )
             rows = load_successful_rows(path)
             self.assertEqual([row["sequence"] for row in rows], ["ready", "review"])
+
+    def test_stream_retry_backoff_uses_later_ready_work_without_hot_loop(self) -> None:
+        sequences = ["first", "second", "third"]
+        attempts = {"first": 1}
+        retry_not_before = {"first": 100.0}
+        readiness = {"first": True, "second": True, "third": False}
+
+        self.assertEqual(
+            next_stream_sequence(
+                sequences,
+                set(),
+                attempts,
+                retry_not_before,
+                max_attempts=2,
+                monotonic_now=99.0,
+                is_ready=readiness.__getitem__,
+            ),
+            "second",
+        )
+        self.assertEqual(
+            next_stream_sequence(
+                sequences,
+                set(),
+                attempts,
+                retry_not_before,
+                max_attempts=2,
+                monotonic_now=100.0,
+                is_ready=readiness.__getitem__,
+            ),
+            "first",
+        )
+
+    def test_stream_retry_is_bounded_and_checkpointed(self) -> None:
+        sequences = ["exhausted", "pending", "complete"]
+        attempts = {"exhausted": 2, "pending": 1}
+        retry_not_before = {"exhausted": 50.0, "pending": 120.0}
+
+        self.assertIsNone(
+            next_stream_sequence(
+                sequences,
+                {"complete"},
+                attempts,
+                retry_not_before,
+                max_attempts=2,
+                monotonic_now=100.0,
+                is_ready=lambda _sequence: True,
+            )
+        )
+        self.assertEqual(
+            pending_stream_retries(
+                sequences,
+                attempts,
+                retry_not_before,
+                max_attempts=2,
+                monotonic_now=100.0,
+            ),
+            [
+                {
+                    "sequence": "pending",
+                    "attempts_completed": 1,
+                    "retry_in_seconds": 20.0,
+                }
+            ],
+        )
 
     def test_process_alive_for_current_and_finished_process(self) -> None:
         self.assertTrue(process_alive(os.getpid()))

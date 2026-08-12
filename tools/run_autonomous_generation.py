@@ -21,9 +21,9 @@ import shutil
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Callable, Sequence
 
 import numpy as np
 
@@ -79,6 +79,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sam-body4d-root", type=Path, required=True)
     parser.add_argument("--sapiens-retries", type=int, default=2)
     parser.add_argument("--poll-seconds", type=float, default=30.0)
+    parser.add_argument(
+        "--stream-retries",
+        type=int,
+        default=1,
+        help="Bounded retries for a failed pose-ready sequence while Sapiens runs.",
+    )
+    parser.add_argument(
+        "--stream-retry-seconds",
+        type=float,
+        default=300.0,
+        help="Backoff before retrying a failed streaming sequence.",
+    )
     parser.add_argument("--deadline-utc", default="2026-08-14T04:00:00+00:00")
     parser.add_argument("--minimum-free-gib", type=float, default=20.0)
     parser.add_argument("--expected-target-crops", type=int, default=65430)
@@ -303,6 +315,53 @@ def load_successful_rows(path: Path) -> list[dict[str, Any]]:
         return [row for row in rows if row.get("status") in {"PASS", "REVIEW"}]
     except (OSError, csv.Error):
         return []
+
+
+def next_stream_sequence(
+    sequences: Sequence[str],
+    successful: set[str],
+    attempts: dict[str, int],
+    retry_not_before: dict[str, float],
+    *,
+    max_attempts: int,
+    monotonic_now: float,
+    is_ready: Callable[[str], bool],
+) -> str | None:
+    """Choose the first ready sequence eligible for a bounded stream attempt."""
+    for sequence in sequences:
+        if sequence in successful:
+            continue
+        if attempts.get(sequence, 0) >= max_attempts:
+            continue
+        if monotonic_now < retry_not_before.get(sequence, 0.0):
+            continue
+        if is_ready(sequence):
+            return sequence
+    return None
+
+
+def pending_stream_retries(
+    sequences: Sequence[str],
+    attempts: dict[str, int],
+    retry_not_before: dict[str, float],
+    *,
+    max_attempts: int,
+    monotonic_now: float,
+) -> list[dict[str, Any]]:
+    """Return privacy-safe retry state for the atomic supervisor checkpoint."""
+    pending: list[dict[str, Any]] = []
+    for sequence in sequences:
+        retry_at = retry_not_before.get(sequence)
+        if retry_at is None or attempts.get(sequence, 0) >= max_attempts:
+            continue
+        pending.append(
+            {
+                "sequence": sequence,
+                "attempts_completed": attempts.get(sequence, 0),
+                "retry_in_seconds": max(0.0, retry_at - monotonic_now),
+            }
+        )
+    return pending
 
 
 def missing_pose_sequences(args: argparse.Namespace) -> list[str]:
@@ -593,6 +652,8 @@ def main() -> int:
     if (
         args.poll_seconds <= 0
         or args.sapiens_retries < 0
+        or args.stream_retries < 0
+        or args.stream_retry_seconds <= 0
         or args.minimum_free_gib <= 0
         or args.expected_target_crops <= 0
         or args.reused_target_crops < 0
@@ -618,23 +679,29 @@ def main() -> int:
     sequence_csv = args.runtime_dir.resolve() / "autonomous_sequences.csv"
     rows = load_successful_rows(sequence_csv)
     successful = {row["sequence"] for row in rows}
-    stream_attempted: set[str] = set()
+    stream_attempts: dict[str, int] = {}
+    stream_retry_not_before: dict[str, float] = {}
+    max_stream_attempts = args.stream_retries + 1
     sam_smoke_ok = False
     if args.wait_sapiens_pid is not None:
         while process_alive(args.wait_sapiens_pid):
-            ready = next(
-                (
-                    sequence
-                    for sequence in args.sequences
-                    if sequence not in successful
-                    and sequence not in stream_attempted
-                    and sequence_ready(
-                        args.dataset_root.resolve(), args.pose_root.resolve(), sequence
-                    )
+            monotonic_now = time.monotonic()
+            ready = next_stream_sequence(
+                args.sequences,
+                successful,
+                stream_attempts,
+                stream_retry_not_before,
+                max_attempts=max_stream_attempts,
+                monotonic_now=monotonic_now,
+                is_ready=lambda sequence: sequence_ready(
+                    args.dataset_root.resolve(),
+                    args.pose_root.resolve(),
+                    sequence,
                 ),
-                None,
             )
             if ready is not None:
+                stream_attempts[ready] = stream_attempts.get(ready, 0) + 1
+                stream_retry_not_before.pop(ready, None)
                 sam_smoke_ok = sam_smoke_ok or ensure_sam_smoke(args, ready)
                 update_state(
                     args,
@@ -643,19 +710,39 @@ def main() -> int:
                     active_sequence=ready,
                     monitored_pid=args.wait_sapiens_pid,
                     concurrent_with_sapiens=True,
+                    stream_attempt=stream_attempts[ready],
+                    stream_max_attempts=max_stream_attempts,
                     sapiens_progress=sapiens_progress(args),
                     free_storage_gib=free_gib(args.sam_output_root),
                 )
                 row = run_sequence_pipeline(args, ready, sam_smoke_ok)
                 upsert_row(rows, row)
                 atomic_csv(sequence_csv, rows)
-                stream_attempted.add(ready)
                 if row["status"] in {"PASS", "REVIEW"}:
                     successful.add(ready)
+                elif stream_attempts[ready] < max_stream_attempts:
+                    stream_retry_not_before[ready] = (
+                        time.monotonic() + args.stream_retry_seconds
+                    )
+                    update_state(
+                        args,
+                        "STREAM_SEQUENCE_RETRY_BACKOFF",
+                        rows,
+                        active_sequence=ready,
+                        failed_stage=row["failed_stage"],
+                        stream_attempt=stream_attempts[ready],
+                        stream_max_attempts=max_stream_attempts,
+                        retry_not_before_utc=(
+                            datetime.now(timezone.utc)
+                            + timedelta(seconds=args.stream_retry_seconds)
+                        ).isoformat(),
+                        monitored_pid=args.wait_sapiens_pid,
+                    )
                 print(json.dumps(row, ensure_ascii=False), flush=True)
-                # A failed sequence has already consumed its configured retry;
-                # do not hot-loop it while the long teacher process is alive.
+                # Resume-aware stages may be retried after a bounded backoff;
+                # continue to later ready sequences instead of hot-looping.
                 continue
+            monotonic_now = time.monotonic()
             update_state(
                 args,
                 "WAIT_RUNNING_SAPIENS2",
@@ -663,6 +750,13 @@ def main() -> int:
                 monitored_pid=args.wait_sapiens_pid,
                 sapiens_progress=sapiens_progress(args),
                 free_storage_gib=free_gib(args.sam_output_root),
+                pending_stream_retries=pending_stream_retries(
+                    args.sequences,
+                    stream_attempts,
+                    stream_retry_not_before,
+                    max_attempts=max_stream_attempts,
+                    monotonic_now=monotonic_now,
+                ),
             )
             time.sleep(args.poll_seconds)
 
