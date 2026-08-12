@@ -280,7 +280,7 @@ tmux new-window -n exercise3d-dashboard \
 ## Git state
 
 - branch: `agent/phase-5-1-pushup-0003-recovery`
-- latest implementation commit: marker ctime cutoff attestation `6e802b1`; sentinel loaded-code identity `60eadb8`; deadline marker identity binding `e31098c`; premature deadline publication gate `ddd3461`; durable latest-completion event `a0ad72c`; remaining deadline order audit `f8f603b`; immutable freeze storage
+- latest implementation commit: Sapiens duplicate-resume guard `30a051d`; marker ctime cutoff attestation `6e802b1`; sentinel loaded-code identity `60eadb8`; deadline marker identity binding `e31098c`; premature deadline publication gate `ddd3461`; durable latest-completion event `a0ad72c`; remaining deadline order audit `f8f603b`; immutable freeze storage
   forecast `5bb9c4c`; monitoring-plane recovery
   watchdog `16a8600` + default-path validation
   fix `5c93d4e`; SAM output storage forecast `b24f509`; quality follower recovery
@@ -297,4 +297,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-12 13:42 KST
+- 2026-08-12 13:44 KST

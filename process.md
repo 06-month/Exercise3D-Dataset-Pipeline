@@ -594,6 +594,8 @@
   real read-only probe는 현재 output-bound legacy PID 373049 하나를 exact-match했다.
 - Current Sapiens PID 373049와 supervisor PID 1701200은 signal/restart하지 않았다. 이 guard는 현재 output을
   재계산하지 않으며 향후 resume subprocess가 on-disk current entrypoint를 load할 때 자동 적용된다.
+- Sapiens target environment CLI help, 전체 141 tests와 publication-safety PASS 후 implementation commit
+  `30a051d`를 push했다. Current legacy process는 계속 동일 PID로 실행한다.
 
 ### Source-of-truth 재검증
 
