@@ -487,6 +487,14 @@
   `exercise3d-predeadline-auto-012-77ac2165e283`의 `DURABLE_CHECKPOINT_PUBLISHED`,
   `FREEZE_ELIGIBLE`, 2026-08-12 13:06:55 KST로 산출했다. GPU/supervisor에는 signal이나 launch를
   수행하지 않았으며 전체 126 regression이 PASS했다.
+- Publication-safety PASS 후 implementation commit `a0ad72c`를 push했다. 기존 dashboard PID
+  2026797의 cwd/exact argv/child 0/lock을 확인하고 CPU-only daemon만 교체했으나, exec-scoped manual
+  PID 2042374는 첫 atomic state를 쓴 뒤 session과 함께 종료됐다. 추가 manual launch로 경합하지 않고
+  기존 monitoring watchdog recovery를 사용했다.
+- Watchdog은 3회 absence와 final rescan 후 동일 command로 PID 2044638을 1회 복구했다. Cwd/argv exact,
+  child 0, singleton lock held, live/resume SHA exact, missing 0, attention false를 확인했다. 새 persistent
+  dashboard state는 durable checkpoint event와 `WAIT_RUNNING_SAPIENS2` operational event를 분리해
+  기록한다. Inference/SAM/supervisor/follower/sentinel에는 signal·restart·duplicate launch가 없었다.
 
 ### Source-of-truth 재검증
 

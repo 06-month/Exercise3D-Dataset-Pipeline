@@ -65,7 +65,7 @@
   Sentinel lifetime lock은 별도 process probe에서 held로 확인했고 exporter는 build ID별
   lock을 staging mutation 전에 취득한다.
 - dashboard monitor: `tools/monitor_autonomous_generation.py`; atomic state는
-  `.runtime/dashboard_state.json`. Quiet daemon PID 2026797이며 `--once`는 snapshot,
+  `.runtime/dashboard_state.json`. Quiet daemon PID 2044638이며 `--once`는 snapshot,
   기본은 Rich live, `--quiet`는 state-only daemon이다. Export section은 final deadline
   build progress와 contract-v2 best durable checkpoint progress를 별도로 보존한다. Selector
   exact workload와 measured rate를 사용한 overhead-free deadline upper bound는 현재 24/26이며,
@@ -84,7 +84,9 @@
   immutable manifest 중 최신 durable completion의 stage/sequence/camera/build/status/UTC·KST 시각을
   구조화하며 `current_operational_event`와 분리한다.
 - Monitoring-plane watchdog PID 2009359: dashboard/handoff monitor의 live/resume exact argv SHA를
-  각각 pin하며 restart 0, attention false다. 두 monitor와 watchdog의 lifetime lock은 모두 held다.
+  각각 pin한다. Latest-completion code activation 중 exec-scoped manual daemon이 첫 state 뒤 종료되자
+  3-cycle/final-rescan 경로로 dashboard PID 2044638을 1회 자동 복구했으며 현재 exact identity,
+  missing 0, attention false다. 두 monitor와 watchdog의 lifetime lock은 모두 held다.
   3회 연속 absence + 2초 final rescan 후 target별 최대 3회/시간 detached recovery하고 live process는
   signal하지 않는다. Exact target/watchdog commands는 `.runtime/handoff_state.json`, state는
   `.runtime/monitoring_watchdog_state.json`에 atomic 보존된다.
@@ -263,7 +265,7 @@ tmux new-window -n exercise3d-dashboard \
 ## Git state
 
 - branch: `agent/phase-5-1-pushup-0003-recovery`
-- latest implementation commit: remaining deadline order audit `f8f603b`; immutable freeze storage
+- latest implementation commit: durable latest-completion event `a0ad72c`; remaining deadline order audit `f8f603b`; immutable freeze storage
   forecast `5bb9c4c`; monitoring-plane recovery
   watchdog `16a8600` + default-path validation
   fix `5c93d4e`; SAM output storage forecast `b24f509`; quality follower recovery
@@ -280,4 +282,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-12 13:09 KST
+- 2026-08-12 13:19 KST
