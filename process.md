@@ -597,6 +597,25 @@
 - Sapiens target environment CLI help, 전체 141 tests와 publication-safety PASS 후 implementation commit
   `30a051d`를 push했다. Current legacy process는 계속 동일 PID로 실행한다.
 
+### SAM Mode B duplicate/orphan resume guard
+
+- Supervisor lifetime lock은 duplicate supervisor를 막지만, legacy SAM coordinator가 비정상 종료된 뒤
+  benchmark 또는 primary GPU child가 살아남으면 새 supervisor가 같은 output subtree를 다시 시작할 수
+  있었다. Current Sapiens/supervisor는 건드리지 않고 future `run_sam_body4d_full.py` entrypoint만
+  hardening했다.
+- New coordinator는 `.runtime/sam_body4d_full.lock`을 전체 camera run 동안 보유한다. Lock 획득 뒤
+  `/proc`에서 exact `run_sam_body4d_full.py --output-root`, 또는 동일 resolved root 아래의 exact
+  `benchmark_sam_body4d.py --mode B --run --output-dir`와
+  `sam_body_primary_target_runner.py --mode B --output-dir .../mode_b_private_output` process를 검색한다.
+  Non-zombie PID만 취급하며 private argv/path 대신 matching PID만 출력한다. Process table을 검사할 수
+  없으면 GPU child 생성 전에 fail-closed한다.
+- Lock lifetime/symlink safety, coordinator·benchmark·primary output binding, wrong mode/non-run rejection,
+  legacy/orphan refusal-before-run, lock retention/release, process-table fail-closed regression을 추가했다.
+  전체 147 tests와 compile, CLI help, publication-safety가 PASS했다. Real read-only `/proc` probe는
+  dashboard의 dependency wait와 동일하게 matching SAM coordinator/child 0을 확인했다.
+- Implementation commit `46cdced`를 push했다. Supervisor PID 1701200과 Sapiens PID 373049에는
+  signal/restart가 없었으며, 다음 normal SAM subprocess가 on-disk guarded entrypoint를 자동 load한다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화

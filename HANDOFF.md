@@ -34,16 +34,21 @@
   resume command digest가 exact-match하며 restart 0, attention false다. 3회 연속 absence +
   2초 final rescan 후에만 최대 3회/시간 내에서 detached resume하고 live process는
   절대 signal하지 않는다. Exact watchdog PID와 command은 runtime/dashboard state가 source of truth다.
-- 2026-08-12 13:38 KST dashboard snapshot: `benchpress_0001` Mode B/body fit/Mode C/quality/freeze-ready와
+- 2026-08-12 13:51 KST dashboard snapshot: `benchpress_0001` Mode B/body fit/Mode C/quality/freeze-ready와
   12-sequence immutable checkpoint가 완료됐고 supervisor는 다음 3-view pose dependency를
   `WAIT_RUNNING_SAPIENS2`로 대기 중
-- Sapiens durable 37/78 camera, current partial 포함 24,647/65,430 crop; PID 373049 alive,
-  current `benchpress_0002/cam2`
-- Sapiens recent-completed-camera throughput 0.217 crop/s; projected ETA는 deadline 약 4시간 45분 후 risk.
-  이전 snapshot들보다 악화돼 `DEADLINE_ETA_WORSENED` warning을 기록했지만
+- Sapiens durable 38/78 camera, current partial 포함 24,818/65,430 crop; PID 373049 alive,
+  current `benchpress_0002/cam3`
+- Sapiens recent-completed-camera throughput 0.221 crop/s; projected ETA는 deadline 약 3시간 46분 후 risk.
   OOM/retry/stall은 없음
 - SAM durable 36/78 camera, 23,460/65,595 frame, 12/26 full sequence; aggregate 0.584 frame/s.
   현재 SAM child는 없으며 `benchpress_0002` 3-view pose 완료 후 cam1부터 자동 재개한다.
+  Future `run_sam_body4d_full.py` invocation은 GPU child 생성 전
+  `.runtime/sam_body4d_full.lock`을 lifetime 동안 보유하고, exact coordinator 또는 Mode B
+  benchmark/primary child의 resolved output이 같은 SAM root 아래인지 `/proc`에서 검사한다.
+  Legacy coordinator/orphan child가 남았거나 process table을 검사할 수 없으면 fail-closed로 거부한다.
+  13:51 KST read-only probe는 dashboard와 동일하게 matching child 0을 확인했으며, supervisor는
+  restart하지 않아 다음 normal subprocess부터 current guarded entrypoint가 자동 적용된다.
 - GPU: A100 80GB, Sapiens-only dependency-wait snapshot 36,375 MiB/100%, 366.59 W, 56°C;
   observed OOM/retry 없음
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
@@ -187,7 +192,7 @@ Public-safe Sapiens command 형태:
 
 ## Remaining work
 
-- Sapiens2: 41/78 camera, current partial 포함 41,295 target crops
+- Sapiens2: 40/78 camera, current partial 포함 40,612 target crops
 - Phase 7 이후: `latpulldown_0003` 및 이후 pose-complete sequence
 - SAM full: 36/78 camera PASS, full-complete sequence 12/26; 다음 `benchpress_0002` 3-view pose 대기
 - critical path: pose-complete sequence → Phase 7 gate → Mode B → compact prior → body fit → Mode C candidate QA → export
@@ -203,7 +208,8 @@ Public-safe Sapiens command 형태:
    반복하지 않고 autonomous process에 맡긴다.
 4. Sapiens camera는 `metadata.json` PASS, frame 수, `(N,308,2)/(N,308)` shape, finite/abstention을 검사한다. SAM camera는 benchmark/profile/provenance, mesh/numeric 수량과 required field를 모두 검사한다.
 5. 죽어 있으면 live process absence와 child 부재를 다시 확인한 뒤 `.runtime/handoff_state.json`의
-   exact frozen resume command를 사용한다. Sapiens와 SAM runner는 PASS camera/chunk를 검증 후 skip한다.
+   exact frozen resume command를 사용한다. Sapiens와 SAM runner는 PASS camera/chunk를 검증 후 skip하며,
+   두 runner의 lifetime lock과 output-bound legacy/orphan process guard를 우회하지 않는다.
 6. supervisor가 죽었으면 local state의 exact supervisor command로 재실행한다. `--overwrite`는 사용하지 않는다.
    단, `.runtime/supervisor_watchdog_state.json`의 watchdog이 정상이면 수동 launch하지 말고
    자동 recovery 결과를 사용한다. `ATTENTION`/재시도 소진일 때만 수동 개입한다.
@@ -266,11 +272,11 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Runtime estimates
 
-- 2026-08-12 13:38 KST snapshot: Sapiens recent-completed-camera rate 0.217 crop/s,
-  streaming ETA는 deadline 약 4시간 45분 후. Downstream overhead를 제외한 sequence schedule
+- 2026-08-12 13:51 KST snapshot: Sapiens recent-completed-camera rate 0.221 crop/s,
+  streaming ETA는 deadline 약 3시간 46분 후. Downstream overhead를 제외한 sequence schedule
   upper bound와 empirical p90-adjusted estimate는 deadline까지 24/26이며 `deadlift_0002`가
   첫 projected late sequence
-- deadline margin: Sapiens 전량 기준 약 -4.75 h; 대신 Mode B complete sequence와
+- deadline margin: Sapiens 전량 기준 약 -3.78 h; 대신 Mode B complete sequence와
   deadline snapshot을 내구적으로 확보
 - concurrent SAM Mode B aggregate 19,455 frame/33,159.28초 = 0.58671 frame/s;
   standalone expected 20.80 h projection은
@@ -280,7 +286,7 @@ tmux new-window -n exercise3d-dashboard \
 ## Git state
 
 - branch: `agent/phase-5-1-pushup-0003-recovery`
-- latest implementation commit: Sapiens duplicate-resume guard `30a051d`; marker ctime cutoff attestation `6e802b1`; sentinel loaded-code identity `60eadb8`; deadline marker identity binding `e31098c`; premature deadline publication gate `ddd3461`; durable latest-completion event `a0ad72c`; remaining deadline order audit `f8f603b`; immutable freeze storage
+- latest implementation commit: SAM duplicate-resume/orphan guard `46cdced`; Sapiens duplicate-resume guard `30a051d`; marker ctime cutoff attestation `6e802b1`; sentinel loaded-code identity `60eadb8`; deadline marker identity binding `e31098c`; premature deadline publication gate `ddd3461`; durable latest-completion event `a0ad72c`; remaining deadline order audit `f8f603b`; immutable freeze storage
   forecast `5bb9c4c`; monitoring-plane recovery
   watchdog `16a8600` + default-path validation
   fix `5c93d4e`; SAM output storage forecast `b24f509`; quality follower recovery
@@ -297,4 +303,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-12 13:44 KST
+- 2026-08-12 13:54 KST
