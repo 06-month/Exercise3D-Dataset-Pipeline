@@ -25,9 +25,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 def atomic_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + f".{os.getpid()}.tmp")
-    temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    with temporary.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
     os.replace(temporary, path)
 
 
@@ -38,7 +40,9 @@ def parse_list(value: str) -> list[str]:
     return result
 
 
-def export_command(args: argparse.Namespace) -> list[str]:
+def export_command(
+    args: argparse.Namespace, *, defer_eligible_incomplete: bool = False
+) -> list[str]:
     command = [
         sys.executable,
         str(PROJECT_ROOT / "tools" / "export_private_dataset.py"),
@@ -56,6 +60,8 @@ def export_command(args: argparse.Namespace) -> list[str]:
     ]
     if getattr(args, "deadline_utc", None):
         command.extend(["--deadline-cutoff-utc", str(args.deadline_utc)])
+    if defer_eligible_incomplete:
+        command.append("--defer-eligible-incomplete")
     return command
 
 
@@ -123,10 +129,14 @@ def run_export_with_retries(
     deadline: datetime,
     manifest_path: Path,
 ) -> tuple[dict[str, Any] | None, list[str], int, int]:
-    command = export_command(args)
     last_exit_code = -1
     integrity_errors: list[str] = []
     for attempt in range(1, args.export_retries + 2):
+        defer_eligible_incomplete = attempt <= args.export_retries
+        command = export_command(
+            args,
+            defer_eligible_incomplete=defer_eligible_incomplete,
+        )
         now = datetime.now(timezone.utc)
         atomic_json(
             args.runtime_state.resolve(),
@@ -136,6 +146,7 @@ def run_export_with_retries(
                 "attempt": attempt,
                 "maximum_attempts": args.export_retries + 1,
                 "command": command,
+                "defer_cutoff_eligible_incomplete": defer_eligible_incomplete,
             },
         )
         process = subprocess.run(command, cwd=PROJECT_ROOT)

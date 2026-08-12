@@ -39,6 +39,8 @@ class DeadlineSnapshotTest(unittest.TestCase):
         self.assertIn("--quality-root", command)
         self.assertIn("--deadline-cutoff-utc", command)
         self.assertNotIn("--overwrite", command)
+        deferred = export_command(args, defer_eligible_incomplete=True)
+        self.assertIn("--defer-eligible-incomplete", deferred)
 
     def test_export_retries_resume_until_manifest_exists(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -86,6 +88,55 @@ class DeadlineSnapshotTest(unittest.TestCase):
             self.assertEqual(attempt, 2)
             self.assertEqual(run.call_count, 2)
             sleep.assert_called_once_with(1.0)
+
+    def test_final_attempt_publishes_truthful_incomplete(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = Namespace(
+                dataset_root=root / "dataset",
+                selection_root=root / "selection",
+                pose_root=root / "pose",
+                triangulation_root=root / "triangulation",
+                sam_prior_root=root / "sam_prior",
+                sam_mode_c_review_root=root / "mode_c",
+                body_fit_root=root / "body",
+                quality_root=root / "quality",
+                output_root=root / "freeze",
+                runtime_state=root / "state.json",
+                build_id="deadline-build",
+                sequences=["sequence"],
+                deadline_utc="2026-08-14T04:00:00+00:00",
+                export_retries=1,
+                retry_seconds=1.0,
+            )
+            with (
+                patch(
+                    "tools.run_deadline_snapshot.subprocess.run",
+                    side_effect=[
+                        subprocess.CompletedProcess([], 75),
+                        subprocess.CompletedProcess([], 2),
+                    ],
+                ) as run,
+                patch(
+                    "tools.run_deadline_snapshot.verified_manifest",
+                    side_effect=[
+                        (None, []),
+                        ({"build_id": "deadline-build", "freeze_eligible": False}, []),
+                    ],
+                ),
+                patch("tools.run_deadline_snapshot.time.sleep"),
+            ):
+                manifest, _, _, attempt = run_export_with_retries(
+                    args,
+                    datetime(2026, 8, 14, 4, tzinfo=timezone.utc),
+                    root / "freeze" / "deadline-build" / "dataset_manifest.json",
+                )
+            self.assertIsNotNone(manifest)
+            self.assertEqual(attempt, 2)
+            first_command = run.call_args_list[0].args[0]
+            final_command = run.call_args_list[1].args[0]
+            self.assertIn("--defer-eligible-incomplete", first_command)
+            self.assertNotIn("--defer-eligible-incomplete", final_command)
 
     def test_atomic_state_and_manifest_read(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -72,6 +72,14 @@ def build_parser() -> argparse.ArgumentParser:
             "Mode-C markers are missing or newer remain INCOMPLETE."
         ),
     )
+    parser.add_argument(
+        "--defer-eligible-incomplete",
+        action="store_true",
+        help=(
+            "Do not publish yet when a cutoff-eligible sequence is temporarily INCOMPLETE. "
+            "Used by retrying deadline sentinels; the final attempt omits this flag."
+        ),
+    )
     return parser
 
 
@@ -903,6 +911,7 @@ def main() -> int:
         )
 
     sequence_rows = []
+    cutoff_eligible_incomplete: list[dict[str, Any]] = []
     for sequence in args.sequences:
         deadline_eligible, deadline_reasons, marker_mtimes = deadline_eligibility(
             args,
@@ -959,6 +968,17 @@ def main() -> int:
             "sam_mode_c_review_status": validation.get("sam_mode_c_review_status", ""),
         }
         sequence_rows.append(row)
+        if (
+            deadline_cutoff is not None
+            and deadline_eligible
+            and validation["status"] == "INCOMPLETE"
+        ):
+            cutoff_eligible_incomplete.append(
+                {
+                    "sequence": sequence,
+                    "reasons": list(validation["reasons"]),
+                }
+            )
         if validation["status"] in {"INCOMPLETE", "FAIL"}:
             print(json.dumps({"sequence": sequence, **validation}, ensure_ascii=False), flush=True)
             continue
@@ -1001,6 +1021,22 @@ def main() -> int:
             }
         )
         print(json.dumps({"sequence": sequence, **validation}, ensure_ascii=False), flush=True)
+
+    if args.defer_eligible_incomplete and cutoff_eligible_incomplete:
+        print(
+            json.dumps(
+                {
+                    "build_id": args.build_id,
+                    "status": "DEFERRED_ELIGIBLE_INCOMPLETE",
+                    "deadline_cutoff_utc": deadline_cutoff.isoformat(),
+                    "sequences": cutoff_eligible_incomplete,
+                    "recovery": "retry after derived quality/provenance sidecars settle",
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+        return 75
 
     atomic_csv(build_root / "sequence_status.csv", sequence_rows)
     manifest = {
