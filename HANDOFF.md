@@ -207,8 +207,8 @@ tmux new-window -n exercise3d-dashboard \
 ## Git state
 
 - branch: `agent/phase-5-1-pushup-0003-recovery`
-- latest implementation commit: freeze source byte snapshot `f1b701e`; latest durable checkpoint
-  record `54a8d2c`; 현재 exact `HEAD`는
+- latest implementation commit: freeze source byte snapshot `f1b701e`; predeadline checkpoint
+  manifest source commit `54a8d2c`; 현재 exact `HEAD`는
   `git rev-parse HEAD`와 local state의 `git_commit`으로 확인
 - Draft PR: #1 (`https://github.com/06-month/Exercise3D-Dataset-Pipeline/pull/1`)
 - pushed: handoff/streaming supervisor와 문서 milestone remote 동기화 완료
