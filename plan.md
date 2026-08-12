@@ -30,6 +30,8 @@
   abstention-vs-valid bbox, finite confidence와 strictly increasing PTS 계약을 모두 통과하고,
   mesh/numeric 및 존재하는 focal/render object root의 유일한 real object directory `1`, recursive
   extra payload 0, numeric `object_id==1`을 강제해야 함
+- compact SAM prior는 provenance/numeric inventory의 size/mtime/ctime signature와 output
+  frame/PTS/identity/finite/QA 계약이 exact할 때만 resume skip하고 drift 시 atomic rebuild
 - deadline에 미완료된 sequence는 `INCOMPLETE_DEADLINE`로 명시하고 PASS로 위장하지 않음
 - Fit3D exhaustive tolerance/ablation은 final private dataset critical path를 방해하면 freeze 이후로 이동
 - persistent handoff: `HANDOFF.md` + ignored `.runtime/handoff_state.json` 30초 atomic checkpoint;

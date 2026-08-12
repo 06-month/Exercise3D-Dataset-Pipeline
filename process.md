@@ -665,6 +665,23 @@
 - Implementation commit `d3fc911`를 push했다. Existing GPU/supervisor에는 signal/restart가 없고 다음
   normal SAM coordinator child가 current gate를 자동 load한다.
 
+### Source-bound SAM prior consolidation resume
+
+- `consolidate_sam_body_prior.py`는 retry/recovered supervisor가 호출하면 valid compact prior가 있어도
+  3 camera를 항상 다시 읽고 덮어썼다. 또한 existing prior가 current SAM provenance/numeric source와
+  같은 generation인지 증명하는 dependency identity가 없어 무조건 skip도 안전하지 않았다.
+- Current target provenance와 object-1 numeric inventory의 relative label, size, mtime_ns, ctime_ns를
+  privacy-safe SHA-256 signature로 묶어 metadata에 저장한다. Existing output은 signature/canonical mapping,
+  frame/source identity, PTS, target flags/confidence/bbox, output-valid/accepted-prior 관계, canonical finite,
+  frames CSV와 QA count/status를 모두 재검증한 뒤에만 `resume_skipped=true`로 재사용한다. Source 또는
+  consolidated payload가 바뀌면 기존 atomic writers로 rebuild한다.
+- Exact skip이 metadata timestamp를 보존하는지, forced accepted-prior corruption을 수리하는지, numeric
+  source drift가 rebuild되는지 regression을 추가했다. 전체 150 tests, compile과 publication-safety가
+  PASS했고 implementation commit `e641bfa`를 push했다.
+- Existing 12 completed sequence는 supervisor successful-row gate가 consolidation command 자체를 skip하므로
+  재계산하지 않는다. Current GPU/supervisor에는 signal/restart가 없으며 다음 새 sequence의 child부터
+  source-bound metadata가 생성된다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화

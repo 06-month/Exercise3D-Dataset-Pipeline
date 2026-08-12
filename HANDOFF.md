@@ -38,12 +38,12 @@
   사용해 300초 backoff 뒤 1회만 재시도한다. Backoff 중에는 다른 ready sequence를 진행하고
   retry attempt/UTC를 atomic supervisor state에 남긴다. 현재 live PID는 이 변경 전 시작했으므로
   활성화를 위해 restart하지 않았으며, 향후 watchdog recovery가 current entrypoint를 load할 때 적용된다.
-- 2026-08-12 14:06 KST dashboard snapshot: `benchpress_0001` Mode B/body fit/Mode C/quality/freeze-ready와
+- 2026-08-12 14:10 KST dashboard snapshot: `benchpress_0001` Mode B/body fit/Mode C/quality/freeze-ready와
   12-sequence immutable checkpoint가 완료됐고 supervisor는 다음 3-view pose dependency를
   `WAIT_RUNNING_SAPIENS2`로 대기 중
 - Sapiens durable 38/78 camera, current partial 포함 25,074/65,430 crop; PID 373049 alive,
   current `benchpress_0002/cam3`
-- Sapiens recent-completed-camera throughput 0.227 crop/s; projected ETA는 deadline 약 2시간 24분 후 risk.
+- Sapiens recent-completed-camera throughput 0.227 crop/s; projected ETA는 deadline 약 2시간 28분 후 risk.
   OOM/retry/stall은 없음
 - SAM durable 36/78 camera, 23,460/65,595 frame, 12/26 full sequence; aggregate 0.584 frame/s.
   현재 SAM child는 없으며 `benchpress_0002` 3-view pose 완료 후 cam1부터 자동 재개한다.
@@ -59,6 +59,11 @@
   `benchpress_0001/cam3` 673-frame output은 신규 checks 전부 PASS했다. Mesh/numeric required object root와
   존재하는 focal/render per-object root는 real directory `1` 하나만 허용하고 recursive extra payload 및
   각 numeric `object_id != 1`을 거부한다. 같은 실출력은 exact-object checks도 전부 PASS했다.
+  SAM compact-prior consolidation은 current provenance/numeric inventory의 privacy-safe
+  size/mtime/ctime signature를 metadata에 저장한다. Retry 시 output의 frame/PTS/target flags/bbox,
+  accepted-prior/finite payload/QA와 signature가 모두 일치할 때만 skip하고 source/output drift는 atomic
+  rebuild한다. 기존 12 completed sequence는 supervisor successful-row gate로 호출 자체를 skip하며,
+  다음 새 sequence부터 signature가 생성된다.
 - GPU: A100 80GB, Sapiens-only dependency-wait snapshot 36,375 MiB/100%, 366.59 W, 56°C;
   observed OOM/retry 없음
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
@@ -219,7 +224,8 @@ Public-safe Sapiens command 형태:
 4. Sapiens camera는 `metadata.json` PASS, frame 수, `(N,308,2)/(N,308)` shape, finite/abstention을 검사한다. SAM camera는 benchmark/profile/provenance, mesh/numeric 수량과 required field를 모두 검사한다.
 5. 죽어 있으면 live process absence와 child 부재를 다시 확인한 뒤 `.runtime/handoff_state.json`의
    exact frozen resume command를 사용한다. Sapiens와 SAM runner는 PASS camera/chunk를 검증 후 skip하며,
-   두 runner의 lifetime lock과 output-bound legacy/orphan process guard를 우회하지 않는다.
+   두 runner의 lifetime lock과 output-bound legacy/orphan process guard를 우회하지 않는다. SAM prior
+   consolidation도 current source signature와 output contract가 exact할 때만 materialization을 skip한다.
 6. supervisor가 죽었으면 local state의 exact supervisor command로 재실행한다. `--overwrite`는 사용하지 않는다.
    단, `.runtime/supervisor_watchdog_state.json`의 watchdog이 정상이면 수동 launch하지 말고
    자동 recovery 결과를 사용한다. `ATTENTION`/재시도 소진일 때만 수동 개입한다.
@@ -282,11 +288,11 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Runtime estimates
 
-- 2026-08-12 14:06 KST snapshot: Sapiens recent-completed-camera rate 0.227 crop/s,
-  streaming ETA는 deadline 약 2시간 24분 후. Downstream overhead를 제외한 sequence schedule
+- 2026-08-12 14:10 KST snapshot: Sapiens recent-completed-camera rate 0.227 crop/s,
+  streaming ETA는 deadline 약 2시간 28분 후. Downstream overhead를 제외한 sequence schedule
   upper bound와 empirical p90-adjusted estimate는 deadline까지 25/26이며 `squat_0003`가
   첫 projected late sequence
-- deadline margin: Sapiens 전량 기준 약 -2.43 h; 대신 Mode B complete sequence와
+- deadline margin: Sapiens 전량 기준 약 -2.47 h; 대신 Mode B complete sequence와
   deadline snapshot을 내구적으로 확보
 - concurrent SAM Mode B aggregate 23,460 frame, measured 0.584 frame/s;
   standalone expected 20.80 h projection은
@@ -296,7 +302,8 @@ tmux new-window -n exercise3d-dashboard \
 ## Git state
 
 - branch: `agent/phase-5-1-pushup-0003-recovery`
-- latest implementation commit: SAM single-target exact-tree gate `d3fc911`; SAM provenance completion
+- latest implementation commit: source-bound SAM prior resume `e641bfa`; SAM single-target exact-tree
+  gate `d3fc911`; SAM provenance completion
   gate `11a91ca`; streaming transient retry
   `0412590`; SAM duplicate-resume/orphan guard
   `46cdced`; Sapiens duplicate-resume guard `30a051d`; marker ctime cutoff attestation `6e802b1`;
@@ -318,4 +325,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-12 14:07 KST
+- 2026-08-12 14:12 KST
