@@ -699,6 +699,23 @@
   gate로 호출하지 않아 재계산하지 않으며, current GPU/supervisor에는 signal/restart가 없었다. 다음
   새 sequence body-fit부터 source-bound metadata가 자동 생성된다.
 
+### Source-bound Mode C assessment resume
+
+- Mode C assessment JSON은 deadline cutoff의 terminal marker이지만 dependency identity가 없고 retry마다
+  다시 기록됐다. Unchanged decision의 mtime/ctime을 불필요하게 바꾸거나, 반대로 단순 exists skip으로
+  stale body/prior evidence를 유지하는 두 문제를 함께 피해야 했다.
+- Body-fit NPZ/metadata, triangulation supporting-view NPZ, 세 camera compact prior, policy/canonical config의
+  privacy-safe size/mtime_ns/ctime_ns inventory를 SHA-256 signature로 저장한다. Existing marker는 signature와
+  frozen policy, camera order/reference counts, nonnegative signal/candidate counts, sorted unique source indices,
+  non-overlapping bounded clips와 coverage, threshold evidence, selected-total과
+  `PASS_MODE_B_FROZEN`/`REVIEW_MODE_C_CANDIDATE` 결정을 검증한 뒤에만 timestamp를 보존해 skip한다.
+- Source drift, status/candidate inconsistency, clip/threshold structure regression을 포함해 전체 154 tests,
+  compile과 publication-safety가 PASS했다. 기존 `benchpress_0001` marker는 signature를 요구하지 않는
+  read-only audit에서 candidate 0 `PASS_MODE_B_FROZEN` contract PASS였다.
+- Implementation commit `1c8046e`를 push했다. 기존 12 completed marker를 다시 쓰지 않았고 current
+  GPU/supervisor에는 signal/restart가 없었다. 다음 새 sequence assessment부터 source-bound marker가
+  자동 생성된다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화
