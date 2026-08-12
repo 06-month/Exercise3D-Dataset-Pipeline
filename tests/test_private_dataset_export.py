@@ -326,15 +326,18 @@ class PrivateDatasetExportTest(unittest.TestCase):
                 path.touch()
                 path.chmod(0o600)
                 os.utime(path, ns=(before_ns, before_ns))
-            eligible, reasons, mtimes = deadline_eligibility(
+            eligible, reasons, mtimes, identities = deadline_eligibility(
                 args, sequence, cutoff
             )
             self.assertTrue(eligible)
             self.assertEqual(reasons, [])
             self.assertEqual(len(mtimes), 3)
+            self.assertEqual(len(identities), 3)
 
             os.utime(markers[-1], ns=(after_ns, after_ns))
-            eligible, reasons, _ = deadline_eligibility(args, sequence, cutoff)
+            eligible, reasons, _, _ = deadline_eligibility(
+                args, sequence, cutoff
+            )
             self.assertFalse(eligible)
             self.assertEqual(
                 reasons,
@@ -417,6 +420,28 @@ class PrivateDatasetExportTest(unittest.TestCase):
                     copy_exact(source, destination)
             self.assertFalse(destination.exists())
             self.assertEqual(list((root / "freeze").glob("*.tmp")), [])
+
+    def test_copy_binds_deadline_eligibility_source_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "body_fit.npz"
+            destination = root / "freeze" / "body_fit.npz"
+            source.write_bytes(b"pre-deadline payload")
+            descriptor = os.open(source, os.O_RDONLY)
+            try:
+                eligible_identity = source_descriptor_identity(descriptor)
+            finally:
+                os.close(descriptor)
+            source.write_bytes(b"post-eligibility replacement")
+            with self.assertRaisesRegex(
+                RuntimeError, "changed since deadline eligibility"
+            ):
+                copy_exact(
+                    source,
+                    destination,
+                    expected_source_identity=eligible_identity,
+                )
+            self.assertFalse(destination.exists())
 
     def test_finite_nan_contract_separates_invalid_payload(self) -> None:
         points = np.asarray([[[1.0, 2.0, 3.0]], [[np.nan, np.nan, np.nan]]])

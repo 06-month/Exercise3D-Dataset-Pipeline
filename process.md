@@ -512,6 +512,21 @@
   build가 없으며, live sentinel PID 1882473은 중단하지 않았다. Deadline 시 exporter subprocess가
   새 code를 load하므로 GPU/supervisor/sentinel restart 없이 hardening이 적용된다.
 
+### Deadline terminal-marker identity binding
+
+- Deadline 후 generation은 계속되므로 cutoff eligibility의 marker mtime을 기록한 직후 해당 source가
+  atomic replacement되면, 기존 code는 새 descriptor bytes를 copy하면서 과거 mtime provenance만
+  sequence manifest에 남길 수 있었다. Per-copy source stability 검사는 있었지만 eligibility 시점과
+  copy 시점 사이의 TOCTOU는 결합하지 않았다.
+- `deadline_eligibility`가 body fit NPZ/metadata와 Mode-C assessment의
+  dev/inode/size/mtime/ctime identity를 내부 snapshot으로 함께 반환한다. `copy_exact`는 terminal marker
+  source descriptor를 연 뒤 hashing 전 이 identity와 exact-match하는지 검사한다. Replacement가 있으면
+  destination publish 없이 `freeze source changed since deadline eligibility`로 실패해 sentinel의 기존
+  staging resume/retry 경로로 넘어간다.
+- Manifest에는 기존 privacy-safe marker mtime만 기록하며 private path나 filesystem identity는 노출하지
+  않는다. Cutoff 없는 predeadline checkpoint와 global/nonterminal source copy semantics는 변하지 않는다.
+  Eligibility identity capture와 replacement rejection regression을 포함한 전체 131 tests가 PASS했다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화

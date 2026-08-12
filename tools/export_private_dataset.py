@@ -332,9 +332,14 @@ def deadline_eligibility(
     args: argparse.Namespace,
     sequence: str,
     cutoff: datetime | None,
-) -> tuple[bool, list[str], dict[str, str]]:
+) -> tuple[
+    bool,
+    list[str],
+    dict[str, str],
+    dict[str, tuple[int, int, int, int, int]],
+]:
     if cutoff is None:
-        return True, [], {}
+        return True, [], {}, {}
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     delta = cutoff - epoch
     cutoff_ns = (
@@ -343,6 +348,7 @@ def deadline_eligibility(
     )
     reasons: list[str] = []
     marker_mtimes: dict[str, str] = {}
+    marker_identities: dict[str, tuple[int, int, int, int, int]] = {}
     for label, path in deadline_terminal_markers(args, sequence).items():
         try:
             stat = path.stat()
@@ -356,9 +362,16 @@ def deadline_eligibility(
             stat.st_mtime_ns / 1_000_000_000, tz=timezone.utc
         )
         marker_mtimes[label] = modified.isoformat()
+        marker_identities[label] = (
+            stat.st_dev,
+            stat.st_ino,
+            stat.st_size,
+            stat.st_mtime_ns,
+            stat.st_ctime_ns,
+        )
         if stat.st_mtime_ns > cutoff_ns:
             reasons.append(f"deadline_after_cutoff:{label}")
-    return not reasons, reasons, marker_mtimes
+    return not reasons, reasons, marker_mtimes, marker_identities
 
 
 def verify_deadline_marker_mtimes(
@@ -801,7 +814,12 @@ def publish_staged_build(
     return integrity
 
 
-def copy_exact(source: Path, destination: Path) -> dict[str, Any]:
+def copy_exact(
+    source: Path,
+    destination: Path,
+    *,
+    expected_source_identity: tuple[int, int, int, int, int] | None = None,
+) -> dict[str, Any]:
     if source.is_symlink():
         raise RuntimeError(f"freeze source must not be a symlink: {source}")
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -815,6 +833,13 @@ def copy_exact(source: Path, destination: Path) -> dict[str, Any]:
     try:
         with os.fdopen(descriptor, "rb", closefd=True) as source_handle:
             initial_identity = source_descriptor_identity(source_handle.fileno())
+            if (
+                expected_source_identity is not None
+                and initial_identity != expected_source_identity
+            ):
+                raise RuntimeError(
+                    f"freeze source changed since deadline eligibility: {source}"
+                )
             source_digest = hash_file_handle(source_handle)
             if source_descriptor_identity(source_handle.fileno()) != initial_identity:
                 raise RuntimeError(f"freeze source changed while hashing: {source}")
@@ -1194,11 +1219,12 @@ def main() -> int:
     sequence_rows = []
     cutoff_eligible_incomplete: list[dict[str, Any]] = []
     for sequence in args.sequences:
-        deadline_eligible, deadline_reasons, marker_mtimes = deadline_eligibility(
-            args,
-            sequence,
-            deadline_cutoff,
-        )
+        (
+            deadline_eligible,
+            deadline_reasons,
+            marker_mtimes,
+            marker_identities,
+        ) = deadline_eligibility(args, sequence, deadline_cutoff)
         if not deadline_eligible:
             validation = {
                 "status": "INCOMPLETE",
@@ -1266,7 +1292,11 @@ def main() -> int:
         sequence_root = build_root / "sequences" / sequence
         copied = []
         for label, source in sequence_dependencies(args, sequence).items():
-            result = copy_exact(source, sequence_root / label)
+            result = copy_exact(
+                source,
+                sequence_root / label,
+                expected_source_identity=marker_identities.get(label),
+            )
             record = {
                 "sequence": sequence,
                 "path": str((Path("sequences") / sequence / label).as_posix()),

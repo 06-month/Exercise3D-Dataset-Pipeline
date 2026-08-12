@@ -60,7 +60,9 @@
   global provenance 3 files + complete sequence당 required 33-file set을 강제한다. Sentinel은
   고정된 26-sequence list와 exact cutoff를 verifier에 별도로 전달한다. Exporter는 cutoff 전에
   output root/lock/staging을 만들지 않으며 manifest `created_at_utc >= cutoff`도 검증한다. 현재 live
-  sentinel을 재시작하지 않아도 deadline export subprocess가 이 code를 load한다.
+  sentinel을 재시작하지 않아도 deadline export subprocess가 이 code를 load한다. Cutoff eligibility에서
+  terminal marker 3개의 dev/inode/size/mtime/ctime identity를 고정해 validation 이후 copy descriptor와
+  exact-match하지 않으면 publish를 중단하고 retry하므로 post-cutoff replacement가 섞이지 않는다.
   GPU inference/supervisor는 건드리지 않았다.
 - deadline sentinel watchdog PID 1882820: live/persisted command digest exact-match,
   restart/launch 0, attention false. State는 `.runtime/deadline_sentinel_watchdog_state.json`.
@@ -267,7 +269,7 @@ tmux new-window -n exercise3d-dashboard \
 ## Git state
 
 - branch: `agent/phase-5-1-pushup-0003-recovery`
-- latest implementation commit: durable latest-completion event `a0ad72c`; remaining deadline order audit `f8f603b`; immutable freeze storage
+- latest implementation commit: premature deadline publication gate `ddd3461`; durable latest-completion event `a0ad72c`; remaining deadline order audit `f8f603b`; immutable freeze storage
   forecast `5bb9c4c`; monitoring-plane recovery
   watchdog `16a8600` + default-path validation
   fix `5c93d4e`; SAM output storage forecast `b24f509`; quality follower recovery
