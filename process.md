@@ -389,6 +389,30 @@
   첫 projected late sequence는 `deadlift_0002`다. Process alive, GPU saturation, retry/error 0이므로
   frozen shortest-first order와 acceptance policy는 변경하지 않았다.
 
+### Dashboard/handoff monitoring-plane continuity
+
+- Persistent dashboard와 handoff checkpoint monitor에는 lifetime singleton lock이 없고 exact resume
+  command도 handoff에 보존되지 않아 terminal/session loss 시 AI polling 없이 복구할 수 없었다.
+- 두 persistent mode에 symlink-safe advisory lifetime lock을 추가했다. `--once` 진단은 lock owner의
+  state를 수정하지 않고 계속 사용할 수 있으며, duplicate daemon은 output write 전에 exit 3으로 거부한다.
+- Handoff process inventory는 basename-exact argv match와 `shlex.join`을 사용하고 dashboard, handoff
+  monitor, monitoring watchdog의 last-known exact command를 보존한다. 이 monitoring plane은 workload
+  RUNNING 판정에서는 제외해 pipeline completion status를 왜곡하지 않는다.
+- `tools/run_monitoring_watchdog.py`는 두 target별 live/resume argv SHA pin, 3-cycle absence confirmation,
+  2초 final rescan, 최대 3회/시간 detached recovery를 제공한다. Live target을 signal하지 않고 각
+  lifetime lock이 manual/watchdog race를 닫는다. State는 `.runtime/monitoring_watchdog_state.json`이다.
+- Dashboard는 watchdog dead/stale/duplicate/structured attention을 표시한다. 관련 22개와 전체 123개
+  tests, publication safety가 PASS했다. Implementation `16a8600`과 default handoff output-path validator
+  fix `5c93d4e`를 push했다.
+- Exact cwd/argv/child 0 확인 후 CPU-only dashboard PID 1992655와 handoff monitor PID 1974706만
+  SIGTERM하고 동일 argv로 PID 2006908/2006909를 시작했다. 두 target lock held와 handoff exact command
+  persistence를 확인했으며 GPU inference/SAM/supervisor에는 signal하지 않았다.
+- Monitoring watchdog PID 2009359은 두 target 모두 live/resume SHA exact, missing/restart 0,
+  attention false다. Watchdog command도 handoff에 보존됐고 세 lifetime lock이 모두 held다.
+- 2026-08-12 12:55 KST snapshot은 SAM cam2의 새 durable PASS를 반영해 35/78 camera,
+  22,787 frame이며 cam3 Mode B 192 frame으로 전진했다. Sapiens 23,964/65,430 crop,
+  OOM/retry/stall 0이고 deadline 경고 외 operational attention은 없다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화

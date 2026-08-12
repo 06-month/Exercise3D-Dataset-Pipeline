@@ -30,19 +30,19 @@
   resume command digest가 exact-match하며 restart 0, attention false다. 3회 연속 absence +
   2초 final rescan 후에만 최대 3회/시간 내에서 detached resume하고 live process는
   절대 signal하지 않는다. Exact watchdog PID와 command은 runtime/dashboard state가 source of truth다.
-- 2026-08-12 12:45 KST dashboard snapshot: `benchpress_0001` pose 3-view 완료 후
+- 2026-08-12 12:55 KST dashboard snapshot: `benchpress_0001` pose 3-view 완료 후
   supervisor는 `STREAM_SEQUENCE_PIPELINE`; 해당 sequence Mode B를 자동 실행 중
 - Sapiens durable 36/78 camera, current partial 포함 23,964/65,430 crop; PID 373049 alive,
   current `benchpress_0002/cam1`
-- Sapiens recent-completed-camera throughput 0.223 crop/s; projected ETA는 deadline 약 3시간 25분 후 risk.
+- Sapiens recent-completed-camera throughput 0.223 crop/s; projected ETA는 deadline 약 3시간 35분 후 risk.
   이전 snapshot들보다 악화돼 `DEADLINE_ETA_WORSENED` warning을 기록했지만
   OOM/retry/stall은 없음
-- SAM durable 34/78 camera, 22,114/65,595 frame, 11/26 full sequence; aggregate 0.585 frame/s;
-  PID 1930239가 `benchpress_0001/cam2` Mode B 실행 중이며 snapshot numeric 623 frame까지 진행
+- SAM durable 35/78 camera, 22,787/65,595 frame, 11/26 full sequence; aggregate 0.584 frame/s;
+  PID 1930239가 `benchpress_0001/cam3` Mode B 실행 중이며 snapshot numeric 192 frame까지 진행
 - GPU: A100 80GB, current combined snapshot 62,823 MiB/100%, 362.08 W, 56°C;
   observed OOM/retry 없음
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
-- handoff monitor PID 1974706: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
+- handoff monitor PID 2006909: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
   `updated_at_utc` 증가와 exact active/resume command/stage count 보존 확인 완료
 - deadline snapshot sentinel PID 1882473: 2026-08-14 13:00 KST에 completed sequence와
   `INCOMPLETE` 목록을 별도 versioned private build로 export; local state는
@@ -64,15 +64,20 @@
   Sentinel lifetime lock은 별도 process probe에서 held로 확인했고 exporter는 build ID별
   lock을 staging mutation 전에 취득한다.
 - dashboard monitor: `tools/monitor_autonomous_generation.py`; atomic state는
-  `.runtime/dashboard_state.json`. Quiet daemon PID 1992655이며 `--once`는 snapshot,
+  `.runtime/dashboard_state.json`. Quiet daemon PID 2006908이며 `--once`는 snapshot,
   기본은 Rich live, `--quiet`는 state-only daemon이다. Export section은 final deadline
   build progress와 contract-v2 best durable checkpoint progress를 별도로 보존한다. Selector
   exact workload와 measured rate를 사용한 overhead-free deadline upper bound는 현재 24/26이며,
   첫 late sequence는 `deadlift_0002`다. 완료 11 sequence의 post-SAM terminal latency p90
   1,399.83초를 적용한 empirical schedule도 24/26이며, upper/adjusted all-sequence terminal은
   각각 2026-08-14 18:14/18:37 KST projection이다. 완료 PASS camera 34개의 Mode B
-  `output_bytes/frame` nearest-rank p90 기반 잔여 storage는 약 41.44 GiB, SAM 완료 후 예상 free
-  103.70 GiB, 20 GiB reserve margin 83.70 GiB로 현재 storage attention은 없다.
+  `output_bytes/frame` nearest-rank p90 기반 잔여 storage는 약 41.21 GiB, SAM 완료 후 예상 free
+  103.63 GiB, 20 GiB reserve margin 83.63 GiB로 현재 storage attention은 없다.
+- Monitoring-plane watchdog PID 2009359: dashboard/handoff monitor의 live/resume exact argv SHA를
+  각각 pin하며 restart 0, attention false다. 두 monitor와 watchdog의 lifetime lock은 모두 held다.
+  3회 연속 absence + 2초 final rescan 후 target별 최대 3회/시간 detached recovery하고 live process는
+  signal하지 않는다. Exact target/watchdog commands는 `.runtime/handoff_state.json`, state는
+  `.runtime/monitoring_watchdog_state.json`에 atomic 보존된다.
 - Phase 11 CPU follower PID 1973073: complete body-fit/Mode-C dependency만 감지해 quality를
   atomic materialize/validate한다. Final exporter와 동일 sequence validation도 미리 수행해
   `freeze-ready`를 출력한다. Lifetime lock `.runtime/quality_follower.lock`은 held로 검증했다.
@@ -141,7 +146,7 @@ Public-safe Sapiens command 형태:
   366 files/344,922,733 bytes, requested order/tree/ownership/SHA error 0,
   `git_worktree_dirty=false`, `freeze_eligible=true`; immutable reuse 재검증 PASS.
   이 build는 final deadline build ID와 별도이며 남은 generation은 계속한다.
-- completed Sapiens 34 camera와 SAM 33 camera의 `run_provenance.json` materialize PASS;
+- completed Sapiens 36 camera와 SAM 35 camera의 `run_provenance.json` materialize PASS;
   model/checkpoint/config/source/selection/tool/exact-resume identity 포함
 - `latpulldown_0003`: 662×26, coverage/alignment 1.0, prior-only/missing 0,
   displacement p95 0.07748 + camera uncertainty로 REVIEW; Mode C candidate 79, 실행/채택 0
@@ -153,7 +158,7 @@ Public-safe Sapiens command 형태:
 
 - Sapiens2: 42/78 camera, current partial 포함 41,466 target crops
 - Phase 7 이후: `latpulldown_0003` 및 이후 pose-complete sequence
-- SAM full: 34/78 camera PASS, full-complete sequence 11/26; `benchpress_0001/cam2` Mode B 실행 중
+- SAM full: 35/78 camera PASS, full-complete sequence 11/26; `benchpress_0001/cam3` Mode B 실행 중
 - critical path: pose-complete sequence → Phase 7 gate → Mode B → compact prior → body fit → Mode C candidate QA → export
 - Phase 11은 body fit/Mode C 뒤 CPU-only로 생성하며 deadline exporter가 누락 output을 자동 materialize한다.
 
@@ -172,8 +177,10 @@ Public-safe Sapiens command 형태:
    단, `.runtime/supervisor_watchdog_state.json`의 watchdog이 정상이면 수동 launch하지 말고
    자동 recovery 결과를 사용한다. `ATTENTION`/재시도 소진일 때만 수동 개입한다.
 7. resume 후 `python -m unittest discover -s tests -p 'test_*.py'`와 마지막 completed camera completion gate를 확인한다.
-8. handoff monitor가 없으면 `python tools/checkpoint_handoff_state.py ... --poll-seconds 30`을
-   동일 root/sequence 설정으로 재실행하고 `updated_at_utc`가 전진하는지 확인한다.
+8. dashboard 또는 handoff monitor가 없으면 먼저 `.runtime/monitoring_watchdog_state.json`을 확인한다.
+   Watchdog이 RUNNING이면 수동 launch하지 않고 3-cycle automatic recovery를 사용한다. Watchdog
+   ATTENTION/restart exhaustion일 때만 exact absence를 재확인하고 handoff의 target resume command로
+   복구한다. 두 target lifetime lock을 우회하지 않는다.
 9. `.runtime/deadline_snapshot_state.json`의 sentinel이 없으면 `HANDOFF.md`와 local resume
    command로 복구한다. 단 deadline sentinel watchdog이 RUNNING이면 수동 launch하지
    말고 exact-identity recovery에 맡긴다. 기존 deadline build manifest가 있으면 duplicate
@@ -228,11 +235,11 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Runtime estimates
 
-- 2026-08-12 12:45 KST snapshot: Sapiens recent-completed-camera rate 0.223 crop/s,
-  streaming ETA는 deadline 약 3시간 25분 후. Downstream overhead를 제외한 sequence schedule
+- 2026-08-12 12:55 KST snapshot: Sapiens recent-completed-camera rate 0.223 crop/s,
+  streaming ETA는 deadline 약 3시간 35분 후. Downstream overhead를 제외한 sequence schedule
   upper bound와 empirical p90-adjusted estimate는 deadline까지 24/26이며 `deadlift_0002`가
   첫 projected late sequence
-- deadline margin: Sapiens 전량 기준 약 -3.42 h; 대신 Mode B complete sequence와
+- deadline margin: Sapiens 전량 기준 약 -3.59 h; 대신 Mode B complete sequence와
   deadline snapshot을 내구적으로 확보
 - concurrent SAM Mode B aggregate 19,455 frame/33,159.28초 = 0.58671 frame/s;
   standalone expected 20.80 h projection은
@@ -242,7 +249,8 @@ tmux new-window -n exercise3d-dashboard \
 ## Git state
 
 - branch: `agent/phase-5-1-pushup-0003-recovery`
-- latest implementation commit: SAM output storage forecast `b24f509`; quality follower recovery
+- latest implementation commits: monitoring-plane recovery watchdog `16a8600` + default-path validation
+  fix `5c93d4e`; SAM output storage forecast `b24f509`; quality follower recovery
   watchdog `4600dff`; empirical downstream
   deadline forecast `7ffeb9a`; checkpoint follower
   recovery watchdog `16fd41f`; deadline freeze
@@ -256,4 +264,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-12 12:45 KST
+- 2026-08-12 12:55 KST
