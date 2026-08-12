@@ -60,9 +60,8 @@ def validate_target_command(target: str, argv: list[str] | None) -> str | None:
     if target == "dashboard" and "--quiet" not in argv:
         return "detached dashboard recovery requires --quiet"
     if target == "handoff_monitor":
-        for required in ("--sequences", "--output"):
-            if required not in argv:
-                return f"handoff monitor resume command has no {required}"
+        if "--sequences" not in argv:
+            return "handoff monitor resume command has no --sequences"
     return None
 
 

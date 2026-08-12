@@ -64,7 +64,7 @@ class MonitoringWatchdogTest(unittest.TestCase):
             validate_target_command("dashboard", [*dashboard, "--once"]) or "",
         )
         self.assertIn(
-            "has no",
+            "no --sequences",
             validate_target_command("handoff_monitor", handoff[:2]) or "",
         )
 
