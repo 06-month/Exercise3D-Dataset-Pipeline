@@ -749,6 +749,11 @@
   전체 161 tests, compile과 staged publication-safety가 PASS했고 implementation `533959e`를 push했다.
 - Current Sapiens/SAM/supervisor/quality follower에는 signal/restart/duplicate launch가 없었다. 다음 새
   sequence의 supervisor quality subprocess부터 source-bound metadata가 자동 생성된다.
+- 14:34 KST 단일 dashboard snapshot에서 같은 Sapiens PID 373049가 25,330/65,430 crops,
+  38/78 durable camera로 진행했고 recent/average rate는 0.232/0.217 crop/s였다. GPU 100%,
+  OOM/retry/stall/error 0이며 supervisor는 `benchpress_0002/cam3` pose completion을 기다린다. Deadline
+  Sapiens ETA risk는 +1시간 31분으로 개선됐고 optimistic/p90-adjusted freeze coverage 모두 25/26,
+  first late `squat_0003`이다. 이 snapshot 뒤 정상 진행 확인을 위한 추가 AI polling은 수행하지 않는다.
 
 ### Source-of-truth 재검증
 
