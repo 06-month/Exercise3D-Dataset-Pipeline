@@ -16,10 +16,13 @@ import numpy as np
 from tools.export_private_dataset import (
     DEADLINE_BOUNDARY_POLICY,
     acquire_build_lock,
+    capture_source_identities,
     copy_exact,
     deadline_eligibility,
+    dependency_identity_reasons,
     deadline_publication_due,
     deadline_terminal_markers,
+    ensure_quality_output,
     finite_nan_contract,
     git_provenance,
     main as export_main,
@@ -33,6 +36,7 @@ from tools.export_private_dataset import (
     sha256,
     source_descriptor_identity,
     validate_path_component,
+    validate_quality_for_export,
     verify_frozen_build,
     verify_deadline_marker_mtimes,
     verify_deadline_marker_ctimes,
@@ -500,6 +504,44 @@ class PrivateDatasetExportTest(unittest.TestCase):
                 )
             self.assertFalse(destination.exists())
 
+    def test_capture_source_identities_detects_replacement(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source.bin"
+            source.write_bytes(b"before")
+            before = capture_source_identities({"source": source})
+            replacement = root / "replacement.bin"
+            replacement.write_bytes(b"after")
+            os.replace(replacement, source)
+            after = capture_source_identities({"source": source})
+            self.assertNotEqual(before, after)
+
+    def test_capture_source_identities_rejects_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "target.bin"
+            target.write_bytes(b"private")
+            source = root / "source.bin"
+            source.symlink_to(target)
+            with self.assertRaisesRegex(RuntimeError, "must not be a symlink"):
+                capture_source_identities({"source": source})
+
+    def test_dependency_identity_gate_covers_validation_and_deadline_windows(self) -> None:
+        first = (1, 2, 3, 4, 5)
+        changed = (1, 6, 3, 7, 8)
+        reasons = dependency_identity_reasons(
+            {"body/body_fit.npz": first, "quality/metadata.json": first},
+            {"body/body_fit.npz": changed, "quality/metadata.json": changed},
+            {"body/body_fit.npz": first},
+        )
+        self.assertEqual(
+            reasons,
+            [
+                "source_changed_during_validation",
+                "deadline_source_changed_after_eligibility:body/body_fit.npz",
+            ],
+        )
+
     def test_finite_nan_contract_separates_invalid_payload(self) -> None:
         points = np.asarray([[[1.0, 2.0, 3.0]], [[np.nan, np.nan, np.nan]]])
         valid = np.asarray([[True], [False]])
@@ -734,6 +776,80 @@ class PrivateDatasetExportTest(unittest.TestCase):
             dependencies["quality/metadata.json"].name,
             "metadata.json",
         )
+
+    def test_export_reuses_valid_unsigned_legacy_quality(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = Namespace(
+                selection_root=root / "selection",
+                pose_root=root / "pose",
+                triangulation_root=root / "triangulation",
+                sam_prior_root=root / "sam",
+                sam_mode_c_review_root=root / "mode_c",
+                body_fit_root=root / "body",
+                quality_root=root / "quality",
+            )
+            body = args.body_fit_root / "sequence" / "body_fit.npz"
+            mode_c = (
+                args.sam_mode_c_review_root
+                / "sequence"
+                / "mode_c_escalation.json"
+            )
+            metadata = args.quality_root / "sequence" / "metadata.json"
+            for path in (body, mode_c, metadata):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("{}", encoding="utf-8")
+            with (
+                patch(
+                    "tools.export_private_dataset.validate_quality_output",
+                    return_value=(True, [], {"qa": {"sequence_status": "REVIEW"}}),
+                ),
+                patch(
+                    "tools.export_private_dataset.build_sequence_quality"
+                ) as build,
+            ):
+                result = ensure_quality_output(args, "sequence")
+            build.assert_not_called()
+            self.assertTrue(result["resume_skipped"])
+
+    def test_export_validates_signed_quality_against_current_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = Namespace(
+                selection_root=root / "selection",
+                pose_root=root / "pose",
+                triangulation_root=root / "triangulation",
+                sam_prior_root=root / "sam",
+                sam_mode_c_review_root=root / "mode_c",
+                body_fit_root=root / "body",
+                quality_root=root / "quality",
+            )
+            metadata = args.quality_root / "sequence" / "metadata.json"
+            metadata.parent.mkdir(parents=True)
+            metadata.write_text(
+                json.dumps({"source_dependency_signature": "stored"}),
+                encoding="utf-8",
+            )
+            with (
+                patch(
+                    "tools.export_private_dataset.quality_dependency_signature",
+                    return_value="current",
+                ),
+                patch(
+                    "tools.export_private_dataset.validate_quality_output",
+                    return_value=(False, ["source_dependency_signature_mismatch"], {}),
+                ) as validate,
+            ):
+                result = validate_quality_for_export(args, "sequence")
+            validate.assert_called_once_with(
+                args.quality_root.resolve() / "sequence",
+                args.body_fit_root.resolve() / "sequence" / "body_fit.npz",
+                "current",
+            )
+            self.assertFalse(result[0])
+            self.assertEqual(
+                result[1], ["source_dependency_signature_mismatch"]
+            )
 
 
 if __name__ == "__main__":

@@ -28,10 +28,15 @@ import numpy as np
 try:
     from tools.build_pseudolabel_quality import (
         build_sequence_quality,
+        quality_dependency_signature,
         validate_quality_output,
     )
 except ModuleNotFoundError:
-    from build_pseudolabel_quality import build_sequence_quality, validate_quality_output
+    from build_pseudolabel_quality import (
+        build_sequence_quality,
+        quality_dependency_signature,
+        validate_quality_output,
+    )
 
 
 CAMERAS = ("cam1", "cam2", "cam3")
@@ -147,6 +152,42 @@ def source_descriptor_identity(descriptor: int) -> tuple[int, int, int, int, int
         value.st_mtime_ns,
         value.st_ctime_ns,
     )
+
+
+def capture_source_identities(
+    sources: dict[str, Path],
+) -> dict[str, tuple[int, int, int, int, int]]:
+    """Capture no-follow identities for a bounded set of freeze inputs."""
+
+    identities: dict[str, tuple[int, int, int, int, int]] = {}
+    flags = os.O_RDONLY | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    for label, source in sorted(sources.items()):
+        if source.is_symlink():
+            raise RuntimeError(f"freeze source must not be a symlink: {label}")
+        descriptor = os.open(source, flags)
+        try:
+            identities[label] = source_descriptor_identity(descriptor)
+        finally:
+            os.close(descriptor)
+    return identities
+
+
+def dependency_identity_reasons(
+    before_validation: dict[str, tuple[int, int, int, int, int]],
+    after_validation: dict[str, tuple[int, int, int, int, int]],
+    deadline_marker_identities: dict[str, tuple[int, int, int, int, int]],
+) -> list[str]:
+    reasons = []
+    if before_validation != after_validation:
+        reasons.append("source_changed_during_validation")
+    reasons.extend(
+        f"deadline_source_changed_after_eligibility:{label}"
+        for label, identity in sorted(deadline_marker_identities.items())
+        if after_validation.get(label) != identity
+    )
+    return reasons
 
 
 def hash_file_handle(handle: BinaryIO) -> str:
@@ -982,7 +1023,7 @@ def ensure_quality_output(args: argparse.Namespace, sequence: str) -> dict[str, 
     )
     if not body_path.is_file() or not mode_c_path.is_file():
         return None
-    quality_args = argparse.Namespace(
+    builder_args = argparse.Namespace(
         selection_root=args.selection_root,
         pose_root=args.pose_root,
         triangulation_root=args.triangulation_root,
@@ -991,7 +1032,38 @@ def ensure_quality_output(args: argparse.Namespace, sequence: str) -> dict[str, 
         body_fit_root=args.body_fit_root,
         output_root=args.quality_root,
     )
-    return build_sequence_quality(quality_args, sequence)
+    quality_ok, _, quality_metadata = validate_quality_for_export(args, sequence)
+    if quality_ok and quality_metadata is not None:
+        return {**quality_metadata, "resume_skipped": True}
+    return build_sequence_quality(builder_args, sequence)
+
+
+def validate_quality_for_export(
+    args: argparse.Namespace, sequence: str
+) -> tuple[bool, list[str], dict[str, Any] | None]:
+    """Validate signed quality against current sources while preserving legacy output."""
+
+    output = args.quality_root.resolve() / sequence
+    body_path = args.body_fit_root.resolve() / sequence / "body_fit.npz"
+    metadata = read_json(output / "metadata.json")
+    dependency_signature = None
+    if metadata is not None and metadata.get("source_dependency_signature") is not None:
+        builder_args = argparse.Namespace(
+            selection_root=args.selection_root,
+            pose_root=args.pose_root,
+            triangulation_root=args.triangulation_root,
+            sam_prior_root=args.sam_prior_root,
+            sam_mode_c_review_root=args.sam_mode_c_review_root,
+            body_fit_root=args.body_fit_root,
+            output_root=args.quality_root,
+        )
+        try:
+            dependency_signature = quality_dependency_signature(
+                builder_args, sequence
+            )
+        except RuntimeError:
+            return False, ["source_dependency_signature_unavailable"], metadata
+    return validate_quality_output(output, body_path, dependency_signature)
 
 
 def validate_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]:
@@ -1082,9 +1154,8 @@ def validate_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]
         reasons.append("triangulation_not_eligible")
     if str(body_metadata["qa"]["status"]).startswith("FAIL"):
         reasons.append("body_fit_fail")
-    quality_ok, quality_reasons, quality_metadata = validate_quality_output(
-        args.quality_root.resolve() / sequence,
-        args.body_fit_root.resolve() / sequence / "body_fit.npz",
+    quality_ok, quality_reasons, quality_metadata = validate_quality_for_export(
+        args, sequence
     )
     if not quality_ok:
         reasons.extend(f"quality:{reason}" for reason in quality_reasons)
@@ -1287,7 +1358,14 @@ def main() -> int:
             continue
         try:
             ensure_quality_output(args, sequence)
-        except (OSError, ValueError, KeyError, RuntimeError, json.JSONDecodeError) as error:
+        except (
+            OSError,
+            EOFError,
+            ValueError,
+            KeyError,
+            RuntimeError,
+            json.JSONDecodeError,
+        ) as error:
             print(
                 json.dumps(
                     {
@@ -1300,7 +1378,40 @@ def main() -> int:
                 ),
                 flush=True,
             )
-        validation = validate_sequence(args, sequence)
+        dependencies = sequence_dependencies(args, sequence)
+        dependency_identities: dict[
+            str, tuple[int, int, int, int, int]
+        ] = {}
+        try:
+            before_validation = capture_source_identities(dependencies)
+            validation = validate_sequence(args, sequence)
+            dependency_identities = capture_source_identities(dependencies)
+        except (
+            OSError,
+            EOFError,
+            ValueError,
+            KeyError,
+            RuntimeError,
+            json.JSONDecodeError,
+        ) as error:
+            validation = {
+                "status": "INCOMPLETE",
+                "reasons": [
+                    "source_dependency_identity_unavailable:"
+                    f"{type(error).__name__}"
+                ],
+            }
+        else:
+            identity_reasons = dependency_identity_reasons(
+                before_validation,
+                dependency_identities,
+                marker_identities,
+            )
+            if identity_reasons:
+                validation = {
+                    "status": "INCOMPLETE",
+                    "reasons": identity_reasons,
+                }
         validation["deadline_terminal_marker_mtimes"] = marker_mtimes
         validation["deadline_terminal_marker_ctimes"] = marker_ctimes
         row = {
@@ -1330,11 +1441,11 @@ def main() -> int:
             continue
         sequence_root = build_root / "sequences" / sequence
         copied = []
-        for label, source in sequence_dependencies(args, sequence).items():
+        for label, source in dependencies.items():
             result = copy_exact(
                 source,
                 sequence_root / label,
-                expected_source_identity=marker_identities.get(label),
+                expected_source_identity=dependency_identities[label],
             )
             record = {
                 "sequence": sequence,
