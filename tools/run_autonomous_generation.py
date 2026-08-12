@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import fcntl
 import json
 import os
 import shutil
@@ -22,7 +23,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 import numpy as np
 
@@ -83,6 +84,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-target-crops", type=int, default=65430)
     parser.add_argument("--reused-target-crops", type=int, default=9725)
     parser.add_argument("--expected-sam-hours", type=float, default=20.8)
+    parser.add_argument(
+        "--instance-lock",
+        type=Path,
+        default=PROJECT_ROOT / ".runtime" / "autonomous_supervisor.lock",
+        help="Lifetime advisory lock preventing duplicate supervisor instances.",
+    )
     return parser
 
 
@@ -92,6 +99,23 @@ def process_alive(pid: int) -> bool:
         return state != "Z"
     except (OSError, IndexError):
         return False
+
+
+def acquire_instance_lock(path: Path) -> BinaryIO | None:
+    """Acquire and retain the singleton lock; return None when already held."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = path.open("a+b")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        return None
+    handle.seek(0)
+    handle.truncate()
+    handle.write(f"{os.getpid()}\n".encode("ascii"))
+    handle.flush()
+    os.fsync(handle.fileno())
+    return handle
 
 
 def free_gib(path: Path) -> float:
@@ -571,6 +595,22 @@ def main() -> int:
         or args.expected_sam_hours <= 0
     ):
         raise RuntimeError("invalid poll/retry configuration")
+    # Keep this descriptor alive for the lifetime of main().  A recovered or
+    # manually launched second supervisor exits before touching any stage.
+    instance_lock = acquire_instance_lock(args.instance_lock.resolve())
+    if instance_lock is None:
+        print(
+            json.dumps(
+                {
+                    "status": "DUPLICATE_SUPERVISOR_REFUSED",
+                    "instance_lock": str(args.instance_lock),
+                    "pid": os.getpid(),
+                    "at_utc": utc_now(),
+                }
+            ),
+            flush=True,
+        )
+        return 3
     sequence_csv = args.runtime_dir.resolve() / "autonomous_sequences.csv"
     rows = load_successful_rows(sequence_csv)
     successful = {row["sequence"] for row in rows}

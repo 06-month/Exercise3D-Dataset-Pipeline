@@ -168,6 +168,19 @@
   26-sequence list를 final verifier에 별도로 전달하는 contract v2 code를 load했다.
   GPU inference와 autonomous supervisor는 중단·재시작하지 않았다.
 
+### Supervisor single-instance recovery watchdog
+
+- 이전에 supervisor 자체가 한 번 종료되어 agent가 수동 복구한 실제 event를 무인
+  운영의 single point of failure로 확인했다. Dashboard attention만으로는 자동 복구되지 않았다.
+- `run_autonomous_supervisor_watchdog.py`는 현재 live supervisor argv와 handoff의 exact resume
+  command SHA-256이 같을 때만 identity를 pin한다. Supervisor가 3회 연속 보이지 않고
+  2초 final scan에서도 없을 때만 shell 없이 detached resume하며, 1시간 3회로 제한한다.
+- Watchdog singleton lock과 새 supervisor의 lifetime advisory lock을 결합해 동시 launch race에서
+  하나만 stage를 진행한다. Duplicate가 보이면 어느 process도 kill하지 않고 attention만 남긴다.
+- One-shot live identity gate에서 supervisor PID 1701200과 persisted command digest가 exact-match,
+  launch 0, attention false였다. Dashboard는 watchdog death/stale/identity/restart exhaustion을
+  machine-readable attention으로 승격한다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화

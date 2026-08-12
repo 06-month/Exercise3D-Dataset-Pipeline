@@ -11,6 +11,7 @@ import numpy as np
 
 from tools.consolidate_sam_body_prior import REQUIRED_PRIOR_FIELDS
 from tools.run_autonomous_generation import (
+    acquire_instance_lock,
     free_gib,
     load_successful_rows,
     process_alive,
@@ -21,6 +22,20 @@ from tools.run_autonomous_generation import (
 
 
 class AutonomousGenerationTest(unittest.TestCase):
+    def test_supervisor_instance_lock_refuses_a_duplicate(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "supervisor.lock"
+            first = acquire_instance_lock(path)
+            self.assertIsNotNone(first)
+            second = acquire_instance_lock(path)
+            self.assertIsNone(second)
+            assert first is not None
+            first.close()
+            third = acquire_instance_lock(path)
+            self.assertIsNotNone(third)
+            assert third is not None
+            third.close()
+
     def test_resume_loads_only_successful_sequence_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "rows.csv"

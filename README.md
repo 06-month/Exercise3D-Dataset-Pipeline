@@ -16,6 +16,10 @@ payload는 공개하지 않습니다. 저장소에는 재현 가능한 코드, �
 `tools/monitor_autonomous_generation.py`가 `.runtime/dashboard_state.json`에 atomic 저장합니다.
 Phase 11 CPU follower는 quality가 완료된 sequence에 대해 final exporter과 동일 validation을
 미리 수행하고 dashboard에 `freeze-ready` count와 지속 dependency failure를 보고합니다.
+별도 CPU-only supervisor watchdog은 살아 있는 supervisor의 exact argv를 persisted resume
+command와 digest pin하고, 3회 연속 absence와 final rescan을 통과한 때만 자동
+resume합니다. 신규 supervisor는 lifetime advisory lock으로 launch race에서도 중복
+stage 실행을 거부합니다.
 완료된 expensive camera output에는 checkpoint/config/source/selection/tool/command identity를
 담은 `run_provenance.json`을 별도 atomic sidecar로 남깁니다.
 고정 deadline에는 별도 private snapshot build가 현재 PASS/REVIEW/FAIL/INCOMPLETE 상태를 보존하며,

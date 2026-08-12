@@ -25,6 +25,11 @@
 - autonomous supervisor는 2026-08-12 08:45 KST 이후 사라진 것을 live process와
   stale state로 확인한 뒤, 중복/child 부재를 재확인하고 exact resumable command로 09:44 KST 복구했다.
   현재 exact PID/stage는 dashboard/handoff state가 source of truth다.
+- CPU-only supervisor watchdog은 `.runtime/supervisor_watchdog_state.json`에 exact command
+  digest/restart history/attention을 atomic 저장한다. 현재 supervisor PID 1701200과 persisted
+  resume command digest가 exact-match하며 restart 0, attention false다. 3회 연속 absence +
+  2초 final rescan 후에만 최대 3회/시간 내에서 detached resume하고 live process는
+  절대 signal하지 않는다. Exact watchdog PID와 command은 runtime/dashboard state가 source of truth다.
 - 2026-08-12 11:08 KST dashboard snapshot: `latpulldown_0003` end-to-end 완료 후
   supervisor는 `WAIT_RUNNING_SAPIENS2`; 다음 pose-ready sequence를 기다림
 - Sapiens durable 34/78 camera, current partial 포함 22,618/65,430 crop; PID 373049 alive,
@@ -125,6 +130,8 @@ Public-safe Sapiens command 형태:
 5. 죽어 있으면 live process absence와 child 부재를 다시 확인한 뒤 `.runtime/handoff_state.json`의
    exact frozen resume command를 사용한다. Sapiens와 SAM runner는 PASS camera/chunk를 검증 후 skip한다.
 6. supervisor가 죽었으면 local state의 exact supervisor command로 재실행한다. `--overwrite`는 사용하지 않는다.
+   단, `.runtime/supervisor_watchdog_state.json`의 watchdog이 정상이면 수동 launch하지 말고
+   자동 recovery 결과를 사용한다. `ATTENTION`/재시도 소진일 때만 수동 개입한다.
 7. resume 후 `python -m unittest discover -s tests -p 'test_*.py'`와 마지막 completed camera completion gate를 확인한다.
 8. handoff monitor가 없으면 `python tools/checkpoint_handoff_state.py ... --poll-seconds 30`을
    동일 root/sequence 설정으로 재실행하고 `updated_at_utc`가 전진하는지 확인한다.

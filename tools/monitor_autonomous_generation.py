@@ -29,6 +29,7 @@ PROCESS_MARKERS = {
         "sam_body_primary_target_runner.py",
     },
     "supervisor": {"run_autonomous_generation.py"},
+    "supervisor_watchdog": {"run_autonomous_supervisor_watchdog.py"},
     "quality_follower": {"run_quality_control_follower.py"},
     "handoff_monitor": {"checkpoint_handoff_state.py"},
     "deadline_sentinel": {"run_deadline_snapshot.py"},
@@ -448,6 +449,7 @@ def build_dashboard(
     now = (now or utc_now()).astimezone(timezone.utc)
     handoff = read_json(args.handoff_state)
     supervisor = read_json(args.supervisor_state)
+    supervisor_watchdog_state = read_json(args.supervisor_watchdog_state)
     deadline_state = read_json(args.deadline_state)
     quality_follower_state = read_json(args.quality_follower_state)
     freeze_readiness = dict(quality_follower_state.get("freeze_readiness", {}))
@@ -597,6 +599,11 @@ def build_dashboard(
         attention("SAPIENS_PROCESS_DEAD", "Sapiens output is incomplete but no matching live process exists.")
     if (incomplete_pose or incomplete_body) and not roots["supervisor"]:
         attention("SUPERVISOR_DEAD", "Autonomous generation is incomplete but the supervisor is not alive.")
+    if (incomplete_pose or incomplete_body) and not roots["supervisor_watchdog"]:
+        attention(
+            "SUPERVISOR_WATCHDOG_DEAD",
+            "Autonomous generation is incomplete but the supervisor recovery watchdog is not alive.",
+        )
     if (incomplete_pose or incomplete_body) and not roots["handoff_monitor"]:
         attention("HANDOFF_MONITOR_DEAD", "Persistent handoff checkpoint monitor is not alive.")
     if remaining_seconds > 0 and not roots["deadline_sentinel"]:
@@ -606,6 +613,37 @@ def build_dashboard(
             "QUALITY_FOLLOWER_DEAD",
             "Phase 11 quality output is incomplete but the CPU follower is not alive.",
         )
+    watchdog_updated = parse_datetime(supervisor_watchdog_state.get("updated_at_utc"))
+    if (
+        (incomplete_pose or incomplete_body)
+        and roots["supervisor_watchdog"]
+        and (
+            watchdog_updated is None
+            or (now - watchdog_updated).total_seconds() > args.state_stale_seconds
+        )
+    ):
+        age = (
+            "unknown"
+            if watchdog_updated is None
+            else human_duration((now - watchdog_updated).total_seconds())
+        )
+        attention(
+            "SUPERVISOR_WATCHDOG_STATE_STALE",
+            f"supervisor_watchdog_state.json age is {age}.",
+        )
+    if supervisor_watchdog_state.get("attention_required"):
+        watchdog_reasons = supervisor_watchdog_state.get("attention_reasons", [])
+        if watchdog_reasons:
+            for reason in watchdog_reasons:
+                attention(
+                    str(reason.get("code", "SUPERVISOR_WATCHDOG_ATTENTION")),
+                    str(reason.get("message", reason)),
+                )
+        else:
+            attention(
+                "SUPERVISOR_WATCHDOG_ATTENTION",
+                "Supervisor watchdog requested attention without a structured reason.",
+            )
     quality_follower_updated = parse_datetime(quality_follower_state.get("updated_at_utc"))
     if (
         incomplete_quality
@@ -659,6 +697,7 @@ def build_dashboard(
         "quality_follower",
         "handoff_monitor",
         "deadline_sentinel",
+        "supervisor_watchdog",
     ):
         if len(roots[group]) > 1:
             attention(
@@ -742,7 +781,14 @@ def build_dashboard(
     if int(body_source.get("count", 0)) >= total_sequences and export.get("freeze_eligible"):
         overall_status = "COMPLETE"
     elif any(
-        roots[group] for group in ("sapiens", "sam", "supervisor", "quality_follower")
+        roots[group]
+        for group in (
+            "sapiens",
+            "sam",
+            "supervisor",
+            "supervisor_watchdog",
+            "quality_follower",
+        )
     ):
         overall_status = "RUNNING"
     else:
@@ -849,6 +895,23 @@ def build_dashboard(
             "stage": stage,
             "active_sequence": active_sequence,
             "completed_sequence_rows": len(sequence_rows),
+        },
+        "supervisor_watchdog": {
+            "alive": bool(roots["supervisor_watchdog"]),
+            "pid": (
+                roots["supervisor_watchdog"][0]["pid"]
+                if roots["supervisor_watchdog"]
+                else None
+            ),
+            "status": supervisor_watchdog_state.get("status", "UNKNOWN"),
+            "updated_at": supervisor_watchdog_state.get("updated_at_utc"),
+            "last_event": supervisor_watchdog_state.get("last_event"),
+            "restart_count_in_window": int(
+                supervisor_watchdog_state.get("restart_count_in_window", 0) or 0
+            ),
+            "attention_reasons": supervisor_watchdog_state.get(
+                "attention_reasons", []
+            ),
         },
         "handoff_monitor": {
             "alive": bool(roots["handoff_monitor"]),
@@ -967,7 +1030,10 @@ def render_rich(state: dict[str, Any], console: Any | None = None) -> Any:
         f"VRAM {cell(gpu.get('memory_used_mib'))}/{cell(gpu.get('memory_total_mib'))} MiB | "
         f"Power {cell(gpu.get('power_draw_w'))} W | Temp {cell(gpu.get('temperature_c'))} C\n"
         f"Disk free {cell(disk.get('free_gib'))} GiB | Last progress {state['last_progress_timestamp']} | "
-        f"Last event {state['last_event']}"
+        f"Last event {state['last_event']}\n"
+        f"Supervisor PID {state['supervisor']['pid'] or '-'} | "
+        f"watchdog PID {state['supervisor_watchdog']['pid'] or '-'} "
+        f"({state['supervisor_watchdog']['status']})"
     )
     parts: list[Any] = [Panel(title), table, Panel(system, title="System")]
     if attention:
@@ -990,6 +1056,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--supervisor-state",
         type=Path,
         default=PROJECT_ROOT / "outputs/runtime/autonomous_generation/autonomous_generation_state.json",
+    )
+    parser.add_argument(
+        "--supervisor-watchdog-state",
+        type=Path,
+        default=PROJECT_ROOT / ".runtime" / "supervisor_watchdog_state.json",
     )
     parser.add_argument(
         "--deadline-state",

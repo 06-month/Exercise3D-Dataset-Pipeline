@@ -26,6 +26,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PROCESS_MARKERS = (
     "sapiens2_target_pipeline.py",
     "run_autonomous_generation.py",
+    "run_autonomous_supervisor_watchdog.py",
     "run_quality_control_follower.py",
     "run_sam_body4d_full.py",
     "benchmark_sam_body4d.py",
