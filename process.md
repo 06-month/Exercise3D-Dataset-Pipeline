@@ -265,6 +265,14 @@
 - 실제 one-shot은 현재 freeze-ready 11과 기존 checkpoint 11을 전수 검증한 뒤
   `WAITING_FOR_NEW_FREEZE_READY_SEQUENCE`, attempted build/exit code 없음, attention false였다.
   신규 export나 GPU process는 생성하지 않았다. 전체 105개 regression이 PASS했다.
+- Publication-safety PASS 후 code commit `711d4fd`를 push하고 persistent follower PID 1916854를
+  시작했다. 기존 11-sequence build를 다시 byte-verify한 뒤 child/export 없이 대기한다.
+- 새 process marker/state schema를 load하도록 exact argv/cwd/child 0을 확인한 CPU-only dashboard와
+  handoff monitor만 각각 PID 1917825/1917827로 교체했다. Sapiens/SAM/supervisor/watchdog/sentinel은
+  signal하거나 restart하지 않았다.
+- Persistent dashboard는 follower alive/RUNNING, ready 11, best verified checkpoint 11,
+  final deadline build 0을 분리해 표시한다. Follower attention은 없고 전체 attention은 기존
+  `DEADLINE_ETA_AT_RISK` 하나다.
 
 ### Source-of-truth 재검증
 

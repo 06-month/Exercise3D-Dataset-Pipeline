@@ -30,17 +30,16 @@
   resume command digest가 exact-match하며 restart 0, attention false다. 3회 연속 absence +
   2초 final rescan 후에만 최대 3회/시간 내에서 detached resume하고 live process는
   절대 signal하지 않는다. Exact watchdog PID와 command은 runtime/dashboard state가 source of truth다.
-- 2026-08-12 11:32 KST dashboard snapshot: `latpulldown_0003` end-to-end 완료 후
+- 2026-08-12 11:58 KST dashboard snapshot: `latpulldown_0003` end-to-end 완료 후
   supervisor는 `WAIT_RUNNING_SAPIENS2`; 다음 pose-ready sequence를 기다림
-- Sapiens durable 35/78 camera, current partial 포함 22,779/65,430 crop; PID 373049 alive,
+- Sapiens durable 35/78 camera, current partial 포함 23,291/65,430 crop; PID 373049 alive,
   current `benchpress_0001/cam3`
-- Sapiens recent-chunk throughput 0.219 crop/s, average 0.214 crop/s; projected ETA는
-  deadline 약 4시간 32분 후 risk
+- Sapiens recent-chunk throughput 0.228 crop/s; projected ETA는 deadline 약 2시간 15분 후 risk
 - SAM durable 33/78 camera, 21,441/65,595 frame, 11/26 full sequence; aggregate 0.585 frame/s;
   current SAM child는 없으며 Sapiens GPU utilization 100%
 - GPU: A100 80GB, combined snapshot 62,693 MiB/100%; observed OOM/retry 없음
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
-- handoff monitor PID 1883380: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
+- handoff monitor PID 1917827: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
   `updated_at_utc` 증가와 exact active/resume command/stage count 보존 확인 완료
 - deadline snapshot sentinel PID 1882473: 2026-08-14 13:00 KST에 completed sequence와
   `INCOMPLETE` 목록을 별도 versioned private build로 export; local state는
@@ -62,14 +61,20 @@
   Sentinel lifetime lock은 별도 process probe에서 held로 확인했고 exporter는 build ID별
   lock을 staging mutation 전에 취득한다.
 - dashboard monitor: `tools/monitor_autonomous_generation.py`; atomic state는
-  `.runtime/dashboard_state.json`. Quiet daemon PID 1900669이며 `--once`는 snapshot,
+  `.runtime/dashboard_state.json`. Quiet daemon PID 1917825이며 `--once`는 snapshot,
   기본은 Rich live, `--quiet`는 state-only daemon이다. Export section은 final deadline
   build progress와 contract-v2 best durable checkpoint progress를 별도로 보존한다.
 - Phase 11 CPU follower PID 1819560: complete body-fit/Mode-C dependency만 감지해 quality를
   atomic materialize/validate한다. Final exporter와 동일 sequence validation도 미리 수행해
-  `freeze-ready`를 출력한다. State는 `.runtime/quality_follower_state.json`; 2026-08-12 10:46 KST
+  `freeze-ready`를 출력한다. State는 `.runtime/quality_follower_state.json`; 2026-08-12 11:58 KST
   quality 11/26 REVIEW, freeze-ready 11/26 REVIEW, failure/reason 0, remaining 15는 dependency wait.
   Exact resume command/cwd도 같은 state에 보존하며 GPU work는 하지 않는다.
+- CPU-only predeadline checkpoint follower PID 1916854: `.runtime/quality_follower_state.json`의
+  freeze-ready가 largest byte-verified durable checkpoint의 strict superset일 때만 새 deterministic
+  immutable build를 export한다. 현재 ready 11 = best checkpoint 11이므로 child/export 없이
+  `WAITING_FOR_NEW_FREEZE_READY_SEQUENCE`, attention false다. State와 exact command는
+  `.runtime/predeadline_checkpoint_follower_state.json`; final deadline sentinel과 별도 build prefix/lock을
+  사용하고 deadline 도달 시 정상 종료한다.
 
 Public-safe Sapiens command 형태:
 
@@ -87,7 +92,7 @@ Public-safe Sapiens command 형태:
 ## Completed work
 
 - full selector: 65,595 frame, target 65,430, ambiguity 139, `NO_TARGET` 26, identity/integrity failure 0
-- Sapiens2 pose: complete 34 camera와 current partial 합계 22,106 accepted target crops;
+- Sapiens2 pose: complete 35 camera와 current partial 합계 23,291 accepted target crops;
   `latpulldown_0003`까지 11 sequence 3-view schema/finite PASS
 - Phase 7 final: 11 sequence schema PASS/body-fit eligible, NO_GO 0
 - concurrent Mode B 8-frame smoke: mesh/numeric/PTS schema PASS, combined peak 48,525 MiB
@@ -160,6 +165,10 @@ Public-safe Sapiens command 형태:
 11. `freeze_readiness.failures`는 completed quality의 export validation failure이다. 5분 유예 후
     누락 sidecar가 지속되거나 FAIL이면 dashboard `FREEZE_READINESS_FAILED`를 보고한다.
     Quality/acceptance threshold를 낮추지 말고 reason의 source stage만 recovery한다.
+12. deadline 전 checkpoint follower가 없으면 dashboard/state에서 exact process absence를 확인하고
+    `.runtime/predeadline_checkpoint_follower_state.json`의 command로 복구한다. 기존 exporter child나
+    동일 process가 있으면 launch하지 않는다. Ready 집합이 기존 checkpoint와 같을 때
+    `attempted_build_id=null`이어야 하며, deadline 후 follower 종료는 정상이다.
 
 Dashboard 사용:
 
@@ -196,9 +205,9 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Runtime estimates
 
-- 2026-08-12 11:32 KST snapshot: Sapiens recent-chunk rate 0.219 crop/s,
-  streaming ETA는 deadline 약 4시간 32분 후
-- deadline margin: Sapiens 전량 기준 약 -4.53 h; 대신 Mode B complete sequence와
+- 2026-08-12 11:58 KST snapshot: Sapiens recent-chunk rate 0.228 crop/s,
+  streaming ETA는 deadline 약 2시간 15분 후
+- deadline margin: Sapiens 전량 기준 약 -2.25 h; 대신 Mode B complete sequence와
   deadline snapshot을 내구적으로 확보
 - concurrent SAM Mode B aggregate 19,455 frame/33,159.28초 = 0.58671 frame/s;
   standalone expected 20.80 h projection은
@@ -208,8 +217,8 @@ tmux new-window -n exercise3d-dashboard \
 ## Git state
 
 - branch: `agent/phase-5-1-pushup-0003-recovery`
-- latest implementation commit: durable checkpoint dashboard `80f48ab`; predeadline checkpoint
-  manifest source commit `54a8d2c`; 현재 exact `HEAD`는
+- latest implementation commit: autonomous predeadline checkpoint follower `711d4fd`; durable
+  checkpoint dashboard `80f48ab`; predeadline checkpoint manifest source commit `54a8d2c`; exact `HEAD`는
   `git rev-parse HEAD`와 local state의 `git_commit`으로 확인
 - Draft PR: #1 (`https://github.com/06-month/Exercise3D-Dataset-Pipeline/pull/1`)
 - pushed: handoff/streaming supervisor와 문서 milestone remote 동기화 완료
@@ -217,4 +226,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-12 11:46 KST
+- 2026-08-12 11:58 KST

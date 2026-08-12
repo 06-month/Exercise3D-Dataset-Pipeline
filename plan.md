@@ -346,7 +346,7 @@
   actual tree↔global/sequence manifest exact-match, Git dirty/diff provenance 보존 후 atomic rename
 - streaming preflight: quality 완료 sequence는 exporter와 동일 cross-stage validation으로
   `freeze-ready` PASS/REVIEW를 미리 확정; 5분 지속 dependency 누락/FAIL은 dashboard attention
-- predeadline checkpoint follower: 기존 contract-v2 build를 byte/SHA로 전수 검증해 largest durable
+- predeadline checkpoint follower: `ACTIVE`; 기존 contract-v2 build를 byte/SHA로 전수 검증해 largest durable
   set을 정하고, freeze-ready가 그 집합의 strict superset일 때만 frozen order 기반 deterministic
   immutable build를 CPU-only export; 동일/축소/비-superset set은 재export하지 않음
 - deadline boundary: body-fit NPZ/metadata + Mode-C assessment terminal marker mtime을 UTC cutoff으로
