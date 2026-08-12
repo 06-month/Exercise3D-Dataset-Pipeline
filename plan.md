@@ -13,8 +13,8 @@
 - 이미 완료된 4개 pilot sequence output은 검증 후 재사용하고 재추론하지 않음
 - GPU scheduling: Sapiens2-5B는 계속 실행하고, pose-complete sequence의 Mode B를 겹쳐
   end-to-end 완결 sequence를 확보한다. 첫 full camera 병렬 peak 61,821 MiB와 completion PASS 확인
-- current projection: 2026-08-12 13:51 KST Sapiens current partial 포함 24,818/65,430 crop,
-  recent 0.221 crop/s, 전량 ETA 2026-08-14 16:47 KST; 약 -3.78 h deadline margin을
+- current projection: 2026-08-12 14:06 KST Sapiens current partial 포함 25,074/65,430 crop,
+  recent 0.227 crop/s, 전량 ETA 2026-08-14 15:26 KST; 약 -2.43 h deadline margin을
   end-to-end complete sequence 확보와
   명시적 INCOMPLETE provenance로 관리
 - SAM policy: Mode B default, Mode C는 실제 failure/occlusion escalation evidence가 있는 경우만 REVIEW
@@ -27,7 +27,9 @@
   later ready work를 진행하고 attempt state를 atomic checkpoint
 - SAM full 직전 8-frame Mode B numeric smoke에서 source PTS/mesh/MHR compact schema exact gate 요구
 - SAM camera durable PASS는 numeric schema/count와 함께 provenance length/source-index/seed,
-  abstention-vs-valid bbox, finite confidence와 strictly increasing PTS 계약을 모두 통과해야 함
+  abstention-vs-valid bbox, finite confidence와 strictly increasing PTS 계약을 모두 통과하고,
+  mesh/numeric 및 존재하는 focal/render object root의 유일한 real object directory `1`, recursive
+  extra payload 0, numeric `object_id==1`을 강제해야 함
 - deadline에 미완료된 sequence는 `INCOMPLETE_DEADLINE`로 명시하고 PASS로 위장하지 않음
 - Fit3D exhaustive tolerance/ablation은 final private dataset critical path를 방해하면 freeze 이후로 이동
 - persistent handoff: `HANDOFF.md` + ignored `.runtime/handoff_state.json` 30초 atomic checkpoint;

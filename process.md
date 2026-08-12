@@ -649,6 +649,22 @@
 - Implementation commit `11a91ca`를 push했다. Current inference/supervisor에는 signal/restart가 없고,
   다음 정상 SAM coordinator child가 current on-disk gate를 자동 load한다.
 
+### SAM single-target exact-tree gate
+
+- Camera completion은 `mesh_4d_individual/1`과 `mhr_numeric/1`의 expected count만 확인해, interrupted
+  legacy/all-person output에서 stale object `2` directory 또는 extra payload가 남아도 primary object
+  count가 맞으면 PASS할 수 있었다. 이는 downstream이 object `1`만 읽더라도 private working output의
+  identity 정책과 exact resume 판단을 약화한다.
+- Required mesh/numeric object root는 symlink가 아닌 directory `1` 하나만 허용한다. Optional
+  focal/rendered per-object root도 존재하면 같은 exact contract를 적용한다. Mesh/numeric recursive
+  payload count가 expected frames와 같아야 하고, 모든 compact numeric archive의 scalar `object_id`가
+  정확히 1이어야 한다.
+- Extra object directory/payload regression을 추가했다. 전체 150 tests, compile,
+  publication-safety가 PASS했고 마지막 완료 `benchpress_0001/cam3` 673-frame 실출력은 신규
+  exact-root/recursive/object-id checks까지 전부 PASS했다.
+- Implementation commit `d3fc911`를 push했다. Existing GPU/supervisor에는 signal/restart가 없고 다음
+  normal SAM coordinator child가 current gate를 자동 load한다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화
