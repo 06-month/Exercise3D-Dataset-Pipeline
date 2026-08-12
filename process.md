@@ -496,6 +496,22 @@
   dashboard state는 durable checkpoint event와 `WAIT_RUNNING_SAPIENS2` operational event를 분리해
   기록한다. Inference/SAM/supervisor/follower/sentinel에는 signal·restart·duplicate launch가 없었다.
 
+### Deadline snapshot premature-publication gate
+
+- Deadline sentinel/export 경로를 다시 감사해, 알려진 final build ID가 cutoff 전에 수동 materialize되면
+  기존 sentinel이 valid immutable build로 받아 조기 종료할 수 있는 시간 경계 gap을 확인했다. 이는
+  이후 deadline 전 완료 sequence를 snapshot에서 놓칠 수 있으므로 실제 correctness risk다.
+- Deadline cutoff가 있는 exporter는 현재 UTC가 cutoff보다 이르면 output root, build lock, staging을
+  전혀 생성하지 않고 exit 76 `DEADLINE_CUTOFF_NOT_REACHED`로 종료하도록 했다. 기존 checkpoint
+  follower build는 cutoff가 없어 영향받지 않는다.
+- Generic frozen-build verifier는 deadline manifest의 `created_at_utc >= deadline_cutoff_utc`를 강제하고,
+  sentinel wrapper는 manifest cutoff가 요청된 2026-08-14 04:00 UTC와 exact-match하는지도 검증한다.
+  Marker mtime·sequence universe/order·payload SHA 기존 gate는 그대로 유지한다.
+- Future-cutoff no-write, premature manifest, wrong expected cutoff, sentinel delegation regression을
+  추가했고 전체 130 tests가 PASS했다. 현재 deadline build는 아직 `NOT_STARTED`여서 충돌하는 final
+  build가 없으며, live sentinel PID 1882473은 중단하지 않았다. Deadline 시 exporter subprocess가
+  새 code를 load하므로 GPU/supervisor/sentinel restart 없이 hardening이 적용된다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화

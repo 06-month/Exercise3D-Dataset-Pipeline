@@ -100,12 +100,16 @@ def verified_manifest(
     path: Path,
     expected_build_id: str,
     expected_sequences: list[str] | None = None,
+    expected_deadline_cutoff: datetime | None = None,
 ) -> tuple[dict[str, Any] | None, list[str]]:
     manifest = read_manifest(path)
     if manifest is None:
         return None, []
     result = verify_frozen_build(
-        path.parent, expected_build_id, expected_sequences
+        path.parent,
+        expected_build_id,
+        expected_sequences,
+        expected_deadline_cutoff,
     )
     if not result["valid"]:
         return None, list(result["errors"])
@@ -185,7 +189,7 @@ def run_export_with_retries(
         process = subprocess.run(command, cwd=PROJECT_ROOT)
         last_exit_code = process.returncode
         manifest, integrity_errors = verified_manifest(
-            manifest_path, args.build_id, args.sequences
+            manifest_path, args.build_id, args.sequences, deadline
         )
         if manifest is not None or integrity_errors:
             return manifest, integrity_errors, last_exit_code, attempt
@@ -237,7 +241,7 @@ def main() -> int:
     while True:
         now = datetime.now(timezone.utc)
         manifest, integrity_errors = verified_manifest(
-            manifest_path, args.build_id, args.sequences
+            manifest_path, args.build_id, args.sequences, deadline
         )
         if integrity_errors:
             atomic_json(

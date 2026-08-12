@@ -190,6 +190,37 @@ class DeadlineSnapshotTest(unittest.TestCase):
             self.assertIsNone(manifest)
             self.assertTrue(errors)
 
+    def test_manifest_verification_binds_the_exact_deadline_cutoff(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "deadline-build"
+            root.mkdir()
+            path = root / "dataset_manifest.json"
+            atomic_json(path, {"build_id": "deadline-build"})
+            deadline = datetime(2026, 8, 14, 4, tzinfo=timezone.utc)
+            verified = {
+                "valid": True,
+                "errors": [],
+                "manifest": {"build_id": "deadline-build"},
+            }
+            with patch(
+                "tools.run_deadline_snapshot.verify_frozen_build",
+                return_value=verified,
+            ) as verifier:
+                manifest, errors = verified_manifest(
+                    path,
+                    "deadline-build",
+                    ["one"],
+                    deadline,
+                )
+            self.assertEqual(manifest, verified["manifest"])
+            self.assertEqual(errors, [])
+            verifier.assert_called_once_with(
+                root,
+                "deadline-build",
+                ["one"],
+                deadline,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

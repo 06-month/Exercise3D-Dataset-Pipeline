@@ -36,6 +36,10 @@ except ModuleNotFoundError:
 
 CAMERAS = ("cam1", "cam2", "cam3")
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEADLINE_BOUNDARY_POLICY = (
+    "terminal body-fit and Mode-C marker mtimes must not exceed cutoff; "
+    "post-cutoff sequences remain INCOMPLETE"
+)
 
 
 def utc_now() -> str:
@@ -244,6 +248,55 @@ def parse_utc_datetime(value: Any, label: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def deadline_publication_due(
+    cutoff: datetime | None, now: datetime
+) -> bool:
+    """Return whether a point-in-time build may be published yet."""
+    if now.tzinfo is None or (cutoff is not None and cutoff.tzinfo is None):
+        raise RuntimeError("deadline publication timestamps must be timezone-aware")
+    return cutoff is None or now.astimezone(timezone.utc) >= cutoff.astimezone(
+        timezone.utc
+    )
+
+
+def verify_deadline_manifest_timing(
+    manifest: dict[str, Any],
+    expected_deadline_cutoff: datetime | None = None,
+) -> tuple[datetime | None, list[str]]:
+    """Validate that a deadline build was created no earlier than its cutoff."""
+    errors: list[str] = []
+    cutoff_value = manifest.get("deadline_cutoff_utc")
+    manifest_cutoff: datetime | None = None
+    if cutoff_value is not None:
+        try:
+            manifest_cutoff = parse_utc_datetime(
+                cutoff_value, "manifest deadline cutoff"
+            )
+        except RuntimeError:
+            errors.append("deadline_cutoff_invalid")
+        if manifest.get("deadline_boundary_policy") != DEADLINE_BOUNDARY_POLICY:
+            errors.append("deadline_boundary_policy_invalid")
+    if expected_deadline_cutoff is not None:
+        if expected_deadline_cutoff.tzinfo is None:
+            raise RuntimeError("expected deadline cutoff must be timezone-aware")
+        expected = expected_deadline_cutoff.astimezone(timezone.utc)
+        if manifest_cutoff is None:
+            errors.append("expected_deadline_cutoff_missing")
+        elif manifest_cutoff != expected:
+            errors.append("expected_deadline_cutoff_mismatch")
+    if manifest_cutoff is not None:
+        try:
+            created_at = parse_utc_datetime(
+                manifest.get("created_at_utc"), "deadline build creation time"
+            )
+        except RuntimeError:
+            errors.append("deadline_build_created_at_invalid")
+        else:
+            if created_at < manifest_cutoff:
+                errors.append("deadline_build_created_before_cutoff")
+    return manifest_cutoff, errors
+
+
 def effective_deadline_cutoff(args: argparse.Namespace) -> datetime | None:
     if args.deadline_cutoff_utc:
         return parse_utc_datetime(args.deadline_cutoff_utc, "deadline cutoff")
@@ -440,6 +493,7 @@ def verify_frozen_build(
     build_root: Path,
     expected_build_id: str | None = None,
     expected_sequences: list[str] | None = None,
+    expected_deadline_cutoff: datetime | None = None,
 ) -> dict[str, Any]:
     """Verify a published/staged build without mutating it."""
     if build_root.is_symlink():
@@ -474,20 +528,10 @@ def verify_frozen_build(
         errors.append("source_rgb_policy_invalid")
     if manifest.get("source_payload_modified") is not False:
         errors.append("source_mutation_policy_invalid")
-    cutoff_value = manifest.get("deadline_cutoff_utc")
-    manifest_cutoff: datetime | None = None
-    if cutoff_value is not None:
-        try:
-            manifest_cutoff = parse_utc_datetime(
-                cutoff_value, "manifest deadline cutoff"
-            )
-        except RuntimeError:
-            errors.append("deadline_cutoff_invalid")
-        if manifest.get("deadline_boundary_policy") != (
-            "terminal body-fit and Mode-C marker mtimes must not exceed cutoff; "
-            "post-cutoff sequences remain INCOMPLETE"
-        ):
-            errors.append("deadline_boundary_policy_invalid")
+    manifest_cutoff, deadline_timing_errors = verify_deadline_manifest_timing(
+        manifest, expected_deadline_cutoff
+    )
+    errors.extend(deadline_timing_errors)
     commit = manifest.get("git_commit")
     if commit is not None and not re.fullmatch(r"[0-9a-f]{40,64}", str(commit)):
         errors.append("git_commit_invalid")
@@ -1045,6 +1089,21 @@ def main() -> int:
         validate_path_component(sequence, "sequence id")
     output_root = args.output_root.resolve()
     deadline_cutoff = effective_deadline_cutoff(args)
+    now = datetime.now(timezone.utc)
+    if not deadline_publication_due(deadline_cutoff, now):
+        print(
+            json.dumps(
+                {
+                    "build_id": args.build_id,
+                    "status": "DEADLINE_CUTOFF_NOT_REACHED",
+                    "deadline_cutoff_utc": deadline_cutoff.isoformat(),
+                    "current_time_utc": now.isoformat(),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+        return 76
     output_root.mkdir(parents=True, exist_ok=True)
     # Retain this descriptor for all staging/copy/verify/publish operations.
     # Concurrent callers for the same build ID exit before touching staging.
@@ -1272,10 +1331,7 @@ def main() -> int:
             deadline_cutoff.isoformat() if deadline_cutoff is not None else None
         ),
         "deadline_boundary_policy": (
-            "terminal body-fit and Mode-C marker mtimes must not exceed cutoff; "
-            "post-cutoff sequences remain INCOMPLETE"
-            if deadline_cutoff is not None
-            else None
+            DEADLINE_BOUNDARY_POLICY if deadline_cutoff is not None else None
         ),
         **git_provenance(),
         "private_dataset": True,

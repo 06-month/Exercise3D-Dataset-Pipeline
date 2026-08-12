@@ -24,6 +24,10 @@ Build provenance는 Git commit 뿐 아니라 worktree dirty flag, status hash, t
 diff 내용이나 private path는 manifest에 노출하지 않는다.
 
 Deadline build의 sequence membership은 export 완료 시각이 아니라 고정 cutoff으로 결정한다.
+Exporter는 wall clock이 cutoff에 도달하기 전에는 output root/lock/staging을 생성하지 않고
+`DEADLINE_CUTOFF_NOT_REACHED`로 종료한다. Published deadline manifest는 `created_at_utc >= cutoff`이고
+sentinel이 요청한 exact cutoff와 일치해야 verifier를 통과한다. 따라서 알려진 final build ID를
+deadline 전에 실수로 materialize해 이후 완료분을 가로막을 수 없다.
 `body_fit.npz`, body metadata, Mode-C assessment 세 terminal marker가 모두 존재하고 mtime이
 cutoff 이하인 sequence만 validation/export 후보다. Deadline 후 완료된 sequence는 exporter
 retry 중에 새로 보이더라도 `INCOMPLETE`로 유지한다. Quality와 manifest는 pre-deadline

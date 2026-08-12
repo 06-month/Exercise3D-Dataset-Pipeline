@@ -30,12 +30,12 @@
   resume command digest가 exact-match하며 restart 0, attention false다. 3회 연속 absence +
   2초 final rescan 후에만 최대 3회/시간 내에서 detached resume하고 live process는
   절대 signal하지 않는다. Exact watchdog PID와 command은 runtime/dashboard state가 source of truth다.
-- 2026-08-12 13:09 KST dashboard snapshot: `benchpress_0001` Mode B/body fit/Mode C/quality/freeze-ready와
+- 2026-08-12 13:19 KST dashboard snapshot: `benchpress_0001` Mode B/body fit/Mode C/quality/freeze-ready와
   12-sequence immutable checkpoint가 완료됐고 supervisor는 다음 3-view pose dependency를
   `WAIT_RUNNING_SAPIENS2`로 대기 중
-- Sapiens durable 37/78 camera, current partial 포함 24,135/65,430 crop; PID 373049 alive,
+- Sapiens durable 37/78 camera, current partial 포함 24,391/65,430 crop; PID 373049 alive,
   current `benchpress_0002/cam2`
-- Sapiens recent-completed-camera throughput 0.218 crop/s; projected ETA는 deadline 약 4시간 47분 후 risk.
+- Sapiens recent-completed-camera throughput 0.216 crop/s; projected ETA는 deadline 약 5시간 04분 후 risk.
   이전 snapshot들보다 악화돼 `DEADLINE_ETA_WORSENED` warning을 기록했지만
   OOM/retry/stall은 없음
 - SAM durable 36/78 camera, 23,460/65,595 frame, 12/26 full sequence; aggregate 0.584 frame/s.
@@ -58,7 +58,9 @@
   네 번째 최종 시도에는 truthful INCOMPLETE snapshot을 반드시 publish한다.
   Freeze contract v2는 requested 26-sequence list/order hash와 status CSV를 exact-match하고,
   global provenance 3 files + complete sequence당 required 33-file set을 강제한다. Sentinel은
-  고정된 26-sequence list를 verifier에 별도로 전달하는 새 code로 교체했고,
+  고정된 26-sequence list와 exact cutoff를 verifier에 별도로 전달한다. Exporter는 cutoff 전에
+  output root/lock/staging을 만들지 않으며 manifest `created_at_utc >= cutoff`도 검증한다. 현재 live
+  sentinel을 재시작하지 않아도 deadline export subprocess가 이 code를 load한다.
   GPU inference/supervisor는 건드리지 않았다.
 - deadline sentinel watchdog PID 1882820: live/persisted command digest exact-match,
   restart/launch 0, attention false. State는 `.runtime/deadline_sentinel_watchdog_state.json`.
@@ -251,11 +253,11 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Runtime estimates
 
-- 2026-08-12 13:09 KST snapshot: Sapiens recent-completed-camera rate 0.218 crop/s,
-  streaming ETA는 deadline 약 4시간 47분 후. Downstream overhead를 제외한 sequence schedule
+- 2026-08-12 13:19 KST snapshot: Sapiens recent-completed-camera rate 0.216 crop/s,
+  streaming ETA는 deadline 약 5시간 04분 후. Downstream overhead를 제외한 sequence schedule
   upper bound와 empirical p90-adjusted estimate는 deadline까지 24/26이며 `deadlift_0002`가
   첫 projected late sequence
-- deadline margin: Sapiens 전량 기준 약 -4.79 h; 대신 Mode B complete sequence와
+- deadline margin: Sapiens 전량 기준 약 -5.07 h; 대신 Mode B complete sequence와
   deadline snapshot을 내구적으로 확보
 - concurrent SAM Mode B aggregate 19,455 frame/33,159.28초 = 0.58671 frame/s;
   standalone expected 20.80 h projection은

@@ -3,21 +3,25 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from argparse import Namespace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
 
 from tools.export_private_dataset import (
+    DEADLINE_BOUNDARY_POLICY,
     acquire_build_lock,
     copy_exact,
     deadline_eligibility,
+    deadline_publication_due,
     finite_nan_contract,
     git_provenance,
+    main as export_main,
     prune_staging_tree,
     publish_staged_build,
     required_global_manifest_paths,
@@ -30,10 +34,126 @@ from tools.export_private_dataset import (
     validate_path_component,
     verify_frozen_build,
     verify_deadline_marker_mtimes,
+    verify_deadline_manifest_timing,
 )
 
 
 class PrivateDatasetExportTest(unittest.TestCase):
+    def test_deadline_publication_gate_refuses_premature_build_without_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "freeze"
+            argv = [
+                "export_private_dataset.py",
+                "--dataset-root",
+                str(root / "dataset"),
+                "--selection-root",
+                str(root / "selection"),
+                "--pose-root",
+                str(root / "pose"),
+                "--triangulation-root",
+                str(root / "triangulation"),
+                "--sam-prior-root",
+                str(root / "sam_prior"),
+                "--sam-mode-c-review-root",
+                str(root / "mode_c"),
+                "--body-fit-root",
+                str(root / "body"),
+                "--quality-root",
+                str(root / "quality"),
+                "--output-root",
+                str(output),
+                "--build-id",
+                "deadline-build",
+                "--sequences",
+                "one",
+                "--deadline-cutoff-utc",
+                "9999-12-31T23:59:59+00:00",
+            ]
+            with patch.object(sys, "argv", argv), patch("builtins.print") as printed:
+                result = export_main()
+            self.assertEqual(result, 76)
+            self.assertFalse(output.exists())
+            payload = json.loads(printed.call_args.args[0])
+            self.assertEqual(payload["status"], "DEADLINE_CUTOFF_NOT_REACHED")
+
+    def test_deadline_manifest_timing_binds_creation_and_expected_cutoff(self) -> None:
+        cutoff = datetime(2026, 8, 14, 4, tzinfo=timezone.utc)
+        valid = {
+            "deadline_cutoff_utc": cutoff.isoformat(),
+            "deadline_boundary_policy": DEADLINE_BOUNDARY_POLICY,
+            "created_at_utc": "2026-08-14T04:00:01+00:00",
+        }
+        parsed, errors = verify_deadline_manifest_timing(valid, cutoff)
+        self.assertEqual(parsed, cutoff)
+        self.assertEqual(errors, [])
+
+        premature = {**valid, "created_at_utc": "2026-08-14T03:59:59+00:00"}
+        _, errors = verify_deadline_manifest_timing(premature, cutoff)
+        self.assertIn("deadline_build_created_before_cutoff", errors)
+
+        _, errors = verify_deadline_manifest_timing(
+            valid, cutoff + timedelta(seconds=1)
+        )
+        self.assertIn("expected_deadline_cutoff_mismatch", errors)
+
+        self.assertFalse(
+            deadline_publication_due(
+                cutoff, datetime(2026, 8, 14, 3, 59, 59, tzinfo=timezone.utc)
+            )
+        )
+        self.assertTrue(deadline_publication_due(cutoff, cutoff))
+
+    def test_frozen_build_verifier_rejects_premature_deadline_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.build_contract_v2(Path(temporary))
+            cutoff = datetime(2026, 8, 14, 4, tzinfo=timezone.utc)
+            sequence_manifest_path = (
+                root / "sequences" / "complete" / "sequence_manifest.json"
+            )
+            sequence_manifest = json.loads(sequence_manifest_path.read_text())
+            sequence_manifest["validation"] = {
+                "deadline_terminal_marker_mtimes": {
+                    "body/body_fit.npz": "2026-08-14T03:59:57+00:00",
+                    "body/metadata.json": "2026-08-14T03:59:58+00:00",
+                    "body/mode_c_escalation.json": "2026-08-14T03:59:59+00:00",
+                }
+            }
+            sequence_manifest_path.write_text(
+                json.dumps(sequence_manifest), encoding="utf-8"
+            )
+            manifest_path = root / "dataset_manifest.json"
+            manifest = json.loads(manifest_path.read_text())
+            manifest.update(
+                {
+                    "deadline_cutoff_utc": cutoff.isoformat(),
+                    "deadline_boundary_policy": DEADLINE_BOUNDARY_POLICY,
+                    "created_at_utc": "2026-08-14T03:59:59+00:00",
+                }
+            )
+            sequence_manifest_relative = (
+                "sequences/complete/sequence_manifest.json"
+            )
+            for record in manifest["files"]:
+                if record["path"] == sequence_manifest_relative:
+                    record["bytes"] = sequence_manifest_path.stat().st_size
+                    record["sha256"] = sha256(sequence_manifest_path)
+            manifest["total_payload_bytes"] = sum(
+                record["bytes"] for record in manifest["files"]
+            )
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            result = verify_frozen_build(
+                root,
+                "contract-v2",
+                ["complete", "pending"],
+                cutoff,
+            )
+            self.assertFalse(result["valid"])
+            self.assertIn(
+                "deadline_build_created_before_cutoff", result["errors"]
+            )
+
     def test_build_lock_is_scoped_by_build_id(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

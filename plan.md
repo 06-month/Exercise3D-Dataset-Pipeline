@@ -40,7 +40,9 @@
 - deadline sentinel: 2026-08-14 13:00 KST에 별도 immutable build ID로 private snapshot/export를
   실행하고 PASS/REVIEW/FAIL/INCOMPLETE를 고정한 뒤 generation은 중단 없이 계속
 - deadline build는 hidden resumable staging root에서 만들고 manifest-listed file byte/SHA와 status
-  count/privacy flag를 검증한 뒤 directory rename으로 publish; existing final build는 검증 후 reuse만 허용
+  count/privacy flag를 검증한 뒤 directory rename으로 publish; cutoff 전에는 output mutation을 거부하고
+  manifest creation time이 cutoff 이상이며 sentinel exact cutoff와 일치해야 함; existing final build는
+  검증 후 reuse만 허용
 - first end-to-end gate: `barbellrow_0000` Mode B 1,770/1,770, body fit 590×26,
   export checksum/schema PASS; camera/displacement uncertainty를 숨기지 않고 sequence REVIEW 유지
 - second end-to-end gate: `squat_0001` Mode B 3,801/3,801, body fit 1,267×26,
