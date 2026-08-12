@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 from datetime import datetime, timezone
@@ -52,6 +53,23 @@ BONES = (
     ("left_hip", "right_hip", "hip_width"),
     ("pelvis_center", "shoulder_center", "torso"),
 )
+REQUIRED_BODY_FIT_FIELDS = {
+    "frame_index",
+    "timestamp_pts_seconds",
+    "joint_names",
+    "keypoints_3d",
+    "valid_mask",
+    "confidence",
+    "evidence_type",
+    "triangulated_valid",
+    "triangulated_quality",
+    "shape_params_consensus",
+    "scale_params_consensus",
+    "body_pose_params_consensus",
+    "body_pose_prior_view_count",
+    "s0_names",
+    "s0",
+}
 
 
 def utc_now() -> str:
@@ -111,6 +129,146 @@ def atomic_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         writer.writeheader()
         writer.writerows(rows)
     os.replace(temporary, path)
+
+
+def body_fit_dependency_signature(args: argparse.Namespace, sequence: str) -> str:
+    """Bind a body fit to its geometry, SAM priors, config, and parameters."""
+    triangulation = args.triangulation_root.resolve() / sequence
+    files: list[tuple[str, Path]] = [
+        ("triangulation/canonical_3d.npz", triangulation / "canonical_3d.npz"),
+        ("triangulation/metadata.json", triangulation / "metadata.json"),
+        ("config/phase9_body_fit.json", args.gate_config.resolve()),
+    ]
+    for camera in CAMERAS:
+        prior = args.sam_prior_root.resolve() / sequence / camera
+        files.extend(
+            (
+                (f"sam/{camera}/sam_body_prior.npz", prior / "sam_body_prior.npz"),
+                (f"sam/{camera}/metadata.json", prior / "metadata.json"),
+            )
+        )
+    inventory: list[tuple[str, int, int, int]] = []
+    for label, path in files:
+        if not path.is_file() or path.is_symlink():
+            raise RuntimeError(f"body-fit dependency is missing or symlinked: {label}")
+        stat = path.stat()
+        inventory.append((label, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns))
+    payload = {
+        "files": inventory,
+        "parameters": {
+            "max_time_gap_seconds": args.max_time_gap_seconds,
+            "minimum_alignment_joints": args.minimum_alignment_joints,
+            "geometry_weight": args.geometry_weight,
+            "sam_weight_per_view": args.sam_weight_per_view,
+            "temporal_weight": args.temporal_weight,
+        },
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def validate_existing_body_fit(
+    output_dir: Path,
+    sequence: str,
+    timestamps: np.ndarray,
+    names: list[str],
+    triangulated_valid: np.ndarray,
+    triangulated_quality: np.ndarray,
+    gate_config: dict[str, Any],
+    dependency_signature: str | None,
+) -> tuple[bool, dict[str, Any] | None]:
+    """Validate the body-fit schema/gate and optional exact source binding."""
+    archive_path = output_dir / "body_fit.npz"
+    metadata_path = output_dir / "metadata.json"
+    frames_path = output_dir / "frames.csv"
+    if not archive_path.is_file() or not metadata_path.is_file() or not frames_path.is_file():
+        return False, None
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        qa = metadata["qa"]
+        if (
+            metadata.get("stage") != "SEQUENCE_LEVEL_CANONICAL_BODY_FIT"
+            or metadata.get("sequence") != sequence
+            or (
+                dependency_signature is not None
+                and metadata.get("source_dependency_signature") != dependency_signature
+            )
+            or qa.get("status") not in {"PASS", "REVIEW_BODY_FIT_QUALITY"}
+        ):
+            return False, None
+        with np.load(archive_path, allow_pickle=False) as payload:
+            if not REQUIRED_BODY_FIT_FIELDS <= set(payload.files):
+                return False, None
+            frame_count = len(timestamps)
+            joint_count = len(names)
+            valid = payload["valid_mask"].astype(np.bool_)
+            points = payload["keypoints_3d"].astype(np.float32)
+            confidence = payload["confidence"].astype(np.float32)
+            evidence = payload["evidence_type"].astype(np.uint8)
+            if (
+                points.shape != (frame_count, joint_count, 3)
+                or valid.shape != (frame_count, joint_count)
+                or confidence.shape != valid.shape
+                or evidence.shape != valid.shape
+                or not np.array_equal(
+                    payload["frame_index"].astype(np.int32),
+                    np.arange(frame_count, dtype=np.int32),
+                )
+                or not np.array_equal(
+                    payload["timestamp_pts_seconds"].astype(np.float64), timestamps
+                )
+                or list(payload["joint_names"].astype(str)) != names
+                or not np.array_equal(
+                    payload["triangulated_valid"].astype(np.bool_),
+                    triangulated_valid,
+                )
+                or not np.array_equal(
+                    payload["triangulated_quality"].astype(np.float32),
+                    triangulated_quality.astype(np.float32),
+                    equal_nan=True,
+                )
+                or not np.array_equal(valid, evidence > 0)
+                or np.any(evidence > 3)
+                or not np.isfinite(points[valid]).all()
+                or not np.isnan(points[~valid]).all()
+                or not np.isfinite(confidence).all()
+                or np.any((confidence < 0) | (confidence > 1))
+                or not np.isfinite(payload["shape_params_consensus"]).all()
+                or not np.isfinite(payload["scale_params_consensus"]).all()
+            ):
+                return False, None
+            expected_counts = {
+                "geometry_plus_prior_count": int((evidence == 2).sum()),
+                "geometry_only_count": int((evidence == 1).sum()),
+                "prior_only_count": int((evidence == 3).sum()),
+                "missing_count": int((evidence == 0).sum()),
+            }
+        recomputed_status, review_reasons, fail_reasons = evaluate_fit_gate(
+            qa, gate_config
+        )
+        if (
+            int(qa.get("frame_count", -1)) != len(timestamps)
+            or int(qa.get("joint_count", -1)) != len(names)
+            or not bool(qa.get("finite_valid_points"))
+            or not bool(qa.get("invalid_points_are_nan"))
+            or not np.isclose(float(qa.get("final_valid_joint_fraction", -1)), valid.mean())
+            or any(int(qa.get(key, -1)) != value for key, value in expected_counts.items())
+            or qa.get("status") != recomputed_status
+            or list(qa.get("review_reasons", [])) != review_reasons
+            or list(qa.get("fail_reasons", [])) != fail_reasons
+        ):
+            return False, None
+        with frames_path.open(newline="", encoding="utf-8") as handle:
+            frame_rows = list(csv.DictReader(handle))
+        if len(frame_rows) != len(timestamps) or any(
+            int(row.get("frame_index", -1)) != index
+            for index, row in enumerate(frame_rows)
+        ):
+            return False, None
+        return True, qa
+    except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError):
+        return False, None
 
 
 def percentile(values: np.ndarray, q: float) -> float | None:
@@ -323,6 +481,7 @@ def load_sam_camera(path: Path, expected_names: list[str]) -> dict[str, np.ndarr
 
 def fit_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]:
     gate_config = json.loads(args.gate_config.resolve().read_text(encoding="utf-8"))
+    dependency_signature = body_fit_dependency_signature(args, sequence)
     triangulation_dir = args.triangulation_root.resolve() / sequence
     with np.load(triangulation_dir / "canonical_3d.npz", allow_pickle=False) as payload:
         timestamps = payload["timestamp_pts_seconds"].astype(np.float64)
@@ -333,6 +492,19 @@ def fit_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]:
     triangulation_metadata = json.loads(
         (triangulation_dir / "metadata.json").read_text(encoding="utf-8")
     )
+    output_dir = args.output_root.resolve() / sequence
+    existing_valid, existing_qa = validate_existing_body_fit(
+        output_dir,
+        sequence,
+        timestamps,
+        names,
+        triangulated_valid,
+        triangulated_quality,
+        gate_config,
+        dependency_signature,
+    )
+    if existing_valid and existing_qa is not None:
+        return {**existing_qa, "resume_skipped": True}
     priors = {
         camera: load_sam_camera(
             args.sam_prior_root.resolve() / sequence / camera, names
@@ -473,7 +645,6 @@ def fit_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]:
     reference_length = anthropometry["reference_length_sequence_gauge"]
     normalized_observation = observation_residual / max(reference_length, 1e-12)
 
-    output_dir = args.output_root.resolve() / sequence
     atomic_npz(
         output_dir / "body_fit.npz",
         frame_index=np.arange(frame_count, dtype=np.int32),
@@ -573,6 +744,7 @@ def fit_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]:
             "quality_gate_config": gate_config,
         },
         "source_triangulation_metadata": triangulation_metadata,
+        "source_dependency_signature": dependency_signature,
         "qa": qa,
     }
     atomic_text(
@@ -591,7 +763,7 @@ def fit_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]:
         for frame in range(frame_count)
     ]
     atomic_csv(output_dir / "frames.csv", rows)
-    return qa
+    return {**qa, "resume_skipped": False}
 
 
 def main() -> int:
