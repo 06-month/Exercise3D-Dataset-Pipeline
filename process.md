@@ -309,6 +309,10 @@
 - 실제 snapshot에서는 upper/adjusted 모두 deadline 25/26, 첫 late `squat_0003`이었다. Count는 같지만
   adjusted all-sequence terminal은 upper보다 약 23분 늦어져 risk 해석을 더 보수적으로 만든다.
 - Provenance timing, p90 schedule, dashboard available-forecast integration을 포함한 전체 113 tests가 PASS했다.
+- Publication-safety PASS 후 commit `7ffeb9a`를 push하고 exact argv/cwd/child 0인 CPU-only dashboard만
+  PID 1959115로 교체했다. Persistent state는 sample 11, p90 1,399.83초, upper/adjusted 25/26을
+  표시한다. SAM concurrency로 Sapiens ETA가 직전보다 57분 악화돼 warning이 추가됐지만 GPU 100%,
+  62,823 MiB, OOM/retry/stall 0이므로 frozen concurrent policy를 변경하지 않았다.
 
 ### Predeadline checkpoint follower recovery watchdog
 

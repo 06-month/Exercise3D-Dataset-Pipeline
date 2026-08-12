@@ -30,14 +30,16 @@
   resume command digest가 exact-match하며 restart 0, attention false다. 3회 연속 absence +
   2초 final rescan 후에만 최대 3회/시간 내에서 detached resume하고 live process는
   절대 signal하지 않는다. Exact watchdog PID와 command은 runtime/dashboard state가 source of truth다.
-- 2026-08-12 12:15 KST dashboard snapshot: `benchpress_0001` pose 3-view 완료 후
+- 2026-08-12 12:24 KST dashboard snapshot: `benchpress_0001` pose 3-view 완료 후
   supervisor는 `STREAM_SEQUENCE_PIPELINE`; 해당 sequence Mode B를 자동 실행 중
-- Sapiens durable 36/78 camera, current partial 포함 23,452/65,430 crop; PID 373049 alive,
+- Sapiens durable 36/78 camera, current partial 포함 23,708/65,430 crop; PID 373049 alive,
   current `benchpress_0002/cam1`
-- Sapiens recent-chunk throughput 0.234 crop/s; projected ETA는 deadline 약 1시간 5분 후 risk
+- Sapiens recent-chunk throughput 0.228 crop/s; projected ETA는 deadline 약 2시간 11분 후 risk.
+  SAM concurrency 전 snapshot보다 57분 악화돼 `DEADLINE_ETA_WORSENED` warning을 기록했지만
+  OOM/retry/stall은 없음
 - SAM durable 33/78 camera, 21,441/65,595 frame, 11/26 full sequence; aggregate 0.585 frame/s;
-  PID 1930239가 `benchpress_0001/cam1` Mode B 실행 중이며 durable numeric 162 frame까지 진행
-- GPU: A100 80GB, current combined snapshot 45,224 MiB/100%; observed OOM/retry 없음
+  PID 1930239가 `benchpress_0001/cam1` Mode B 실행 중이며 durable numeric 576 frame까지 진행
+- GPU: A100 80GB, current combined snapshot 62,823 MiB/100%; observed OOM/retry 없음
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
 - handoff monitor PID 1945203: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
   `updated_at_utc` 증가와 exact active/resume command/stage count 보존 확인 완료
@@ -61,11 +63,13 @@
   Sentinel lifetime lock은 별도 process probe에서 held로 확인했고 exporter는 build ID별
   lock을 staging mutation 전에 취득한다.
 - dashboard monitor: `tools/monitor_autonomous_generation.py`; atomic state는
-  `.runtime/dashboard_state.json`. Quiet daemon PID 1945200이며 `--once`는 snapshot,
+  `.runtime/dashboard_state.json`. Quiet daemon PID 1959115이며 `--once`는 snapshot,
   기본은 Rich live, `--quiet`는 state-only daemon이다. Export section은 final deadline
   build progress와 contract-v2 best durable checkpoint progress를 별도로 보존한다. Selector
   exact workload와 measured rate를 사용한 overhead-free deadline upper bound는 현재 25/26이며,
-  첫 late sequence는 `squat_0003`이다.
+  첫 late sequence는 `squat_0003`이다. 완료 11 sequence의 post-SAM terminal latency p90
+  1,399.83초를 적용한 empirical schedule도 25/26이며, upper/adjusted all-sequence terminal은
+  각각 2026-08-14 17:00/17:24 KST projection이다.
 - Phase 11 CPU follower PID 1819560: complete body-fit/Mode-C dependency만 감지해 quality를
   atomic materialize/validate한다. Final exporter와 동일 sequence validation도 미리 수행해
   `freeze-ready`를 출력한다. State는 `.runtime/quality_follower_state.json`; 2026-08-12 12:08 KST
@@ -98,7 +102,7 @@ Public-safe Sapiens command 형태:
 ## Completed work
 
 - full selector: 65,595 frame, target 65,430, ambiguity 139, `NO_TARGET` 26, identity/integrity failure 0
-- Sapiens2 pose: complete 36 camera와 current partial 합계 23,452 accepted target crops;
+- Sapiens2 pose: complete 36 camera와 current partial 합계 23,708 accepted target crops;
   `latpulldown_0003`까지 11 sequence 3-view schema/finite PASS
 - Phase 7 final: 11 sequence schema PASS/body-fit eligible, NO_GO 0
 - concurrent Mode B 8-frame smoke: mesh/numeric/PTS schema PASS, combined peak 48,525 MiB
@@ -138,7 +142,7 @@ Public-safe Sapiens command 형태:
 
 ## Remaining work
 
-- Sapiens2: 42/78 camera, current partial 포함 41,978 target crops
+- Sapiens2: 42/78 camera, current partial 포함 41,722 target crops
 - Phase 7 이후: `latpulldown_0003` 및 이후 pose-complete sequence
 - SAM full: 33/78 camera PASS, full-complete sequence 11/26; 다음 `benchpress_0001` pose dependency 대기
 - critical path: pose-complete sequence → Phase 7 gate → Mode B → compact prior → body fit → Mode C candidate QA → export
@@ -226,7 +230,8 @@ tmux new-window -n exercise3d-dashboard \
 ## Git state
 
 - branch: `agent/phase-5-1-pushup-0003-recovery`
-- latest implementation commit: checkpoint follower recovery watchdog `16fd41f`; deadline freeze
+- latest implementation commit: empirical downstream deadline forecast `7ffeb9a`; checkpoint follower
+  recovery watchdog `16fd41f`; deadline freeze
   coverage forecast `8b55df7`; autonomous
   predeadline checkpoint follower `711d4fd`; durable
   checkpoint dashboard `80f48ab`; predeadline checkpoint manifest source commit `54a8d2c`; exact `HEAD`는
@@ -237,4 +242,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-12 12:15 KST
+- 2026-08-12 12:24 KST
