@@ -25,22 +25,22 @@
 - autonomous supervisor는 2026-08-12 08:45 KST 이후 사라진 것을 live process와
   stale state로 확인한 뒤, 중복/child 부재를 재확인하고 exact resumable command로 09:44 KST 복구했다.
   현재 exact PID/stage는 dashboard/handoff state가 source of truth다.
-- CPU-only supervisor watchdog은 `.runtime/supervisor_watchdog_state.json`에 exact command
+- CPU-only supervisor watchdog PID 1864229는 `.runtime/supervisor_watchdog_state.json`에 exact command
   digest/restart history/attention을 atomic 저장한다. 현재 supervisor PID 1701200과 persisted
   resume command digest가 exact-match하며 restart 0, attention false다. 3회 연속 absence +
   2초 final rescan 후에만 최대 3회/시간 내에서 detached resume하고 live process는
   절대 signal하지 않는다. Exact watchdog PID와 command은 runtime/dashboard state가 source of truth다.
-- 2026-08-12 11:08 KST dashboard snapshot: `latpulldown_0003` end-to-end 완료 후
+- 2026-08-12 11:19 KST dashboard snapshot: `latpulldown_0003` end-to-end 완료 후
   supervisor는 `WAIT_RUNNING_SAPIENS2`; 다음 pose-ready sequence를 기다림
-- Sapiens durable 34/78 camera, current partial 포함 22,618/65,430 crop; PID 373049 alive,
-  current `benchpress_0001/cam2`
-- Sapiens recent-chunk throughput 0.218 crop/s, average 0.216 crop/s; projected ETA는
-  deadline 약 4시간 45분 후 risk
+- Sapiens durable 35/78 camera, current partial 포함 22,779/65,430 crop; PID 373049 alive,
+  current `benchpress_0001/cam3`
+- Sapiens recent-chunk throughput 0.219 crop/s, average 0.217 crop/s; projected ETA는
+  deadline 약 4시간 20분 후 risk
 - SAM durable 33/78 camera, 21,441/65,595 frame, 11/26 full sequence; aggregate 0.585 frame/s;
   current SAM child는 없으며 Sapiens GPU utilization 100%
 - GPU: A100 80GB, combined snapshot 62,693 MiB/100%; observed OOM/retry 없음
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
-- handoff monitor PID 608232: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
+- handoff monitor PID 1866064: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
   `updated_at_utc` 증가와 exact active/resume command/stage count 보존 확인 완료
 - deadline snapshot sentinel PID 1846229: 2026-08-14 13:00 KST에 completed sequence와
   `INCOMPLETE` 목록을 별도 versioned private build로 export; local state는
@@ -58,7 +58,8 @@
   고정된 26-sequence list를 verifier에 별도로 전달하는 새 code로 교체했고,
   GPU inference/supervisor는 건드리지 않았다.
 - dashboard monitor: `tools/monitor_autonomous_generation.py`; atomic state는
-  `.runtime/dashboard_state.json`. `--once`는 snapshot, 기본은 Rich live, `--quiet`는 state-only daemon이다.
+  `.runtime/dashboard_state.json`. Quiet daemon PID 1866198이며 `--once`는 snapshot,
+  기본은 Rich live, `--quiet`는 state-only daemon이다.
 - Phase 11 CPU follower PID 1819560: complete body-fit/Mode-C dependency만 감지해 quality를
   atomic materialize/validate한다. Final exporter와 동일 sequence validation도 미리 수행해
   `freeze-ready`를 출력한다. State는 `.runtime/quality_follower_state.json`; 2026-08-12 10:46 KST
@@ -112,7 +113,7 @@ Public-safe Sapiens command 형태:
 
 ## Remaining work
 
-- Sapiens2: 44/78 camera, current partial 포함 42,812 target crops
+- Sapiens2: 43/78 camera, current partial 포함 42,651 target crops
 - Phase 7 이후: `latpulldown_0003` 및 이후 pose-complete sequence
 - SAM full: 33/78 camera PASS, full-complete sequence 11/26; 다음 `benchpress_0001` pose dependency 대기
 - critical path: pose-complete sequence → Phase 7 gate → Mode B → compact prior → body fit → Mode C candidate QA → export
@@ -179,9 +180,9 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Runtime estimates
 
-- 2026-08-12 11:08 KST snapshot: Sapiens recent-chunk rate 0.218 crop/s,
-  streaming ETA는 deadline 약 4시간 45분 후
-- deadline margin: Sapiens 전량 기준 약 -4.75 h; 대신 Mode B complete sequence와
+- 2026-08-12 11:19 KST snapshot: Sapiens recent-chunk rate 0.219 crop/s,
+  streaming ETA는 deadline 약 4시간 20분 후
+- deadline margin: Sapiens 전량 기준 약 -4.33 h; 대신 Mode B complete sequence와
   deadline snapshot을 내구적으로 확보
 - concurrent SAM Mode B aggregate 19,455 frame/33,159.28초 = 0.58671 frame/s;
   standalone expected 20.80 h projection은
@@ -199,4 +200,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-12 11:09 KST
+- 2026-08-12 11:21 KST

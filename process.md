@@ -180,6 +180,14 @@
 - One-shot live identity gate에서 supervisor PID 1701200과 persisted command digest가 exact-match,
   launch 0, attention false였다. Dashboard는 watchdog death/stale/identity/restart exhaustion을
   machine-readable attention으로 승격한다.
+- Code checkpoint `bd943fb`를 push한 뒤 watchdog PID 1864229를 persistent mode로 시작했다.
+  Supervisor PID 1701200 observation, child/launch/restart 0, attention false를 확인했다.
+- 새 watchdog schema를 load하도록 CPU-only handoff/dashboard monitor만 각각 PID
+  1866064/1866198로 교체했다. 첫 handoff monitor 입력의 sequence typo는 즉시
+  종료했고 private output을 건드리지 않았다. 수정 process의 frozen order는
+  26/26 exact·unique, handoff universe exact, watchdog resume command 보존을 재검증했다.
+- Persistent dashboard에서 watchdog RUNNING/restart 0이며 전체 attention은 기존
+  `DEADLINE_ETA_AT_RISK` warning 하나뿐이다. GPU inference/supervisor는 중단·재시작하지 않았다.
 
 ### Source-of-truth 재검증
 
