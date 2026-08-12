@@ -64,6 +64,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--build-id", required=True)
     parser.add_argument("--sequences", type=parse_list, required=True)
+    parser.add_argument(
+        "--deadline-cutoff-utc",
+        default=None,
+        help=(
+            "Optional point-in-time membership boundary. Sequences whose terminal body-fit/"
+            "Mode-C markers are missing or newer remain INCOMPLETE."
+        ),
+    )
     return parser
 
 
@@ -106,6 +114,110 @@ def read_json(path: Path) -> dict[str, Any] | None:
         return value if isinstance(value, dict) else None
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def parse_utc_datetime(value: Any, label: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError as error:
+        raise RuntimeError(f"{label} must be an ISO-8601 timestamp") from error
+    if parsed.tzinfo is None:
+        raise RuntimeError(f"{label} must include a timezone")
+    return parsed.astimezone(timezone.utc)
+
+
+def effective_deadline_cutoff(args: argparse.Namespace) -> datetime | None:
+    if args.deadline_cutoff_utc:
+        return parse_utc_datetime(args.deadline_cutoff_utc, "deadline cutoff")
+    state = read_json(PROJECT_ROOT / ".runtime" / "deadline_snapshot_state.json")
+    if (
+        state is not None
+        and state.get("build_id") == args.build_id
+        and state.get("deadline_utc")
+    ):
+        return parse_utc_datetime(state["deadline_utc"], "deadline state cutoff")
+    return None
+
+
+def deadline_terminal_markers(
+    args: argparse.Namespace, sequence: str
+) -> dict[str, Path]:
+    return {
+        "body/body_fit.npz": (
+            args.body_fit_root.resolve() / sequence / "body_fit.npz"
+        ),
+        "body/metadata.json": (
+            args.body_fit_root.resolve() / sequence / "metadata.json"
+        ),
+        "body/mode_c_escalation.json": (
+            args.sam_mode_c_review_root.resolve()
+            / sequence
+            / "mode_c_escalation.json"
+        ),
+    }
+
+
+def deadline_eligibility(
+    args: argparse.Namespace,
+    sequence: str,
+    cutoff: datetime | None,
+) -> tuple[bool, list[str], dict[str, str]]:
+    if cutoff is None:
+        return True, [], {}
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    delta = cutoff - epoch
+    cutoff_ns = (
+        (delta.days * 86_400 + delta.seconds) * 1_000_000_000
+        + delta.microseconds * 1_000
+    )
+    reasons: list[str] = []
+    marker_mtimes: dict[str, str] = {}
+    for label, path in deadline_terminal_markers(args, sequence).items():
+        try:
+            stat = path.stat()
+        except OSError:
+            reasons.append(f"deadline_missing:{label}")
+            continue
+        if not path.is_file() or path.is_symlink():
+            reasons.append(f"deadline_invalid:{label}")
+            continue
+        modified = datetime.fromtimestamp(
+            stat.st_mtime_ns / 1_000_000_000, tz=timezone.utc
+        )
+        marker_mtimes[label] = modified.isoformat()
+        if stat.st_mtime_ns > cutoff_ns:
+            reasons.append(f"deadline_after_cutoff:{label}")
+    return not reasons, reasons, marker_mtimes
+
+
+def verify_deadline_marker_mtimes(
+    sequence_metadata: dict[str, Any], cutoff: datetime
+) -> list[str]:
+    validation = sequence_metadata.get("validation", {})
+    values = validation.get("deadline_terminal_marker_mtimes", {})
+    expected = set(deadline_terminal_markers_from_labels())
+    if not isinstance(values, dict) or set(values) != expected:
+        return ["deadline_terminal_marker_set_invalid"]
+    errors: list[str] = []
+    for label in sorted(expected):
+        try:
+            modified = parse_utc_datetime(
+                values[label], f"deadline terminal marker {label}"
+            )
+        except RuntimeError:
+            errors.append(f"deadline_terminal_marker_time_invalid:{label}")
+            continue
+        if modified > cutoff:
+            errors.append(f"deadline_terminal_marker_after_cutoff:{label}")
+    return errors
+
+
+def deadline_terminal_markers_from_labels() -> tuple[str, ...]:
+    return (
+        "body/body_fit.npz",
+        "body/metadata.json",
+        "body/mode_c_escalation.json",
+    )
 
 
 def validate_path_component(value: str, label: str) -> None:
@@ -235,6 +347,20 @@ def verify_frozen_build(
         errors.append("source_rgb_policy_invalid")
     if manifest.get("source_payload_modified") is not False:
         errors.append("source_mutation_policy_invalid")
+    cutoff_value = manifest.get("deadline_cutoff_utc")
+    manifest_cutoff: datetime | None = None
+    if cutoff_value is not None:
+        try:
+            manifest_cutoff = parse_utc_datetime(
+                cutoff_value, "manifest deadline cutoff"
+            )
+        except RuntimeError:
+            errors.append("deadline_cutoff_invalid")
+        if manifest.get("deadline_boundary_policy") != (
+            "terminal body-fit and Mode-C marker mtimes must not exceed cutoff; "
+            "post-cutoff sequences remain INCOMPLETE"
+        ):
+            errors.append("deadline_boundary_policy_invalid")
     commit = manifest.get("git_commit")
     if commit is not None and not re.fullmatch(r"[0-9a-f]{40,64}", str(commit)):
         errors.append("git_commit_invalid")
@@ -397,6 +523,13 @@ def verify_frozen_build(
         ):
             errors.append(f"sequence_manifest_status_mismatch:{sequence}")
             continue
+        if manifest_cutoff is not None:
+            errors.extend(
+                f"{error}:{sequence}"
+                for error in verify_deadline_marker_mtimes(
+                    metadata, manifest_cutoff
+                )
+            )
         declared_files = metadata.get("files")
         if not isinstance(declared_files, list):
             errors.append(f"sequence_manifest_files_invalid:{sequence}")
@@ -695,6 +828,7 @@ def main() -> int:
     for sequence in args.sequences:
         validate_path_component(sequence, "sequence id")
     output_root = args.output_root.resolve()
+    deadline_cutoff = effective_deadline_cutoff(args)
     output_root.mkdir(parents=True, exist_ok=True)
     final_root = output_root / args.build_id
     final_manifest = final_root / "dataset_manifest.json"
@@ -770,6 +904,33 @@ def main() -> int:
 
     sequence_rows = []
     for sequence in args.sequences:
+        deadline_eligible, deadline_reasons, marker_mtimes = deadline_eligibility(
+            args,
+            sequence,
+            deadline_cutoff,
+        )
+        if not deadline_eligible:
+            validation = {
+                "status": "INCOMPLETE",
+                "reasons": deadline_reasons,
+                "deadline_terminal_marker_mtimes": marker_mtimes,
+            }
+            row = {
+                "sequence": sequence,
+                "status": validation["status"],
+                "reasons": ";".join(validation["reasons"]),
+                "reference_frame_count": 0,
+                "valid_body_joint_fraction": "",
+                "body_fit_status": "",
+                "camera_geometry_status": "",
+                "sam_mode_c_review_status": "",
+            }
+            sequence_rows.append(row)
+            print(
+                json.dumps({"sequence": sequence, **validation}, ensure_ascii=False),
+                flush=True,
+            )
+            continue
         try:
             ensure_quality_output(args, sequence)
         except (OSError, ValueError, KeyError, RuntimeError, json.JSONDecodeError) as error:
@@ -786,6 +947,7 @@ def main() -> int:
                 flush=True,
             )
         validation = validate_sequence(args, sequence)
+        validation["deadline_terminal_marker_mtimes"] = marker_mtimes
         row = {
             "sequence": sequence,
             "status": validation["status"],
@@ -845,6 +1007,15 @@ def main() -> int:
         "schema_version": 1,
         "build_id": args.build_id,
         "created_at_utc": utc_now(),
+        "deadline_cutoff_utc": (
+            deadline_cutoff.isoformat() if deadline_cutoff is not None else None
+        ),
+        "deadline_boundary_policy": (
+            "terminal body-fit and Mode-C marker mtimes must not exceed cutoff; "
+            "post-cutoff sequences remain INCOMPLETE"
+            if deadline_cutoff is not None
+            else None
+        ),
         **git_provenance(),
         "private_dataset": True,
         "not_ground_truth": True,

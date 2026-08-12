@@ -1,10 +1,12 @@
 import csv
 import hashlib
 import json
+import os
 import subprocess
 import tempfile
 import unittest
 from argparse import Namespace
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,6 +14,7 @@ import numpy as np
 
 from tools.export_private_dataset import (
     copy_exact,
+    deadline_eligibility,
     finite_nan_contract,
     git_provenance,
     prune_staging_tree,
@@ -21,10 +24,62 @@ from tools.export_private_dataset import (
     sha256,
     validate_path_component,
     verify_frozen_build,
+    verify_deadline_marker_mtimes,
 )
 
 
 class PrivateDatasetExportTest(unittest.TestCase):
+    def test_deadline_cutoff_excludes_post_deadline_terminal_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = Namespace(
+                body_fit_root=root / "body",
+                sam_mode_c_review_root=root / "mode_c",
+            )
+            sequence = "sequence"
+            markers = [
+                args.body_fit_root / sequence / "body_fit.npz",
+                args.body_fit_root / sequence / "metadata.json",
+                args.sam_mode_c_review_root / sequence / "mode_c_escalation.json",
+            ]
+            cutoff = datetime(2026, 8, 14, 4, tzinfo=timezone.utc)
+            before_ns = int(cutoff.timestamp() * 1_000_000_000) - 1_000_000
+            after_ns = int(cutoff.timestamp() * 1_000_000_000) + 1_000_000
+            for path in markers:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.touch()
+                path.chmod(0o600)
+                os.utime(path, ns=(before_ns, before_ns))
+            eligible, reasons, mtimes = deadline_eligibility(
+                args, sequence, cutoff
+            )
+            self.assertTrue(eligible)
+            self.assertEqual(reasons, [])
+            self.assertEqual(len(mtimes), 3)
+
+            os.utime(markers[-1], ns=(after_ns, after_ns))
+            eligible, reasons, _ = deadline_eligibility(args, sequence, cutoff)
+            self.assertFalse(eligible)
+            self.assertEqual(
+                reasons,
+                ["deadline_after_cutoff:body/mode_c_escalation.json"],
+            )
+
+    def test_deadline_marker_provenance_verifier_rejects_late_marker(self) -> None:
+        cutoff = datetime(2026, 8, 14, 4, tzinfo=timezone.utc)
+        metadata = {
+            "validation": {
+                "deadline_terminal_marker_mtimes": {
+                    "body/body_fit.npz": "2026-08-14T03:59:58+00:00",
+                    "body/metadata.json": "2026-08-14T03:59:59+00:00",
+                    "body/mode_c_escalation.json": "2026-08-14T04:00:01+00:00",
+                }
+            }
+        }
+        self.assertEqual(
+            verify_deadline_marker_mtimes(metadata, cutoff),
+            ["deadline_terminal_marker_after_cutoff:body/mode_c_escalation.json"],
+        )
     def test_git_provenance_records_dirty_state_without_exposing_diff(self) -> None:
         results = [
             subprocess.CompletedProcess([], 0, stdout="a" * 40 + "\n", stderr=""),

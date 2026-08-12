@@ -15,6 +15,13 @@ Resume staging에 이전 시도의 temp/unlisted payload가 남아 있으면 fin
 Build provenance는 Git commit 뿐 아니라 worktree dirty flag, status hash, tracked diff hash를 저장하며
 diff 내용이나 private path는 manifest에 노출하지 않는다.
 
+Deadline build의 sequence membership은 export 완료 시각이 아니라 고정 cutoff으로 결정한다.
+`body_fit.npz`, body metadata, Mode-C assessment 세 terminal marker가 모두 존재하고 mtime이
+cutoff 이하인 sequence만 validation/export 후보다. Deadline 후 완료된 sequence는 exporter
+retry 중에 새로 보이더라도 `INCOMPLETE`로 유지한다. Quality와 manifest는 pre-deadline
+terminal payload에서 deadline 후 파생할 수 있지만, sequence manifest에 세 terminal marker의
+mtime provenance를 남기고 verifier가 cutoff을 다시 확인한다.
+
 ```text
 <build_id>/
 ├── dataset_manifest.json

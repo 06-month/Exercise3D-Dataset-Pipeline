@@ -346,6 +346,8 @@
   actual tree↔global/sequence manifest exact-match, Git dirty/diff provenance 보존 후 atomic rename
 - streaming preflight: quality 완료 sequence는 exporter와 동일 cross-stage validation으로
   `freeze-ready` PASS/REVIEW를 미리 확정; 5분 지속 dependency 누락/FAIL은 dashboard attention
+- deadline boundary: body-fit NPZ/metadata + Mode-C assessment terminal marker mtime을 UTC cutoff으로
+  고정해 post-deadline completion은 INCOMPLETE 유지; transient export는 staging checksum-resume 3회 재시도
 - first smoke: complete `barbellrow_0000`만 사용해 REVIEW 1/FAIL 0/INCOMPLETE 0,
   34 files, payload 28,960,929 bytes, SHA/size mismatch 0, freeze-eligible 확인
 - quality/exact-tree smoke: clean commit `250ee73`에서 REVIEW 1/FAIL 0/INCOMPLETE 0,

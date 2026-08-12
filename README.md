@@ -20,6 +20,8 @@ Phase 11 CPU follower는 quality가 완료된 sequence에 대해 final exporter�
 담은 `run_provenance.json`을 별도 atomic sidecar로 남깁니다.
 고정 deadline에는 별도 private snapshot build가 현재 PASS/REVIEW/FAIL/INCOMPLETE 상태를 보존하며,
 장기 generation 자체는 snapshot 이후에도 중단하지 않습니다.
+Snapshot membership은 terminal body-fit/Mode-C marker의 deadline cutoff로 고정하여 export/retry 도중
+완료된 sequence를 소급 포함하지 않으며, transient failure는 hidden staging에서 checksum-resume합니다.
 
 ## 프로젝트 목표
 

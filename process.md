@@ -123,6 +123,19 @@
   Quality follower가 즉시 662-frame vector와 exporter preflight를 완료해 quality/freeze-ready를
   11/26 REVIEW로 증가시켰고 failure/dependency reason은 0이다.
 
+### Deadline point-in-time membership와 export retry
+
+- 기존 sentinel은 deadline 후 exporter를 한 번만 호출했다. Transient copy/source race도
+  복구하지 못하고, export 중 새로 완료된 sequence가 순서에 따라 포함될 수 있어
+  exact deadline snapshot 경계가 불명확했다.
+- Deadline exporter는 body fit NPZ/metadata와 Mode-C assessment의 mtime이 모두 deadline UTC
+  이하인 sequence만 eligible로 분류한다. Post-deadline terminal marker는 retry 중에 발견되어도
+  `INCOMPLETE`를 유지한다. Derived quality/manifest는 이 terminal payload에서 deadline 후 생성할
+  수 있고, marker mtime은 sequence manifest에 보존해 final verifier가 다시 검증한다.
+- Exporter가 final verified manifest를 만들지 못한 transient failure에는 기존 hidden staging을
+  checksum-resume하며 30초 간격으로 최대 3회 재시도한다. Parseable final integrity error는
+  immutable build을 덮어쓰지 않고 즉시 attention으로 종료한다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화
