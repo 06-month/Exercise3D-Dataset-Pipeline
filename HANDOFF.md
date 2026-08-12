@@ -22,6 +22,10 @@
 ## Active job
 
 - Sapiens2 PID 373049, 시작 2026-08-11 18:35 KST, output `outputs/sapiens2_target_only_full`
+  이 PID는 singleton lock 도입 전 시작한 legacy process라 lock held를 기대하지 않는다. Future `infer`
+  invocation은 model load 전 lifetime lock을 잡고 exact script + resolved output-root가 같은 `/proc`
+  process를 검색한다. Read-only integration은 현재 PID 373049를 exact-match했으며 legacy worker/orphan이
+  남아 있거나 process table을 검사할 수 없으면 새 GPU inference를 fail-closed로 거부한다.
 - autonomous supervisor는 2026-08-12 08:45 KST 이후 사라진 것을 live process와
   stale state로 확인한 뒤, 중복/child 부재를 재확인하고 exact resumable command로 09:44 KST 복구했다.
   현재 exact PID/stage는 dashboard/handoff state가 source of truth다.

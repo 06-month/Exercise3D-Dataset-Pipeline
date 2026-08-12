@@ -19,7 +19,9 @@
   명시적 INCOMPLETE provenance로 관리
 - SAM policy: Mode B default, Mode C는 실제 failure/occlusion escalation evidence가 있는 경우만 REVIEW
 - long-run supervision: current 5B 종료 감시, 불완전 camera selection-bound resume, Phase 7→Mode B→
-  consolidation→body fit→versioned private export를 sequence별 자동 진행
+  consolidation→body fit→versioned private export를 sequence별 자동 진행; future Sapiens resume는
+  lifetime lock + exact script/resolved output `/proc` legacy probe를 model load 전에 통과해야 하며
+  process discovery 불가 시 fail-closed
 - SAM full 직전 8-frame Mode B numeric smoke에서 source PTS/mesh/MHR compact schema exact gate 요구
 - deadline에 미완료된 sequence는 `INCOMPLETE_DEADLINE`로 명시하고 PASS로 위장하지 않음
 - Fit3D exhaustive tolerance/ablation은 final private dataset critical path를 방해하면 freeze 이후로 이동

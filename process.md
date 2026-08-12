@@ -579,6 +579,22 @@
   boundary를 기록하며 loaded/current sentinel/exporter SHA가 모두 exact, dashboard drift 제거,
   watchdog missing 0/attention false다. Sapiens/SAM/supervisor/dashboard에는 signal이나 restart가 없었다.
 
+### Sapiens target-inference duplicate-resume guard
+
+- Autonomous supervisor는 monitored Sapiens PID가 종료되면 missing camera resume command를 실행한다.
+  그러나 기존 `process_alive(pid)` 경계는 동일 output job의 worker/orphan이나 PID 변화가 남은 경우를
+  재탐색하지 않아 duplicate 5B model load 가능성이 있었다. Current 정상 job은 중단하지 않고 future
+  `sapiens2_target_pipeline.py infer` entrypoint를 hardening했다.
+- New invocation은 `.runtime/sapiens2_target_inference.lock`을 lifetime 동안 보유한 뒤 `/proc`에서 exact
+  script path, `infer` subcommand, resolved `--output-root`가 같은 non-zombie process를 검색한다. Lock 도입
+  전 legacy process도 탐지하며 PID만 출력하고 private command/path는 출력하지 않는다. `/proc` 자체가
+  unavailable/unreadable이면 새 inference를 fail-closed로 거부한다.
+- Duplicate lock, symlink-safe lock, exact command/output binding, legacy refusal-before-model-load,
+  lifetime lock retention/release, process-table fail-closed regression을 추가했다. 전체 141 tests가 PASS했고
+  real read-only probe는 현재 output-bound legacy PID 373049 하나를 exact-match했다.
+- Current Sapiens PID 373049와 supervisor PID 1701200은 signal/restart하지 않았다. 이 guard는 현재 output을
+  재계산하지 않으며 향후 resume subprocess가 on-disk current entrypoint를 load할 때 자동 적용된다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화

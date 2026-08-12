@@ -233,3 +233,14 @@ Phase 6 target-selection 판정은 `GO_FULL_DATASET`이지만, 전체 inference�
 승인 전 `HOLD`한다. Aggregate batch와 stage breakdown은 각각
 [`sapiens2_target_only_batch_scaling.csv`](../../metadata/results/sapiens2_target_only_batch_scaling.csv),
 [`phase6_2_runtime_projection.csv`](../../metadata/results/phase6_2_runtime_projection.csv)에 있다.
+
+## Full-run resume singleton safety
+
+`infer` entrypoint는 GPU model load 전에 repository-local lifetime lock을 획득한다. 동시에 `/proc`에서
+exact `sapiens2_target_pipeline.py infer` script와 resolved `--output-root`가 같은 live process를 찾는다.
+따라서 lock 도입 전에 시작한 legacy job도 PID가 바뀌거나 worker/orphan만 남은 경우 새 invocation이
+`EXISTING_TARGET_INFERENCE_REFUSED`로 종료한다. Process table 자체를 검사할 수 없으면 fail-closed한다.
+
+Lock은 inference call 전체 동안 유지하고 duplicate/current legacy job을 발견한 invocation은 model이나
+dataset payload를 열기 전에 종료한다. Current long-run PID는 이 변경을 위해 재시작하지 않았으며,
+read-only live probe가 existing output-bound PID를 정확히 식별했다.

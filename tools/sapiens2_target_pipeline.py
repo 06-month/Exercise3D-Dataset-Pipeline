@@ -5,14 +5,19 @@ from __future__ import annotations
 
 import argparse
 import csv
+import fcntl
 import json
 import os
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, BinaryIO, Sequence
 
 import numpy as np
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+INFERENCE_SCRIPT = Path(__file__).resolve()
 
 from sapiens2_pose_pipeline import (
     CAMERAS,
@@ -79,6 +84,11 @@ def build_parser() -> argparse.ArgumentParser:
     infer.add_argument("--retry-failures", type=int, default=1)
     infer.add_argument("--overwrite", action="store_true")
     infer.add_argument("--save-overlays", type=int, default=6)
+    infer.add_argument(
+        "--instance-lock",
+        type=Path,
+        default=PROJECT_ROOT / ".runtime" / "sapiens2_target_inference.lock",
+    )
 
     materialize = commands.add_parser(
         "materialize-baseline",
@@ -109,6 +119,158 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--sequences", type=parse_str_list, default=list(PILOT_SEQUENCES))
     verify.add_argument("--cameras", type=parse_str_list, default=list(CAMERAS))
     return parser
+
+
+def acquire_inference_lock(path: Path) -> BinaryIO | None:
+    """Hold a singleton lock for one target-only inference lifetime."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    handle = os.fdopen(descriptor, "r+b", buffering=0)
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        return None
+    handle.seek(0)
+    handle.truncate()
+    handle.write(f"{os.getpid()}\n".encode("ascii"))
+    handle.flush()
+    os.fsync(handle.fileno())
+    return handle
+
+
+def cli_option(argv: Sequence[str], name: str) -> str | None:
+    for index, value in enumerate(argv):
+        if value == name and index + 1 < len(argv):
+            return str(argv[index + 1])
+        if value.startswith(name + "="):
+            return value.split("=", 1)[1]
+    return None
+
+
+def command_matches_inference_job(
+    argv: Sequence[str], cwd: Path, output_root: Path
+) -> bool:
+    """Match the exact target-inference entrypoint and resolved output root."""
+    scripts = [
+        value for value in argv if value.endswith("sapiens2_target_pipeline.py")
+    ]
+    if len(scripts) != 1:
+        return False
+    script_index = list(argv).index(scripts[0])
+    if script_index + 1 >= len(argv) or argv[script_index + 1] != "infer":
+        return False
+    script = Path(scripts[0])
+    if not script.is_absolute():
+        script = cwd / script
+    try:
+        if script.resolve() != INFERENCE_SCRIPT:
+            return False
+    except OSError:
+        return False
+    raw_output = cli_option(argv, "--output-root")
+    if raw_output is None:
+        return False
+    candidate = Path(raw_output)
+    if not candidate.is_absolute():
+        candidate = cwd / candidate
+    try:
+        return candidate.resolve() == output_root.resolve()
+    except OSError:
+        return False
+
+
+def matching_inference_processes(
+    output_root: Path,
+    *,
+    proc_root: Path = Path("/proc"),
+    exclude_pid: int | None = None,
+) -> list[int]:
+    """Find legacy/current live processes for the same output-bound job."""
+    if not proc_root.is_dir():
+        raise RuntimeError("process table is unavailable; refusing inference launch")
+    matches: list[int] = []
+    try:
+        directories = list(proc_root.iterdir())
+    except OSError as error:
+        raise RuntimeError(
+            "process table cannot be enumerated; refusing inference launch"
+        ) from error
+    for directory in directories:
+        if not directory.name.isdigit():
+            continue
+        pid = int(directory.name)
+        if pid == exclude_pid:
+            continue
+        try:
+            status = (directory / "stat").read_text(encoding="utf-8")
+            state = status.rsplit(")", 1)[1].strip().split()[0]
+            if state == "Z":
+                continue
+            raw = (directory / "cmdline").read_bytes()
+            argv = [
+                value.decode("utf-8", errors="surrogateescape")
+                for value in raw.split(b"\0")
+                if value
+            ]
+            cwd = (directory / "cwd").resolve(strict=True)
+        except (OSError, IndexError):
+            continue
+        if command_matches_inference_job(argv, cwd, output_root):
+            matches.append(pid)
+    return sorted(matches)
+
+
+def guarded_infer_command(args: argparse.Namespace) -> int:
+    """Refuse duplicate current or legacy jobs before loading a GPU model."""
+    instance_lock = acquire_inference_lock(args.instance_lock.resolve())
+    if instance_lock is None:
+        print(
+            json.dumps(
+                {
+                    "status": "DUPLICATE_TARGET_INFERENCE_REFUSED",
+                    "reason": "instance_lock_held",
+                    "pid": os.getpid(),
+                }
+            ),
+            flush=True,
+        )
+        return 3
+    try:
+        try:
+            existing = matching_inference_processes(
+                args.output_root.expanduser().resolve(), exclude_pid=os.getpid()
+            )
+        except RuntimeError as error:
+            print(
+                json.dumps(
+                    {
+                        "status": "TARGET_INFERENCE_PROCESS_DISCOVERY_FAILED",
+                        "reason": str(error),
+                        "pid": os.getpid(),
+                    }
+                ),
+                flush=True,
+            )
+            return 4
+        if existing:
+            print(
+                json.dumps(
+                    {
+                        "status": "EXISTING_TARGET_INFERENCE_REFUSED",
+                        "matching_pids": existing,
+                        "pid": os.getpid(),
+                    }
+                ),
+                flush=True,
+            )
+            return 3
+        return infer_command(args)
+    finally:
+        instance_lock.close()
 
 
 def read_csv(path: Path) -> list[dict[str, str]]:
@@ -1300,7 +1462,7 @@ def main() -> int:
     if args.command == "benchmark":
         return benchmark_command(args)
     if args.command == "infer":
-        return infer_command(args)
+        return guarded_infer_command(args)
     if args.command == "materialize-baseline":
         return materialize_baseline_command(args)
     if args.command == "verify":
