@@ -38,13 +38,13 @@
   사용해 300초 backoff 뒤 1회만 재시도한다. Backoff 중에는 다른 ready sequence를 진행하고
   retry attempt/UTC를 atomic supervisor state에 남긴다. 현재 live PID는 이 변경 전 시작했으므로
   활성화를 위해 restart하지 않았으며, 향후 watchdog recovery가 current entrypoint를 load할 때 적용된다.
-- 2026-08-12 14:34 KST dashboard snapshot: `benchpress_0001` Mode B/body fit/Mode C/quality/freeze-ready와
+- 2026-08-12 14:36 KST dashboard snapshot: `benchpress_0001` Mode B/body fit/Mode C/quality/freeze-ready와
   12-sequence immutable checkpoint가 완료됐고 supervisor는 다음 3-view pose dependency를
-  `WAIT_RUNNING_SAPIENS2`로 대기 중
-- Sapiens durable 38/78 camera, current partial 포함 25,330/65,430 crop; PID 373049 alive,
-  current `benchpress_0002/cam3`
-- Sapiens recent-completed-camera throughput 0.232 crop/s, average 0.217 crop/s; projected ETA는
-  deadline 약 1시간 31분 후 risk.
+  완료한 `benchpress_0002`의 sequence pipeline을 streaming 중
+- Sapiens durable 39/78 camera, current partial 포함 25,501/65,430 crop; PID 373049 alive,
+  current `barbellrow_0003/cam1`
+- Sapiens recent-completed-camera throughput 0.234 crop/s, average 0.219 crop/s; projected ETA는
+  deadline 약 58분 후 risk.
   OOM/retry/stall은 없음
 - Phase 7 initial/final triangulation reuse는 pose NPZ/metadata, selected camera refinement/validation,
   first-frame shape source, temporal report, VGGT canvas metadata, canonical config와 triangulation tool의
@@ -88,7 +88,7 @@
   새 signed completion은 follower fast path에서도 source drift를 확인하며 corrupt NPZ는 follower 종료 대신
   bounded retry state로 전환한다. Live quality follower는 재시작하지 않았고 다음 supervisor quality
   subprocess부터 current builder가 자동 적용된다.
-- GPU: A100 80GB, Sapiens-only dependency-wait snapshot 36,375 MiB/100%, 363.22 W, 56°C;
+- GPU: A100 80GB, Sapiens-only downstream-overlap snapshot 36,375 MiB/100%, 373.46 W, 56°C;
   14:19 KST 단일 snapshot의 0% utilization은 다음 14:23 KST snapshot에서 100%로 복귀했고 stall attention은 없음;
   observed OOM/retry 없음
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
@@ -114,6 +114,12 @@
   exact-match하지 않으면 publish를 중단하고 retry하므로 post-cutoff replacement가 섞이지 않는다.
   Source ctime 자체도 cutoff 이하이어야 하고 privacy-safe timestamp를 sequence manifest에 남겨 verifier가
   재검사하므로 post-cutoff replacement의 mtime backdating도 `INCOMPLETE`로 보존한다.
+  Exporter는 valid unsigned legacy quality를 schema 검증 후 그대로 재사용하여 기존 12개를 다시 쓰지 않고,
+  signed quality는 current Phase 11 source signature까지 exact해야 재사용한다. 각 complete sequence의
+  32개 copied source dependency는 validation 전후 dev/inode/size/mtime/ctime identity가 동일해야 하며 deadline terminal
+  marker identity와도 교차검증한다. 실제 copy descriptor가 동일 identity를 다시 요구하므로 validation,
+  cutoff eligibility, copy 사이의 replacement는 `INCOMPLETE` 또는 sentinel retry로 남는다. 다음 checkpoint/
+  deadline exporter subprocess가 current code를 자연스럽게 load하며 live process restart는 없다.
   GPU inference/supervisor는 건드리지 않았다.
 - deadline sentinel watchdog PID 1882820: live/persisted command digest exact-match,
   loaded-code/ctime-policy activation recovery 2회, 현재 missing 0/attention false. State는
@@ -188,8 +194,8 @@ Public-safe Sapiens command 형태:
 ## Completed work
 
 - full selector: 65,595 frame, target 65,430, ambiguity 139, `NO_TARGET` 26, identity/integrity failure 0
-- Sapiens2 pose: complete 38 camera와 current partial 합계 25,330 accepted target crops;
-  `benchpress_0001`까지 12 sequence 3-view schema/finite PASS, `benchpress_0002/cam1-2` complete
+- Sapiens2 pose: complete 39 camera와 current partial 합계 25,501 accepted target crops;
+  `benchpress_0002`까지 13 sequence 3-view schema/finite PASS
 - Phase 7 final: 12 sequence schema PASS/body-fit eligible, NO_GO 0
 - concurrent Mode B 8-frame smoke: mesh/numeric/PTS schema PASS, combined peak 48,525 MiB
 - full Mode B `barbellrow_0000`: 3 camera/1,770 frame, 전 completion check PASS,
@@ -315,11 +321,11 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Runtime estimates
 
-- 2026-08-12 14:34 KST snapshot: Sapiens recent-completed-camera rate 0.232 crop/s,
-  streaming ETA는 deadline 약 1시간 31분 후. Downstream overhead를 제외한 sequence schedule
+- 2026-08-12 14:36 KST snapshot: Sapiens recent-completed-camera rate 0.234 crop/s,
+  streaming ETA는 deadline 약 58분 후. Downstream overhead를 제외한 sequence schedule
   upper bound는 deadline까지 25/26(`squat_0003` first late), empirical p90-adjusted estimate는
   25/26(`squat_0003` first late)
-- deadline margin: Sapiens 전량 기준 약 -1.53 h; 대신 Mode B complete sequence와
+- deadline margin: Sapiens 전량 기준 약 -0.97 h; 대신 Mode B complete sequence와
   deadline snapshot을 내구적으로 확보
 - concurrent SAM Mode B aggregate 23,460 frame, measured 0.584 frame/s;
   standalone expected 20.80 h projection은
@@ -329,7 +335,8 @@ tmux new-window -n exercise3d-dashboard \
 ## Git state
 
 - branch: `agent/phase-5-1-pushup-0003-recovery`
-- latest implementation commit: source-bound Phase 11 quality resume `533959e`; source-bound Phase 7
+- latest implementation commit: validation-bound freeze copy `2cfd6b7`; source-bound Phase 11 quality
+  resume `533959e`; source-bound Phase 7
   triangulation reuse `fadd5c7` + in-flight source-race
   guard `c55bc5c`; source-bound Mode C assessment resume `1c8046e`; source-bound body-fit
   resume `6cacff1`; source-bound SAM prior resume
@@ -356,4 +363,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-12 14:35 KST
+- 2026-08-12 14:41 KST

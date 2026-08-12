@@ -755,6 +755,26 @@
   Sapiens ETA risk는 +1시간 31분으로 개선됐고 optimistic/p90-adjusted freeze coverage 모두 25/26,
   first late `squat_0003`이다. 이 snapshot 뒤 정상 진행 확인을 위한 추가 AI polling은 수행하지 않는다.
 
+### Validation-bound private freeze copy
+
+- Deadline/predeadline exporter는 eligible sequence마다 quality builder를 호출하므로, source signature 도입 전
+  완료된 12개 unsigned quality를 다음 cumulative checkpoint에서 다시 쓸 위험이 있었다. Export validation도
+  signed quality의 stored signature를 current sources와 대조하지 않았다.
+- Exporter는 legacy unsigned quality를 full schema/body frame·PTS 검증 후 그대로 재사용한다. Signed quality는
+  current Phase 11 dependency signature와 exact-match해야 하며 mismatch는 builder의 bounded rebuild 경로로
+  보낸다. 따라서 기존 12개 output은 보존하면서 다음 signed sequence의 source drift는 거부한다.
+- 기존 copy gate는 deadline terminal marker 3개만 eligibility identity에 묶었다. 이제 complete sequence의
+  32개 selection/pose/provenance/triangulation/prior/body/Mode-C/quality copied source dependency를 validation 전후
+  dev/inode/size/mtime/ctime으로 캡처한다. 두 snapshot과 deadline marker identity가 같아야 PASS/REVIEW를
+  유지하고, 실제 `copy_exact` descriptor도 동일 identity를 요구한다. Race/symlink/missing input은
+  `INCOMPLETE` 또는 sentinel retry로 남고 partial을 complete로 publish하지 않는다.
+- Legacy reuse, signed source validation, dependency replacement/symlink와 validation↔deadline window regression을
+  포함해 전체 166 tests, compile과 staged publication-safety가 PASS했다. Implementation `2cfd6b7`을 push했다.
+- 14:36 KST 단일 snapshot은 같은 Sapiens PID가 39/78 camera, 25,501/65,430 crops로 진행하고
+  `benchpress_0002` 3-view PASS 뒤 supervisor가 sequence pipeline에 진입했음을 보였다. GPU 100%,
+  OOM/retry/stall 0이고 ETA warning은 deadline +58분으로 개선됐다. Existing GPU/follower/supervisor에는
+  signal/restart/duplicate launch가 없었다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화

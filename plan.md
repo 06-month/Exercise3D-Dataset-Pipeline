@@ -13,8 +13,8 @@
 - 이미 완료된 4개 pilot sequence output은 검증 후 재사용하고 재추론하지 않음
 - GPU scheduling: Sapiens2-5B는 계속 실행하고, pose-complete sequence의 Mode B를 겹쳐
   end-to-end 완결 sequence를 확보한다. 첫 full camera 병렬 peak 61,821 MiB와 completion PASS 확인
-- current projection: 2026-08-12 14:34 KST Sapiens current partial 포함 25,330/65,430 crop,
-  recent 0.232 crop/s, 전량 ETA는 deadline 약 1.53 h 후; negative deadline margin을
+- current projection: 2026-08-12 14:36 KST Sapiens current partial 포함 25,501/65,430 crop,
+  recent 0.234 crop/s, 전량 ETA는 deadline 약 0.97 h 후; negative deadline margin을
   end-to-end complete sequence 확보와
   명시적 INCOMPLETE provenance로 관리
 - SAM policy: Mode B default, Mode C는 실제 failure/occlusion escalation evidence가 있는 경우만 REVIEW
@@ -42,6 +42,9 @@
 - Phase 11 quality는 selection/pose/SAM prior/triangulation/body/Mode C/builder signature와 full output
   schema가 exact할 때만 resume skip한다. 기존 persisted unsigned 12 sequence는 재계산하지 않고,
   다음 signed completion부터 follower fast path도 source drift를 감지한다.
+- Freeze exporter는 unsigned legacy quality를 full schema 검증 후 보존하고 signed quality는 current source
+  signature를 강제한다. Complete sequence의 32개 copied source payload는 validation 전후와 copy descriptor에서 동일한
+  dev/inode/size/mtime/ctime identity여야 하며 deadline terminal identity와도 exact-match해야 한다.
 - deadline에 미완료된 sequence는 `INCOMPLETE_DEADLINE`로 명시하고 PASS로 위장하지 않음
 - Fit3D exhaustive tolerance/ablation은 final private dataset critical path를 방해하면 freeze 이후로 이동
 - persistent handoff: `HANDOFF.md` + ignored `.runtime/handoff_state.json` 30초 atomic checkpoint;
