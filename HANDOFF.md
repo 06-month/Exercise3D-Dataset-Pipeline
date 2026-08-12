@@ -45,7 +45,7 @@
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
 - handoff monitor PID 2006909: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
   `updated_at_utc` 증가와 exact active/resume command/stage count 보존 확인 완료
-- deadline snapshot sentinel PID 1882473: 2026-08-14 13:00 KST에 completed sequence와
+- deadline snapshot sentinel PID 2068008: 2026-08-14 13:00 KST에 completed sequence와
   `INCOMPLETE` 목록을 별도 versioned private build로 export; local state는
   `.runtime/deadline_snapshot_state.json`, 현재 `WAITING_DEADLINE`
   Exporter는 hidden `.<build_id>.inprogress`에서 checksum-resume한 뒤 전수 integrity PASS 시 final
@@ -65,14 +65,15 @@
   exact-match하지 않으면 publish를 중단하고 retry하므로 post-cutoff replacement가 섞이지 않는다.
   GPU inference/supervisor는 건드리지 않았다.
 - deadline sentinel watchdog PID 1882820: live/persisted command digest exact-match,
-  restart/launch 0, attention false. State는 `.runtime/deadline_sentinel_watchdog_state.json`.
+  loaded-code activation recovery 1회, 현재 missing 0/attention false. State는
+  `.runtime/deadline_sentinel_watchdog_state.json`.
   Sentinel lifetime lock은 별도 process probe에서 held로 확인했고 exporter는 build ID별
   lock을 staging mutation 전에 취득한다.
   Sentinel runtime state는 process 시작 시 loaded sentinel/exporter tool SHA를 고정하고 dashboard가
   current on-disk SHA와 비교한다. Mismatch/missing은 `DEADLINE_SENTINEL_CODE_DRIFT`이며 exact argv만으로
   loaded Python implementation이 최신이라고 간주하지 않는다.
 - dashboard monitor: `tools/monitor_autonomous_generation.py`; atomic state는
-  `.runtime/dashboard_state.json`. Quiet daemon PID 2044638이며 `--once`는 snapshot,
+  `.runtime/dashboard_state.json`. Quiet daemon PID 2065337이며 `--once`는 snapshot,
   기본은 Rich live, `--quiet`는 state-only daemon이다. Export section은 final deadline
   build progress와 contract-v2 best durable checkpoint progress를 별도로 보존한다. Selector
   exact workload와 measured rate를 사용한 overhead-free deadline upper bound는 현재 24/26이며,
@@ -93,7 +94,8 @@
 - Monitoring-plane watchdog PID 2009359: dashboard/handoff monitor의 live/resume exact argv SHA를
   각각 pin한다. Latest-completion code activation 중 exec-scoped manual daemon이 첫 state 뒤 종료되자
   3-cycle/final-rescan 경로로 dashboard PID 2044638을 1회 자동 복구했으며 현재 exact identity,
-  missing 0, attention false다. 두 monitor와 watchdog의 lifetime lock은 모두 held다.
+  missing 0, attention false다. Loaded-code SHA monitor activation으로 dashboard recovery count는 현재
+  2이며 PID 2065337 exact identity다. 두 monitor와 watchdog의 lifetime lock은 모두 held다.
   3회 연속 absence + 2초 final rescan 후 target별 최대 3회/시간 detached recovery하고 live process는
   signal하지 않는다. Exact target/watchdog commands는 `.runtime/handoff_state.json`, state는
   `.runtime/monitoring_watchdog_state.json`에 atomic 보존된다.
@@ -272,7 +274,7 @@ tmux new-window -n exercise3d-dashboard \
 ## Git state
 
 - branch: `agent/phase-5-1-pushup-0003-recovery`
-- latest implementation commit: deadline marker identity binding `e31098c`; premature deadline publication gate `ddd3461`; durable latest-completion event `a0ad72c`; remaining deadline order audit `f8f603b`; immutable freeze storage
+- latest implementation commit: sentinel loaded-code identity `60eadb8`; deadline marker identity binding `e31098c`; premature deadline publication gate `ddd3461`; durable latest-completion event `a0ad72c`; remaining deadline order audit `f8f603b`; immutable freeze storage
   forecast `5bb9c4c`; monitoring-plane recovery
   watchdog `16a8600` + default-path validation
   fix `5c93d4e`; SAM output storage forecast `b24f509`; quality follower recovery
@@ -289,4 +291,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-12 13:19 KST
+- 2026-08-12 13:36 KST

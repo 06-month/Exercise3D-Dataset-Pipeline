@@ -543,6 +543,22 @@
   GPU inference/SAM/supervisor에는 변화가 없으며 CPU-only sentinel activation은 watchdog recovery gate로
   별도 수행한다.
 
+### Deadline loaded-code activation
+
+- Publication-safety PASS 후 implementation commit `60eadb8`를 push했다. Dashboard PID 2044638의
+  cwd/exact argv/child 0/singleton lock과 monitoring watchdog의 exact identity를 확인한 뒤 dashboard만
+  TERM했다. 수동 launch 없이 3-cycle/final-rescan recovery로 PID 2065337이 기동됐고 live identity exact,
+  missing 0, attention false를 확인했다.
+- 새 dashboard는 기존 sentinel state에 implementation hash가 없어
+  `DEADLINE_SENTINEL_CODE_DRIFT`를 실제로 올렸다. Sentinel PID 1882473의 cwd/exact argv/child 0/lock과
+  sentinel watchdog restart 0/identity exact를 확인한 뒤 CPU-only sentinel만 TERM했다.
+- Sentinel watchdog은 3회 absence와 final rescan 후 동일 frozen command로 PID 2068008을 1회 복구했다.
+  새 state의 loaded sentinel/exporter SHA는 current file SHA와 각각 exact-match하며 dashboard
+  `implementation.exact=true`, drift attention 제거, watchdog missing 0/attention false다. Sentinel과
+  dashboard 모두 child 0 및 lifetime lock held를 재확인했다.
+- Sapiens PID 373049, autonomous supervisor PID 1701200, SAM policy/follower/checkpoint output에는
+  signal·restart·duplicate launch가 없었다. 남은 attention은 기존 deadline ETA/coverage warning 두 건뿐이다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화
