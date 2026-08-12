@@ -38,13 +38,13 @@
   사용해 300초 backoff 뒤 1회만 재시도한다. Backoff 중에는 다른 ready sequence를 진행하고
   retry attempt/UTC를 atomic supervisor state에 남긴다. 현재 live PID는 이 변경 전 시작했으므로
   활성화를 위해 restart하지 않았으며, 향후 watchdog recovery가 current entrypoint를 load할 때 적용된다.
-- 2026-08-12 14:36 KST dashboard snapshot: `benchpress_0001` Mode B/body fit/Mode C/quality/freeze-ready와
+- 2026-08-12 14:45 KST dashboard snapshot: `benchpress_0001` Mode B/body fit/Mode C/quality/freeze-ready와
   12-sequence immutable checkpoint가 완료됐고 supervisor는 다음 3-view pose dependency를
-  완료한 `benchpress_0002`의 sequence pipeline을 streaming 중
+  완료한 `benchpress_0002`의 SAM Mode B pipeline을 streaming 중
 - Sapiens durable 39/78 camera, current partial 포함 25,501/65,430 crop; PID 373049 alive,
   current `barbellrow_0003/cam1`
-- Sapiens recent-completed-camera throughput 0.234 crop/s, average 0.219 crop/s; projected ETA는
-  deadline 약 58분 후 risk.
+- Sapiens recent-completed-camera throughput 0.234 crop/s, average 0.217 crop/s; projected ETA는
+  deadline 약 1시간 7분 후 risk.
   OOM/retry/stall은 없음
 - Phase 7 initial/final triangulation reuse는 pose NPZ/metadata, selected camera refinement/validation,
   first-frame shape source, temporal report, VGGT canvas metadata, canonical config와 triangulation tool의
@@ -54,7 +54,7 @@
   않는다. 기존 12 completed sequence는 supervisor successful-row gate로 호출하지 않아 재삼각화하지 않으며,
   다음 새 sequence부터 적용된다.
 - SAM durable 36/78 camera, 23,460/65,595 frame, 12/26 full sequence; aggregate 0.584 frame/s.
-  현재 SAM child는 없으며 `benchpress_0002` 3-view pose 완료 후 cam1부터 자동 재개한다.
+  현재 PID 2158180이 `benchpress_0002/cam1`을 처리 중이며 14:45 KST snapshot의 partial output은 64 frame이다.
   Future `run_sam_body4d_full.py` invocation은 GPU child 생성 전
   `.runtime/sam_body4d_full.lock`을 lifetime 동안 보유하고, exact coordinator 또는 Mode B
   benchmark/primary child의 resolved output이 같은 SAM root 아래인지 `/proc`에서 검사한다.
@@ -88,13 +88,13 @@
   새 signed completion은 follower fast path에서도 source drift를 확인하며 corrupt NPZ는 follower 종료 대신
   bounded retry state로 전환한다. Live quality follower는 재시작하지 않았고 다음 supervisor quality
   subprocess부터 current builder가 자동 적용된다.
-- GPU: A100 80GB, Sapiens-only downstream-overlap snapshot 36,375 MiB/100%, 373.46 W, 56°C;
+- GPU: A100 80GB, Sapiens+SAM overlap snapshot 62,947 MiB/100%, 372.87 W, 56°C;
   14:19 KST 단일 snapshot의 0% utilization은 다음 14:23 KST snapshot에서 100%로 복귀했고 stall attention은 없음;
   observed OOM/retry 없음
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
 - handoff monitor PID 2006909: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
   `updated_at_utc` 증가와 exact active/resume command/stage count 보존 확인 완료
-- deadline snapshot sentinel PID 2076548: 2026-08-14 13:00 KST에 completed sequence와
+- deadline snapshot sentinel PID 2171153: 2026-08-14 13:00 KST에 completed sequence와
   `INCOMPLETE` 목록을 별도 versioned private build로 export; local state는
   `.runtime/deadline_snapshot_state.json`, 현재 `WAITING_DEADLINE`
   Exporter는 hidden `.<build_id>.inprogress`에서 checksum-resume한 뒤 전수 integrity PASS 시 final
@@ -121,8 +121,11 @@
   cutoff eligibility, copy 사이의 replacement는 `INCOMPLETE` 또는 sentinel retry로 남는다. 다음 checkpoint/
   deadline exporter subprocess가 current code를 자연스럽게 load하며 live process restart는 없다.
   GPU inference/supervisor는 건드리지 않았다.
-- deadline sentinel watchdog PID 1882820: live/persisted command digest exact-match,
-  loaded-code/ctime-policy activation recovery 2회, 현재 missing 0/attention false. State는
+- deadline sentinel watchdog PID 1882820: live/persisted command digest exact-match.
+  Exporter `2cfd6b7` 반영 뒤 dashboard가 loaded-code drift를 탐지해, old CPU-only sentinel PID 2076548의
+  exact argv/cwd, child 0, `WAITING_DEADLINE`, lifetime lock, restart budget 0/3을 확인한 후 그 PID에만
+  SIGTERM을 보냈다. 수동 launch 없이 watchdog의 3-cycle/final-rescan이 PID 2171153을 복구했고 current
+  exporter SHA exact, `WAITING_DEADLINE`, restart 1/3, attention false다. State는
   `.runtime/deadline_sentinel_watchdog_state.json`.
   Sentinel lifetime lock은 별도 process probe에서 held로 확인했고 exporter는 build ID별
   lock을 staging mutation 전에 취득한다.
@@ -196,7 +199,9 @@ Public-safe Sapiens command 형태:
 - full selector: 65,595 frame, target 65,430, ambiguity 139, `NO_TARGET` 26, identity/integrity failure 0
 - Sapiens2 pose: complete 39 camera와 current partial 합계 25,501 accepted target crops;
   `benchpress_0002`까지 13 sequence 3-view schema/finite PASS
-- Phase 7 final: 12 sequence schema PASS/body-fit eligible, NO_GO 0
+- Phase 7 final: 13 sequence schema PASS/body-fit eligible, NO_GO 0. 첫 신규 source-bound
+  `benchpress_0002` initial/final marker는 각각 15개 dependency, `COMPLETE`, current signature exact,
+  `PHASE5_BACKGROUND_BA`, schema/finite PASS이며 absolute private path 0이다.
 - concurrent Mode B 8-frame smoke: mesh/numeric/PTS schema PASS, combined peak 48,525 MiB
 - full Mode B `barbellrow_0000`: 3 camera/1,770 frame, 전 completion check PASS,
   합산 2,960.81초(0.59781 frame/s), combined peak 61,821 MiB
@@ -321,11 +326,11 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Runtime estimates
 
-- 2026-08-12 14:36 KST snapshot: Sapiens recent-completed-camera rate 0.234 crop/s,
-  streaming ETA는 deadline 약 58분 후. Downstream overhead를 제외한 sequence schedule
+- 2026-08-12 14:45 KST snapshot: Sapiens recent-completed-camera rate 0.234 crop/s,
+  streaming ETA는 deadline 약 1시간 7분 후. Downstream overhead를 제외한 sequence schedule
   upper bound는 deadline까지 25/26(`squat_0003` first late), empirical p90-adjusted estimate는
   25/26(`squat_0003` first late)
-- deadline margin: Sapiens 전량 기준 약 -0.97 h; 대신 Mode B complete sequence와
+- deadline margin: Sapiens 전량 기준 약 -1.12 h; 대신 Mode B complete sequence와
   deadline snapshot을 내구적으로 확보
 - concurrent SAM Mode B aggregate 23,460 frame, measured 0.584 frame/s;
   standalone expected 20.80 h projection은
@@ -363,4 +368,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-12 14:41 KST
+- 2026-08-12 14:47 KST

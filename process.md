@@ -775,6 +775,24 @@
   OOM/retry/stall 0이고 ETA warning은 deadline +58분으로 개선됐다. Existing GPU/follower/supervisor에는
   signal/restart/duplicate launch가 없었다.
 
+### First source-bound Phase 7 activation과 sentinel code-drift recovery
+
+- `benchpress_0002`가 14:36 KST에 3-view Sapiens PASS가 되면서 live supervisor가 current Phase 7 subprocess를
+  처음 호출했다. Initial/final `.phase7_source_identity.json`은 각각 `COMPLETE`, 15 dependency,
+  `PHASE5_BACKGROUND_BA`이며 current recomputed signature와 exact-match했다. Canonical schema/finite/source
+  validation도 양쪽 모두 PASS했고 marker label에 absolute private path는 없었다. Phase 7 count는 13/26이다.
+- Exporter implementation 변경을 dashboard가 `DEADLINE_SENTINEL_CODE_DRIFT`로 정확히 탐지했다. Sentinel
+  watchdog은 policy상 live process를 signal하지 않으므로 자동 code activation은 하지 않는다. Old CPU-only
+  sentinel PID 2076548의 exact argv/cwd, child 0, `WAITING_DEADLINE`, lifetime lock, watchdog RUNNING과 restart
+  budget 0/3을 확인한 뒤 이 PID에만 SIGTERM을 보냈고 직접 launch하지 않았다.
+- Watchdog은 3-cycle absence confirmation과 final rescan 후 PID 2171153을 동일 pinned command로 detached
+  recovery했다. 새 state는 current exporter SHA exact, `WAITING_DEADLINE`, restart 1/3, attention false이며
+  dashboard의 code-drift ERROR가 해소됐다. Sapiens PID 373049, SAM PID 2158180, autonomous supervisor와
+  다른 followers에는 signal/restart가 없었다.
+- 14:45 KST snapshot은 SAM `benchpress_0002/cam1` 64-frame partial, combined VRAM 62,947 MiB, GPU 100%,
+  OOM/retry/stall 0을 확인했다. 남은 attention은 deadline ETA +1시간 7분과 25/26 coverage forecast뿐이며,
+  이 recovery 검증 뒤 정상 상태 확인용 추가 AI polling은 수행하지 않는다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화
