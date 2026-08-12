@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import argparse
 import csv
+import fcntl
 import json
 import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO, Sequence
 
 import numpy as np
 
@@ -21,6 +22,12 @@ except ModuleNotFoundError:
 
 
 CAMERAS = ("cam1", "cam2", "cam3")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+COORDINATOR_SCRIPT = Path(__file__).resolve()
+BENCHMARK_SCRIPT = COORDINATOR_SCRIPT.with_name("benchmark_sam_body4d.py")
+PRIMARY_RUNNER_SCRIPT = COORDINATOR_SCRIPT.with_name(
+    "sam_body_primary_target_runner.py"
+)
 
 
 def utc_now() -> str:
@@ -47,7 +54,145 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cameras", type=parse_list, default=list(CAMERAS))
     parser.add_argument("--retry-failures", type=int, default=1)
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument(
+        "--instance-lock",
+        type=Path,
+        default=PROJECT_ROOT / ".runtime" / "sam_body4d_full.lock",
+        help="Lifetime advisory lock preventing duplicate SAM Mode B jobs.",
+    )
     return parser
+
+
+def acquire_instance_lock(path: Path) -> BinaryIO | None:
+    """Hold a singleton lock for one full SAM Mode B coordinator lifetime."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    handle = os.fdopen(descriptor, "r+b", buffering=0)
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        return None
+    handle.seek(0)
+    handle.truncate()
+    handle.write(f"{os.getpid()}\n".encode("ascii"))
+    handle.flush()
+    os.fsync(handle.fileno())
+    return handle
+
+
+def cli_option(argv: Sequence[str], name: str) -> str | None:
+    for index, value in enumerate(argv):
+        if value == name and index + 1 < len(argv):
+            return str(argv[index + 1])
+        if value.startswith(name + "="):
+            return value.split("=", 1)[1]
+    return None
+
+
+def resolved_cli_path(argv: Sequence[str], name: str, cwd: Path) -> Path | None:
+    raw = cli_option(argv, name)
+    if raw is None:
+        return None
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = cwd / candidate
+    try:
+        return candidate.resolve()
+    except OSError:
+        return None
+
+
+def command_matches_sam_job(
+    argv: Sequence[str], cwd: Path, output_root: Path
+) -> bool:
+    """Match a coordinator or orphan GPU child bound below one output root."""
+    script_values = [
+        value
+        for value in argv
+        if value.endswith(
+            (
+                "run_sam_body4d_full.py",
+                "benchmark_sam_body4d.py",
+                "sam_body_primary_target_runner.py",
+            )
+        )
+    ]
+    if len(script_values) != 1:
+        return False
+    script = Path(script_values[0])
+    if not script.is_absolute():
+        script = cwd / script
+    try:
+        script = script.resolve()
+        root = output_root.resolve()
+    except OSError:
+        return False
+
+    if script == COORDINATOR_SCRIPT:
+        candidate = resolved_cli_path(argv, "--output-root", cwd)
+        return candidate == root
+
+    if cli_option(argv, "--mode") != "B":
+        return False
+    candidate = resolved_cli_path(argv, "--output-dir", cwd)
+    if candidate is None:
+        return False
+    try:
+        relative = candidate.relative_to(root)
+    except ValueError:
+        return False
+    if not relative.parts:
+        return False
+    if script == BENCHMARK_SCRIPT:
+        return "--run" in argv
+    if script == PRIMARY_RUNNER_SCRIPT:
+        return candidate.name == "mode_b_private_output"
+    return False
+
+
+def matching_sam_processes(
+    output_root: Path,
+    *,
+    proc_root: Path = Path("/proc"),
+    exclude_pid: int | None = None,
+) -> list[int]:
+    """Find live legacy coordinators and orphan children for this output root."""
+    if not proc_root.is_dir():
+        raise RuntimeError("process table is unavailable; refusing SAM launch")
+    try:
+        directories = list(proc_root.iterdir())
+    except OSError as error:
+        raise RuntimeError(
+            "process table cannot be enumerated; refusing SAM launch"
+        ) from error
+    matches: list[int] = []
+    for directory in directories:
+        if not directory.name.isdigit():
+            continue
+        pid = int(directory.name)
+        if pid == exclude_pid:
+            continue
+        try:
+            status = (directory / "stat").read_text(encoding="utf-8")
+            state = status.rsplit(")", 1)[1].strip().split()[0]
+            if state == "Z":
+                continue
+            raw = (directory / "cmdline").read_bytes()
+            argv = [
+                value.decode("utf-8", errors="surrogateescape")
+                for value in raw.split(b"\0")
+                if value
+            ]
+            cwd = (directory / "cwd").resolve(strict=True)
+        except (OSError, IndexError):
+            continue
+        if command_matches_sam_job(argv, cwd, output_root):
+            matches.append(pid)
+    return sorted(matches)
 
 
 def frame_directory(dataset_root: Path, sequence: str, camera: str) -> Path:
@@ -163,10 +308,8 @@ def atomic_json(path: Path, payload: dict[str, Any]) -> None:
     os.replace(temporary, path)
 
 
-def main() -> int:
-    args = build_parser().parse_args()
-    project_root = Path(__file__).resolve().parents[1]
-    benchmark_tool = project_root / "tools" / "benchmark_sam_body4d.py"
+def run_full(args: argparse.Namespace) -> int:
+    benchmark_tool = PROJECT_ROOT / "tools" / "benchmark_sam_body4d.py"
     rows = []
     for sequence in args.sequences:
         for camera in args.cameras:
@@ -200,7 +343,7 @@ def main() -> int:
                         "--python", str(args.body4d_python.resolve()),
                         "--run",
                     ]
-                    process = subprocess.run(command, cwd=project_root)
+                    process = subprocess.run(command, cwd=PROJECT_ROOT)
                     result = completion_status(output_dir, frame_count)
                     result["runner_exit_code"] = process.returncode
                     result["attempt"] = attempt + 1
@@ -231,6 +374,59 @@ def main() -> int:
     atomic_json(args.runtime_dir.resolve() / "sam_body4d_full_summary.json", summary)
     print(json.dumps(summary, indent=2))
     return 0 if summary["status"] == "PASS" else 2
+
+
+def guarded_run(args: argparse.Namespace) -> int:
+    """Refuse duplicate current or legacy jobs before spawning a GPU child."""
+    instance_lock = acquire_instance_lock(args.instance_lock.resolve())
+    if instance_lock is None:
+        print(
+            json.dumps(
+                {
+                    "status": "DUPLICATE_SAM_MODE_B_REFUSED",
+                    "reason": "instance_lock_held",
+                    "pid": os.getpid(),
+                }
+            ),
+            flush=True,
+        )
+        return 3
+    try:
+        try:
+            existing = matching_sam_processes(
+                args.output_root.expanduser().resolve(), exclude_pid=os.getpid()
+            )
+        except RuntimeError as error:
+            print(
+                json.dumps(
+                    {
+                        "status": "SAM_MODE_B_PROCESS_DISCOVERY_FAILED",
+                        "reason": str(error),
+                        "pid": os.getpid(),
+                    }
+                ),
+                flush=True,
+            )
+            return 4
+        if existing:
+            print(
+                json.dumps(
+                    {
+                        "status": "EXISTING_SAM_MODE_B_REFUSED",
+                        "matching_pids": existing,
+                        "pid": os.getpid(),
+                    }
+                ),
+                flush=True,
+            )
+            return 3
+        return run_full(args)
+    finally:
+        instance_lock.close()
+
+
+def main() -> int:
+    return guarded_run(build_parser().parse_args())
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from argparse import Namespace
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,7 +22,12 @@ from tools.sam_body_primary_target_runner import (
     run_mode_body4d,
     save_body_prior_numeric,
 )
-from tools.run_sam_body4d_full import completion_status
+from tools.run_sam_body4d_full import (
+    acquire_instance_lock,
+    command_matches_sam_job,
+    completion_status,
+    guarded_run,
+)
 from tools.summarize_sam_body_runtime import compute_pass_summary
 from tools.summarize_sam_body_runtime import read_rows
 
@@ -47,6 +53,126 @@ class SamBodyRuntimeTest(unittest.TestCase):
             "peak_nvidia_vram_mib": "20000",
             "refinement_model_seconds": "0",
         }
+
+    def test_full_runner_lifetime_lock_refuses_duplicate(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            lock = Path(temporary) / "sam.lock"
+            first = acquire_instance_lock(lock)
+            self.assertIsNotNone(first)
+            self.assertIsNone(acquire_instance_lock(lock))
+            assert first is not None
+            first.close()
+            recovered = acquire_instance_lock(lock)
+            self.assertIsNotNone(recovered)
+            assert recovered is not None
+            recovered.close()
+
+    def test_full_runner_lock_refuses_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "keep.txt"
+            target.write_text("keep", encoding="utf-8")
+            lock = root / "sam.lock"
+            lock.symlink_to(target)
+            with self.assertRaises(OSError):
+                acquire_instance_lock(lock)
+            self.assertEqual(target.read_text(encoding="utf-8"), "keep")
+
+    def test_sam_process_match_binds_entrypoint_mode_and_output(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        output = repository / "outputs" / "sam"
+        coordinator = [
+            "python",
+            "tools/run_sam_body4d_full.py",
+            "--output-root",
+            "outputs/sam",
+        ]
+        benchmark = [
+            "python",
+            "tools/benchmark_sam_body4d.py",
+            "--mode",
+            "B",
+            "--output-dir",
+            "outputs/sam/sequence/cam1",
+            "--run",
+        ]
+        primary = [
+            "python",
+            "tools/sam_body_primary_target_runner.py",
+            "--mode=B",
+            "--output-dir=outputs/sam/sequence/cam1/mode_b_private_output",
+        ]
+        self.assertTrue(command_matches_sam_job(coordinator, repository, output))
+        self.assertTrue(command_matches_sam_job(benchmark, repository, output))
+        self.assertTrue(command_matches_sam_job(primary, repository, output))
+        self.assertFalse(
+            command_matches_sam_job(
+                [*benchmark[:3], "C", *benchmark[4:]], repository, output
+            )
+        )
+        self.assertFalse(
+            command_matches_sam_job(
+                [item for item in benchmark if item != "--run"], repository, output
+            )
+        )
+        self.assertFalse(
+            command_matches_sam_job(
+                coordinator, repository, repository / "outputs" / "other"
+            )
+        )
+
+    def test_sam_guard_refuses_legacy_or_orphan_before_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = Namespace(
+                instance_lock=root / "sam.lock",
+                output_root=root / "sam",
+            )
+            with (
+                mock.patch(
+                    "tools.run_sam_body4d_full.matching_sam_processes",
+                    return_value=[1234],
+                ),
+                mock.patch("tools.run_sam_body4d_full.run_full") as run_full,
+                mock.patch("builtins.print"),
+            ):
+                self.assertEqual(guarded_run(args), 3)
+            run_full.assert_not_called()
+
+    def test_sam_guard_holds_lock_for_full_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            lock = root / "sam.lock"
+            args = Namespace(instance_lock=lock, output_root=root / "sam")
+
+            def observe_lock(_args):
+                self.assertIsNone(acquire_instance_lock(lock))
+                return 0
+
+            with (
+                mock.patch(
+                    "tools.run_sam_body4d_full.matching_sam_processes",
+                    return_value=[],
+                ),
+                mock.patch(
+                    "tools.run_sam_body4d_full.run_full", side_effect=observe_lock
+                ),
+            ):
+                self.assertEqual(guarded_run(args), 0)
+            released = acquire_instance_lock(lock)
+            self.assertIsNotNone(released)
+            assert released is not None
+            released.close()
+
+    def test_sam_process_discovery_fails_closed_without_proc(self) -> None:
+        from tools.run_sam_body4d_full import matching_sam_processes
+
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(RuntimeError, "process table is unavailable"):
+                matching_sam_processes(
+                    Path(temporary) / "sam",
+                    proc_root=Path(temporary) / "missing-proc",
+                )
 
     def test_mode_requirements_exclude_bypassed_vitdet(self) -> None:
         files_a, dirs_a = required_checkpoint_components(MODE_A)
