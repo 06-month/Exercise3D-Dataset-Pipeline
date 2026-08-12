@@ -413,6 +413,29 @@
   22,787 frame이며 cam3 Mode B 192 frame으로 전진했다. Sapiens 23,964/65,430 crop,
   OOM/retry/stall 0이고 deadline 경고 외 operational attention은 없다.
 
+### Immutable checkpoint/final snapshot storage forecast
+
+- Predeadline follower는 ready set이 1개 늘 때마다 모든 기존 complete sequence를 다시 포함하는 별도
+  immutable cumulative build를 만들므로, SAM-only forecast는 freeze write duplication을 제외했다.
+- Dashboard가 largest verified checkpoint manifest의 sequence별 payload bytes를 selector frame 수로
+  정규화한다. Future sequence에는 관측 최대 16,149.38 bytes/frame을 적용하고, current 11개 이후
+  매 sequence checkpoint와 별도 deadline build ID의 final snapshot을 모두 합산한다.
+- 2026-08-12 13:01 KST empirical p90 deadline coverage 24/26 기준 새 checkpoint 13개 + final snapshot
+  1개의 remaining write는 8.58 GiB다. 모든 26개가 deadline 전에 ready가 되는 observed-max
+  시나리오는 checkpoint 15개 + final snapshot 1개, 10.61 GiB다.
+- SAM forecast와 합친 projected free는 deadline 24개 기준 95.08 GiB, all-sequence observed-max
+  93.05 GiB이며 20 GiB reserve margin은 각각 75.08/73.05 GiB다. Sapiens/compact downstream/
+  unrelated write와 manifest filesystem overhead 제외를 state assumptions에 명시한다.
+- All-sequence observed-max combined free가 reserve 아래면
+  `DISK_COMBINED_FORECAST_RESERVE_AT_RISK`를 기록한다. Helper/real snapshot과 전체 124 tests,
+  publication safety가 PASS했고 implementation commit `5bb9c4c`를 push했다.
+- Exact argv/cwd/child 0인 CPU-only dashboard PID 2006908만 SIGTERM 후 동일 argv PID 2019834로
+  교체했다. Dashboard lock held, monitoring watchdog live/resume SHA exact, restart 0이며 GPU
+  inference/SAM/supervisor에는 signal하지 않았다.
+- 같은 snapshot에서 Sapiens `benchpress_0002/cam1`이 새 durable PASS가 되어 37/78 camera,
+  24,135 crop이며 cam2로 진행했다. SAM은 35/78 camera, cam3 partial 449 frame이고
+  OOM/retry/stall 0이다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화
