@@ -323,6 +323,135 @@ def sam_output_storage_forecast(
     }
 
 
+def checkpoint_export_storage_forecast(
+    export_root: Path,
+    checkpoint: dict[str, Any],
+    workloads: list[dict[str, Any]],
+    *,
+    projected_deadline_sequences: int,
+) -> dict[str, Any]:
+    """Forecast cumulative immutable checkpoints plus the deadline snapshot.
+
+    Each new freeze-ready sequence can publish a complete cumulative build.  To
+    avoid undercounting that duplication, future sequence bytes are scaled by
+    the largest observed bytes/frame among the verified checkpoint sequences.
+    """
+    build_id = checkpoint.get("build_id")
+    manifest_path = export_root / str(build_id) / "dataset_manifest.json"
+    manifest = read_json(manifest_path) if build_id else {}
+    requested = manifest.get("requested_sequences")
+    files = manifest.get("files")
+    workload_order = [str(row.get("sequence")) for row in workloads]
+    frame_counts = {
+        str(row.get("sequence")): int(row.get("frames", 0) or 0)
+        for row in workloads
+    }
+    errors: list[str] = []
+    if not isinstance(requested, list) or not requested:
+        errors.append("checkpoint requested sequence list is unavailable")
+    if not isinstance(files, list) or not files:
+        errors.append("checkpoint file inventory is unavailable")
+    completed = [str(sequence) for sequence in requested] if isinstance(requested, list) else []
+    if completed != workload_order[: len(completed)]:
+        errors.append("checkpoint sequences are not a prefix of frozen workload order")
+    sequence_bytes = {sequence: 0 for sequence in completed}
+    global_bytes = 0
+    if isinstance(files, list):
+        for row in files:
+            if not isinstance(row, dict):
+                errors.append("checkpoint file inventory contains a non-object row")
+                continue
+            try:
+                size = int(row.get("bytes", -1))
+            except (TypeError, ValueError):
+                size = -1
+            sequence = str(row.get("sequence", ""))
+            if size < 0:
+                errors.append("checkpoint file inventory contains invalid bytes")
+            elif sequence:
+                if sequence not in sequence_bytes:
+                    errors.append(f"checkpoint file has unknown sequence:{sequence}")
+                else:
+                    sequence_bytes[sequence] += size
+            else:
+                global_bytes += size
+    rates: list[float] = []
+    for sequence in completed:
+        frames = frame_counts.get(sequence, 0)
+        size = sequence_bytes.get(sequence, 0)
+        if frames <= 0 or size <= 0:
+            errors.append(f"checkpoint sequence sample is invalid:{sequence}")
+        else:
+            rates.append(size / frames)
+    if errors or not rates or not workloads:
+        return {
+            "available": False,
+            "kind": "IMMUTABLE_CHECKPOINT_MAX_BYTES_PER_FRAME",
+            "build_id": build_id,
+            "errors": errors,
+        }
+
+    max_bytes_per_frame = max(rates)
+    estimated_sequence_bytes = {
+        sequence: (
+            sequence_bytes[sequence]
+            if sequence in sequence_bytes
+            else int(math.ceil(max_bytes_per_frame * frame_counts[sequence]))
+        )
+        for sequence in workload_order
+    }
+    current_count = len(completed)
+    total_count = len(workload_order)
+    projected_count = min(
+        total_count, max(current_count, int(projected_deadline_sequences))
+    )
+
+    def build_bytes(count: int) -> int:
+        return global_bytes + sum(
+            estimated_sequence_bytes[sequence]
+            for sequence in workload_order[:count]
+        )
+
+    def remaining_writes(target_count: int) -> tuple[int, list[int]]:
+        incremental = [
+            build_bytes(count) for count in range(current_count + 1, target_count + 1)
+        ]
+        # The deadline sentinel uses a separate immutable build ID even when its
+        # completed membership equals the latest predeadline checkpoint.
+        final_snapshot = build_bytes(target_count)
+        return sum(incremental) + final_snapshot, incremental
+
+    projected_bytes, projected_builds = remaining_writes(projected_count)
+    upper_bytes, upper_builds = remaining_writes(total_count)
+    gib = float(1024**3)
+    return {
+        "available": True,
+        "kind": "IMMUTABLE_CHECKPOINT_MAX_BYTES_PER_FRAME",
+        "build_id": str(build_id),
+        "sample_count": len(rates),
+        "current_checkpoint_sequences": current_count,
+        "projected_deadline_sequences": projected_count,
+        "total_sequences": total_count,
+        "global_payload_bytes_per_build": global_bytes,
+        "median_bytes_per_frame": statistics.median(rates),
+        "maximum_bytes_per_frame": max_bytes_per_frame,
+        "projected_new_checkpoint_build_count": len(projected_builds),
+        "projected_deadline_snapshot_count": 1,
+        "projected_remaining_output_bytes": projected_bytes,
+        "projected_remaining_output_gib": projected_bytes / gib,
+        "all_sequence_new_checkpoint_build_count": len(upper_builds),
+        "all_sequence_remaining_output_bytes": upper_bytes,
+        "all_sequence_remaining_output_gib": upper_bytes / gib,
+        "assumptions": [
+            "each newly ready sequence creates one cumulative immutable checkpoint",
+            "deadline snapshot uses a separate immutable build ID",
+            "future sequence bytes/frame do not exceed the observed maximum",
+            "manifest/status filesystem overhead excluded",
+        ],
+        "errors": [],
+    }
+
+
 def deadline_freeze_upper_bound(
     workloads: list[dict[str, Any]],
     *,
@@ -1038,6 +1167,73 @@ def build_dashboard(
         free_gib=safe_float(disk.get("free_gib")),
         minimum_free_gib=args.minimum_free_gib,
     )
+    adjusted_deadline_count = freeze_forecast.get(
+        "empirical_p90_adjusted", {}
+    ).get("estimated_completed_sequences_by_deadline")
+    optimistic_deadline_count = freeze_forecast.get(
+        "estimated_completed_sequences_by_deadline"
+    )
+    projected_deadline_count = (
+        adjusted_deadline_count
+        if isinstance(adjusted_deadline_count, int)
+        else optimistic_deadline_count
+        if isinstance(optimistic_deadline_count, int)
+        else int(export.get("durable_checkpoint", {}).get("completed_sequences", 0))
+    )
+    disk["checkpoint_export_forecast"] = checkpoint_export_storage_forecast(
+        args.export_root,
+        dict(export.get("durable_checkpoint", {})),
+        workloads,
+        projected_deadline_sequences=projected_deadline_count,
+    )
+    sam_storage = disk["sam_output_forecast"]
+    checkpoint_storage = disk["checkpoint_export_forecast"]
+    free_gib_value = safe_float(disk.get("free_gib"))
+    if (
+        free_gib_value is not None
+        and sam_storage.get("available")
+        and checkpoint_storage.get("available")
+    ):
+        sam_gib = float(sam_storage["projected_remaining_output_gib"])
+        deadline_checkpoint_gib = float(
+            checkpoint_storage["projected_remaining_output_gib"]
+        )
+        upper_checkpoint_gib = float(
+            checkpoint_storage["all_sequence_remaining_output_gib"]
+        )
+        disk["combined_output_forecast"] = {
+            "available": True,
+            "kind": "SAM_PLUS_IMMUTABLE_FREEZE_WRITES",
+            "projected_deadline_free_gib": (
+                free_gib_value - sam_gib - deadline_checkpoint_gib
+            ),
+            "all_sequence_observed_max_free_gib": (
+                free_gib_value - sam_gib - upper_checkpoint_gib
+            ),
+            "minimum_free_gib": args.minimum_free_gib,
+            "projected_deadline_reserve_margin_gib": (
+                free_gib_value
+                - sam_gib
+                - deadline_checkpoint_gib
+                - args.minimum_free_gib
+            ),
+            "all_sequence_observed_max_reserve_margin_gib": (
+                free_gib_value
+                - sam_gib
+                - upper_checkpoint_gib
+                - args.minimum_free_gib
+            ),
+            "assumptions": [
+                "SAM and immutable checkpoint forecasts are additive",
+                "Sapiens, compact downstream outputs, and unrelated writes excluded",
+            ],
+        }
+    else:
+        disk["combined_output_forecast"] = {
+            "available": False,
+            "kind": "SAM_PLUS_IMMUTABLE_FREEZE_WRITES",
+            "reason": "SAM or checkpoint/export storage forecast is unavailable",
+        }
 
     counters = {
         "sapiens_crops": sapiens_done,
@@ -1454,6 +1650,22 @@ def build_dashboard(
             "DISK_FORECAST_RESERVE_AT_RISK",
             f"SAM Mode B p90 output forecast leaves {projected_free_gib:.2f} GiB, "
             f"below the {args.minimum_free_gib:.2f} GiB reserve.",
+            severity="WARNING",
+        )
+    combined_storage = disk.get("combined_output_forecast", {})
+    all_sequence_free_gib = safe_float(
+        combined_storage.get("all_sequence_observed_max_free_gib")
+    )
+    if (
+        combined_storage.get("available")
+        and all_sequence_free_gib is not None
+        and all_sequence_free_gib < args.minimum_free_gib
+    ):
+        attention(
+            "DISK_COMBINED_FORECAST_RESERVE_AT_RISK",
+            f"SAM plus immutable freeze-write all-sequence observed-max forecast leaves "
+            f"{all_sequence_free_gib:.2f} GiB, below the "
+            f"{args.minimum_free_gib:.2f} GiB reserve.",
             severity="WARNING",
         )
     gpu_last_success = parse_datetime(gpu.get("last_success_at"))
@@ -1908,13 +2120,17 @@ def render_rich(state: dict[str, Any], console: Any | None = None) -> Any:
     gpu = state["gpu"]
     disk = state["disk"]
     storage_forecast = disk.get("sam_output_forecast", {})
+    combined_forecast = disk.get("combined_output_forecast", {})
     telemetry_suffix = " (cached)" if not gpu.get("telemetry_fresh", True) else ""
     system = (
         f"GPU {cell(gpu.get('utilization_pct'), '%')}{telemetry_suffix} | "
         f"VRAM {cell(gpu.get('memory_used_mib'))}/{cell(gpu.get('memory_total_mib'))} MiB | "
         f"Power {cell(gpu.get('power_draw_w'))} W | Temp {cell(gpu.get('temperature_c'))} C\n"
-        f"Disk free {cell(disk.get('free_gib'))} GiB | SAM-final forecast "
+        f"Disk free {cell(disk.get('free_gib'))} GiB | SAM-final "
         f"{cell(storage_forecast.get('projected_free_after_sam_gib'))} GiB | "
+        f"combined deadline/all "
+        f"{cell(combined_forecast.get('projected_deadline_free_gib'))}/"
+        f"{cell(combined_forecast.get('all_sequence_observed_max_free_gib'))} GiB | "
         f"Last progress {state['last_progress_timestamp']} | "
         f"Last event {state['last_event']}\n"
         f"Supervisor PID {state['supervisor']['pid'] or '-'} | "

@@ -11,6 +11,7 @@ from tools.monitor_autonomous_generation import (
     acquire_instance_lock as acquire_dashboard_lock,
     atomic_json,
     build_dashboard,
+    checkpoint_export_storage_forecast,
     deadline_freeze_upper_bound,
     export_progress,
     first_incomplete_camera,
@@ -23,6 +24,35 @@ from tools.monitor_autonomous_generation import (
 
 
 class AutonomousMonitorTest(unittest.TestCase):
+    def test_checkpoint_storage_forecast_counts_cumulative_builds(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            build_id = "checkpoint"
+            manifest = {
+                "requested_sequences": ["one"],
+                "files": [
+                    {"sequence": "", "path": "global.json", "bytes": 100},
+                    {"sequence": "one", "path": "one.npz", "bytes": 1_000},
+                ],
+            }
+            atomic_json(root / build_id / "dataset_manifest.json", manifest)
+            workloads = [
+                {"sequence": sequence, "frames": 10}
+                for sequence in ("one", "two", "three")
+            ]
+            forecast = checkpoint_export_storage_forecast(
+                root,
+                {"build_id": build_id},
+                workloads,
+                projected_deadline_sequences=2,
+            )
+            self.assertTrue(forecast["available"])
+            self.assertEqual(forecast["maximum_bytes_per_frame"], 100)
+            self.assertEqual(forecast["projected_new_checkpoint_build_count"], 1)
+            self.assertEqual(forecast["projected_remaining_output_bytes"], 4_200)
+            self.assertEqual(forecast["all_sequence_new_checkpoint_build_count"], 2)
+            self.assertEqual(forecast["all_sequence_remaining_output_bytes"], 8_300)
+
     def test_dashboard_lifetime_lock_rejects_duplicate_daemon(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "dashboard.lock"
