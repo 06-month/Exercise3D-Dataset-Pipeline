@@ -88,6 +88,13 @@
   저장하며 diff text/private path는 manifest에 포함하지 않는다.
 - 기존 immutable smoke를 강화 verifier로 read-only 재검증해 34 files/28,960,929 bytes,
   error 0을 확인했다.
+- Hardening commit `250ee73`의 clean worktree에서 `barbellrow_0000` quality-inclusive private smoke를
+  새 build ID로 publish했다. REVIEW 1/FAIL 0/INCOMPLETE 0, 36 files/28,993,394 bytes,
+  `git_worktree_dirty=false`, status/diff empty hash, exact-tree/ownership/SHA error 0이다.
+- 같은 build ID를 즉시 재호출했을 때 copy/publish를 반복하지 않고
+  `IMMUTABLE_BUILD_REUSED`로 36 files/28,993,394 bytes를 read-only 재검증했다.
+- Exact-tree, stale payload, symlink root/target, INCOMPLETE ownership, Git provenance regression을 포함한
+  전체 74개 unit test와 publication-safety가 PASS했다.
 
 ### Source-of-truth 재검증
 

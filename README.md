@@ -81,7 +81,7 @@ camera calibration을 구분합니다.
 | 10. Body Shape / Proportion | IMPLEMENTED PARTIAL | sequence-level shape/scale provenance 보존; evidence-backed subject mapping 부재로 cross-sequence fusion 안 함 |
 | 11. Pseudo-label Quality Control | RUNNING | 10 sequence/6,485 frame, REVIEW 10/FAIL 0; source-specific vector/bitmask, scalar accuracy score 없음 |
 | 12. Fit3D Validation | IMPLEMENTED/WAITING DATA | metric regression PASS; local Fit3D payload 부재로 실제 score 미주장 |
-| 13. Final Dataset Freeze | IMPLEMENTED/SMOKE PASS | 34-file immutable smoke integrity PASS; deadline build 입력 누적 중 |
+| 13. Final Dataset Freeze | IMPLEMENTED/SMOKE PASS | quality-inclusive 36-file exact-tree smoke PASS; deadline build 입력 누적 중 |
 
 `pushup_0003`은 Phase 5.1에서 observation, initialization, objective와 gate를 그대로 두고
 Stage 2 budget만 300에서 600으로 확장했습니다. 실제 322 evaluations에서 `xtol`로 수렴했고,
@@ -116,6 +116,8 @@ INCOMPLETE 상태를 versioned manifest에 기록합니다.
 geometry displacement p95 0.05167을 그대로 전파해 sequence는 `REVIEW_BODY_FIT_QUALITY`입니다.
 Complete sequence 하나만 사용한 private export smoke는 34 files의 size/SHA-256 불일치 없이
 freeze-eligible이었으며, REVIEW를 PASS로 승격하지 않았습니다.
+강화된 exact-tree exporter smoke는 Phase 11 quality 두 파일을 추가한 36 files/
+28,993,394 bytes를 전수 검증했고, clean commit provenance와 immutable read-only reuse까지 PASS했습니다.
 
 두 번째 `squat_0001`도 Mode B 3-view 3,801/3,801 frame과 1,267×26 body fit을 완료했습니다.
 Body fit coverage/alignment는 1.0이고 prior-only joint는 0이지만 normalized displacement p95

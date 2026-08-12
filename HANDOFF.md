@@ -80,6 +80,9 @@ Public-safe Sapiens command 형태:
   `squat_0001`은 후보 0 `PASS_MODE_B_FROZEN`; Mode C 실행/채택 0, Mode B payload 유지
 - private export smoke: REVIEW 1/FAIL 0/INCOMPLETE 0, 34 files, SHA/size mismatch 0,
   `freeze_eligible=true`
+- quality/exact-tree private smoke: commit `250ee73`, REVIEW 1/FAIL 0/INCOMPLETE 0,
+  36 files/28,993,394 bytes, `git_worktree_dirty=false`, exact-tree error 0;
+  same build ID rerun은 `IMMUTABLE_BUILD_REUSED`
 - completed Sapiens 34 camera와 SAM 32 camera의 `run_provenance.json` materialize PASS;
   model/checkpoint/config/source/selection/tool/exact-resume identity 포함
 - Phase 11: body-fit complete 10 sequence/6,485 reference frame, REVIEW 10/FAIL 0;

@@ -344,6 +344,8 @@
   actual tree↔global/sequence manifest exact-match, Git dirty/diff provenance 보존 후 atomic rename
 - first smoke: complete `barbellrow_0000`만 사용해 REVIEW 1/FAIL 0/INCOMPLETE 0,
   34 files, payload 28,960,929 bytes, SHA/size mismatch 0, freeze-eligible 확인
+- quality/exact-tree smoke: clean commit `250ee73`에서 REVIEW 1/FAIL 0/INCOMPLETE 0,
+  36 files/28,993,394 bytes, actual-tree/ownership/hash error 0, immutable reuse PASS
 - 다음 gate: downstream 연구 사용 승인
 
 ## Phase별 Git Definition of Done
