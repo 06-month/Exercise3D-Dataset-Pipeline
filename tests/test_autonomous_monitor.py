@@ -298,6 +298,7 @@ class AutonomousMonitorTest(unittest.TestCase):
             self.assertIn("SAPIENS_PROCESS_DEAD", codes)
             self.assertIn("SUPERVISOR_DEAD", codes)
             self.assertIn("QUALITY_FOLLOWER_DEAD", codes)
+            self.assertIn("QUALITY_FOLLOWER_WATCHDOG_DEAD", codes)
             self.assertIn("PREDEADLINE_CHECKPOINT_FOLLOWER_DEAD", codes)
             self.assertIn("PREDEADLINE_CHECKPOINT_FOLLOWER_WATCHDOG_DEAD", codes)
             self.assertIn("DISK_RESERVE_LOW", codes)
@@ -464,6 +465,7 @@ class AutonomousMonitorTest(unittest.TestCase):
                 self._process(7, "deadline_sentinel_watchdog"),
                 self._process(8, "checkpoint_follower"),
                 self._process(9, "checkpoint_follower_watchdog"),
+                self._process(10, "quality_follower_watchdog"),
             ]
             args = self._args(root)
             atomic_json(
@@ -505,6 +507,17 @@ class AutonomousMonitorTest(unittest.TestCase):
                     "attention_required": False,
                     "attention_reasons": [],
                     "last_event": "CHECKPOINT_FOLLOWER_OBSERVED",
+                    "restart_count_in_window": 0,
+                },
+            )
+            atomic_json(
+                args.quality_follower_watchdog_state,
+                {
+                    "updated_at_utc": now.isoformat(),
+                    "status": "RUNNING",
+                    "attention_required": False,
+                    "attention_reasons": [],
+                    "last_event": "QUALITY_FOLLOWER_OBSERVED",
                     "restart_count_in_window": 0,
                 },
             )
@@ -698,6 +711,7 @@ class AutonomousMonitorTest(unittest.TestCase):
             codes = {row["code"] for row in state["attention_reasons"]}
             self.assertIn("PREDEADLINE_CHECKPOINT_FOLLOWER_DEAD", codes)
             self.assertIn("PREDEADLINE_CHECKPOINT_FOLLOWER_WATCHDOG_DEAD", codes)
+            self.assertNotIn("QUALITY_FOLLOWER_WATCHDOG_DEAD", codes)
 
     @staticmethod
     def _process(pid: int, group: str) -> dict[str, object]:
@@ -726,6 +740,7 @@ class AutonomousMonitorTest(unittest.TestCase):
             / "checkpoint_follower_watchdog.json",
             deadline_state=root / "deadline.json",
             quality_follower_state=root / "quality_follower.json",
+            quality_follower_watchdog_state=root / "quality_follower_watchdog.json",
             sequence_status=root / "sequences.csv",
             autonomous_runtime_dir=runtime,
             runtime_dir=runtime,

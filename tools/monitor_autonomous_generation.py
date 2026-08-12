@@ -33,6 +33,7 @@ PROCESS_MARKERS = {
     "supervisor": {"run_autonomous_generation.py"},
     "supervisor_watchdog": {"run_autonomous_supervisor_watchdog.py"},
     "quality_follower": {"run_quality_control_follower.py"},
+    "quality_follower_watchdog": {"run_quality_control_follower_watchdog.py"},
     "handoff_monitor": {"checkpoint_handoff_state.py"},
     "deadline_sentinel": {"run_deadline_snapshot.py"},
     "deadline_sentinel_watchdog": {"run_deadline_sentinel_watchdog.py"},
@@ -745,6 +746,7 @@ def build_dashboard(
         args.checkpoint_follower_watchdog_state
     )
     quality_follower_state = read_json(args.quality_follower_state)
+    quality_follower_watchdog_state = read_json(args.quality_follower_watchdog_state)
     freeze_readiness = dict(quality_follower_state.get("freeze_readiness", {}))
     previous = read_json(args.output)
     sequences = sequence_order(handoff)
@@ -983,6 +985,11 @@ def build_dashboard(
             "QUALITY_FOLLOWER_DEAD",
             "Phase 11 quality output is incomplete but the CPU follower is not alive.",
         )
+    if incomplete_quality and not roots["quality_follower_watchdog"]:
+        attention(
+            "QUALITY_FOLLOWER_WATCHDOG_DEAD",
+            "Phase 11 quality is incomplete but its recovery watchdog is not alive.",
+        )
     if (
         remaining_seconds > 0
         and checkpoint_work_remaining
@@ -1160,6 +1167,42 @@ def build_dashboard(
             "QUALITY_FOLLOWER_STATE_STALE",
             f"quality_follower_state.json age is {age}.",
         )
+    quality_watchdog_updated = parse_datetime(
+        quality_follower_watchdog_state.get("updated_at_utc")
+    )
+    if (
+        incomplete_quality
+        and roots["quality_follower_watchdog"]
+        and (
+            quality_watchdog_updated is None
+            or (now - quality_watchdog_updated).total_seconds()
+            > args.state_stale_seconds
+        )
+    ):
+        age = (
+            "unknown"
+            if quality_watchdog_updated is None
+            else human_duration((now - quality_watchdog_updated).total_seconds())
+        )
+        attention(
+            "QUALITY_FOLLOWER_WATCHDOG_STATE_STALE",
+            f"quality follower watchdog state age is {age}.",
+        )
+    if quality_follower_watchdog_state.get("attention_required"):
+        quality_watchdog_reasons = quality_follower_watchdog_state.get(
+            "attention_reasons", []
+        )
+        if quality_watchdog_reasons:
+            for reason in quality_watchdog_reasons:
+                attention(
+                    str(reason.get("code", "QUALITY_FOLLOWER_WATCHDOG_ATTENTION")),
+                    str(reason.get("message", reason)),
+                )
+        else:
+            attention(
+                "QUALITY_FOLLOWER_WATCHDOG_ATTENTION",
+                "Quality follower watchdog requested attention without a structured reason.",
+            )
     quality_failures = quality_follower_state.get("failures", [])
     readiness_failures = freeze_readiness.get("failures", [])
     if quality_failures:
@@ -1193,6 +1236,7 @@ def build_dashboard(
         "sapiens",
         "supervisor",
         "quality_follower",
+        "quality_follower_watchdog",
         "handoff_monitor",
         "deadline_sentinel",
         "supervisor_watchdog",
@@ -1316,6 +1360,7 @@ def build_dashboard(
             "supervisor",
             "supervisor_watchdog",
             "quality_follower",
+            "quality_follower_watchdog",
             "checkpoint_follower",
             "checkpoint_follower_watchdog",
         )
@@ -1418,6 +1463,27 @@ def build_dashboard(
             "updated_at": quality_follower_state.get("updated_at_utc"),
             "last_event": quality_follower_state.get("last_event"),
             "failures": quality_follower_state.get("failures", []),
+        },
+        "quality_follower_watchdog": {
+            "alive": bool(roots["quality_follower_watchdog"]),
+            "pid": (
+                roots["quality_follower_watchdog"][0]["pid"]
+                if roots["quality_follower_watchdog"]
+                else None
+            ),
+            "status": quality_follower_watchdog_state.get("status", "UNKNOWN"),
+            "updated_at": quality_follower_watchdog_state.get("updated_at_utc"),
+            "last_event": quality_follower_watchdog_state.get("last_event"),
+            "restart_count_in_window": int(
+                quality_follower_watchdog_state.get("restart_count_in_window", 0)
+                or 0
+            ),
+            "expected_command_sha256": quality_follower_watchdog_state.get(
+                "expected_command_sha256"
+            ),
+            "attention_reasons": quality_follower_watchdog_state.get(
+                "attention_reasons", []
+            ),
         },
         "export": export,
         "supervisor": {
@@ -1591,9 +1657,12 @@ def render_rich(state: dict[str, Any], console: Any | None = None) -> Any:
         current = f"PASS {counts['PASS']} REVIEW {counts['REVIEW']} FAIL {counts['FAIL']}"
         if key == "quality_control":
             follower = state.get("quality_follower", {})
+            follower_watchdog = state.get("quality_follower_watchdog", {})
             current += (
                 f" | follower {follower.get('status', 'UNKNOWN')}"
                 f" PID {follower.get('pid') or '-'}"
+                f" | watchdog {follower_watchdog.get('status', 'UNKNOWN')}"
+                f" PID {follower_watchdog.get('pid') or '-'}"
             )
         table.add_row(
             label,
@@ -1693,6 +1762,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--quality-follower-state",
         type=Path,
         default=PROJECT_ROOT / ".runtime" / "quality_follower_state.json",
+    )
+    parser.add_argument(
+        "--quality-follower-watchdog-state",
+        type=Path,
+        default=PROJECT_ROOT / ".runtime" / "quality_follower_watchdog_state.json",
     )
     parser.add_argument(
         "--checkpoint-follower-state",

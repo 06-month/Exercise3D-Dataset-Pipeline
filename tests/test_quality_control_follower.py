@@ -1,14 +1,18 @@
+import io
 import tempfile
 import unittest
 from argparse import ArgumentTypeError, Namespace
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
 from tools.run_quality_control_follower import (
     dependency_paths,
+    main,
     parse_list,
     run_cycle,
 )
+from tools.run_autonomous_supervisor_watchdog import acquire_singleton_lock
 
 
 class QualityControlFollowerTest(unittest.TestCase):
@@ -38,6 +42,28 @@ class QualityControlFollowerTest(unittest.TestCase):
         self.assertEqual(parse_list("one,two"), ["one", "two"])
         with self.assertRaises(ArgumentTypeError):
             parse_list("one,one")
+
+    def test_lifetime_lock_rejects_duplicate_follower(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            lock = Path(temporary) / "quality.lock"
+            owner = acquire_singleton_lock(lock)
+            self.assertIsNotNone(owner)
+            try:
+                with redirect_stdout(io.StringIO()), patch(
+                    "sys.argv",
+                    [
+                        "run_quality_control_follower.py",
+                        "--sequences",
+                        "one",
+                        "--instance-lock",
+                        str(lock),
+                        "--once",
+                    ],
+                ):
+                    self.assertEqual(main(), 3)
+            finally:
+                assert owner is not None
+                owner.close()
 
     def test_waits_without_building_until_all_dependencies_exist(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

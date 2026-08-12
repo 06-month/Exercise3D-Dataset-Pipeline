@@ -39,6 +39,11 @@ except ModuleNotFoundError:
         validate_sequence as validate_export_sequence,
     )
 
+try:
+    from tools.run_autonomous_supervisor_watchdog import acquire_singleton_lock
+except ModuleNotFoundError:
+    from run_autonomous_supervisor_watchdog import acquire_singleton_lock
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CAMERAS = ("cam1", "cam2", "cam3")
@@ -429,6 +434,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=PROJECT_ROOT / ".runtime" / "quality_follower_state.json",
     )
+    parser.add_argument(
+        "--instance-lock",
+        type=Path,
+        default=PROJECT_ROOT / ".runtime" / "quality_follower.lock",
+    )
     parser.add_argument("--sequences", type=parse_list, required=True)
     parser.add_argument("--poll-seconds", type=float, default=30.0)
     parser.add_argument("--retry-seconds", type=float, default=300.0)
@@ -447,6 +457,10 @@ def main() -> int:
         raise RuntimeError(
             "poll-seconds/retry-seconds must be positive and readiness grace nonnegative"
         )
+    singleton = acquire_singleton_lock(args.instance_lock.resolve())
+    if singleton is None:
+        print("quality control follower is already running", flush=True)
+        return 3
     completed: dict[str, str] = {}
     retry_state: dict[str, dict[str, Any]] = {}
     freeze_ready: dict[str, dict[str, Any]] = {}

@@ -354,6 +354,9 @@
 - checkpoint follower continuity: exact live/resume argv digest pin, 3-cycle absence confirmation,
   final rescan, follower lifetime lock과 capped detached restart를 사용하는 CPU-only watchdog;
   deadline 이후에는 restart하지 않음
+- quality follower continuity: follower lifetime singleton lock + exact live/resume argv digest pin,
+  3-cycle absence/final rescan/capped detached restart watchdog; quality와 freeze-readiness가 모두
+  26/26 validated COMPLETE일 때만 recovery 종료
 - deadline boundary: body-fit NPZ/metadata + Mode-C assessment terminal marker mtime을 UTC cutoff으로
   고정해 post-deadline completion은 INCOMPLETE 유지; cutoff-eligible derived lag/transient export는
   staging checksum-resume 3회 재시도 후 최종 truthful snapshot publish

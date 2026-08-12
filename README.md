@@ -22,6 +22,9 @@ triangulation/body-fit/quality/export overhead를 제외한 ceiling이며 완료
 미래 rate/latency 보장이 아니라 deadline risk 범위입니다.
 Phase 11 CPU follower는 quality가 완료된 sequence에 대해 final exporter과 동일 validation을
 미리 수행하고 dashboard에 `freeze-ready` count와 지속 dependency failure를 보고합니다.
+Follower는 lifetime singleton lock으로 duplicate writer를 거부합니다. 별도 exact-identity watchdog은
+validated quality/freeze-readiness 26/26 전까지 연속 process absence와 final rescan을 통과한 경우에만
+제한된 detached recovery를 수행합니다.
 별도 CPU-only predeadline checkpoint follower는 이 ready 집합이 기존 byte-verified
 checkpoint의 strict superset이 되었을 때만 deterministic immutable build를 추가합니다.
 동일 집합은 재export하지 않으며, final deadline snapshot과 별도 build ID/state를 사용합니다.
@@ -323,6 +326,7 @@ Sapiens2 Pose 5B single-image smoke:
 | `tools/fit_sequence_body.py` | geometry-dominant staged sequence body fit과 S0 | ignored private output 생성 |
 | `tools/build_pseudolabel_quality.py` | target/pose/SAM/geometry/body evidence의 frame/sequence quality vector | ignored private output 생성 |
 | `tools/run_quality_control_follower.py` | 완료 body-fit을 감지하는 CPU-only Phase 11 follower | ignored runtime/quality output 갱신 |
+| `tools/run_quality_control_follower_watchdog.py` | quality follower exact-identity/absence recovery watchdog | ignored runtime state/log 갱신 |
 | `tools/run_predeadline_checkpoint_follower.py` | 증가한 freeze-ready 집합만 immutable checkpoint로 보존하는 CPU-only follower | ignored runtime/private freeze 갱신 |
 | `tools/run_predeadline_checkpoint_follower_watchdog.py` | checkpoint follower exact-identity/absence recovery watchdog | ignored runtime state/log 갱신 |
 | `tools/export_private_dataset.py` | versioned private dataset export와 byte/SHA/schema 검증 | ignored private output 생성 |

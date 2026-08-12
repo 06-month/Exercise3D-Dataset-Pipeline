@@ -335,6 +335,23 @@
   PID 1945200/1945203으로 교체했다. Handoff에는 watchdog exact resume command가 저장됐고,
   dashboard attention은 기존 deadline ETA/coverage warning 두 개뿐이다. GPU job은 건드리지 않았다.
 
+### Phase 11 quality follower lifetime lock과 recovery watchdog
+
+- Quality follower는 sequence-local quality build lock과 internal retry는 갖고 있었지만 process lifetime
+  lock이 없어 manual/watchdog recovery race에서 state writer가 중복될 수 있었고, terminal/session
+  소실 시 dashboard attention 외 자동 복구가 없었다.
+- `run_quality_control_follower.py`에 lifetime singleton advisory lock을 추가했다. 동일 lock owner가
+  있으면 output/state를 읽거나 쓰기 전에 exit 3으로 거부한다. Valid existing quality는 기존처럼
+  revalidation/resume하고 expensive GPU work는 호출하지 않는다.
+- `tools/run_quality_control_follower_watchdog.py`는 live/persisted exact argv SHA를 pin하고 3회 연속
+  absence + 2초 final rescan 후에만 최대 3회/시간 detached recovery한다. Live follower에는 signal하지
+  않으며 follower lifetime lock이 launch race를 닫는다.
+- Watchdog은 state `COMPLETE`, completed 26/26, freeze-ready 26/26, quality/readiness failure 0을 모두
+  확인한 뒤에만 recovery를 종료한다. `--once` 또는 sequence set이 없는 resume command는 거부한다.
+- Dashboard/handoff에 watchdog dead/stale/duplicate/structured attention과 exact resume command를
+  연결했다. 실제 live PID 1819560 one-shot identity pin은 expected/resume SHA exact-match,
+  missing/restart 0, attention false였다. 전체 117 tests가 PASS했다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화
