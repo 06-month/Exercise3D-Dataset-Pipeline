@@ -34,6 +34,10 @@
   resume command digest가 exact-match하며 restart 0, attention false다. 3회 연속 absence +
   2초 final rescan 후에만 최대 3회/시간 내에서 detached resume하고 live process는
   절대 signal하지 않는다. Exact watchdog PID와 command은 runtime/dashboard state가 source of truth다.
+  Future recovered supervisor는 pose-ready sequence stage가 transient하게 실패하면 기존 resume gate를
+  사용해 300초 backoff 뒤 1회만 재시도한다. Backoff 중에는 다른 ready sequence를 진행하고
+  retry attempt/UTC를 atomic supervisor state에 남긴다. 현재 live PID는 이 변경 전 시작했으므로
+  활성화를 위해 restart하지 않았으며, 향후 watchdog recovery가 current entrypoint를 load할 때 적용된다.
 - 2026-08-12 13:51 KST dashboard snapshot: `benchpress_0001` Mode B/body fit/Mode C/quality/freeze-ready와
   12-sequence immutable checkpoint가 완료됐고 supervisor는 다음 3-view pose dependency를
   `WAIT_RUNNING_SAPIENS2`로 대기 중
@@ -286,8 +290,11 @@ tmux new-window -n exercise3d-dashboard \
 ## Git state
 
 - branch: `agent/phase-5-1-pushup-0003-recovery`
-- latest implementation commit: SAM duplicate-resume/orphan guard `46cdced`; Sapiens duplicate-resume guard `30a051d`; marker ctime cutoff attestation `6e802b1`; sentinel loaded-code identity `60eadb8`; deadline marker identity binding `e31098c`; premature deadline publication gate `ddd3461`; durable latest-completion event `a0ad72c`; remaining deadline order audit `f8f603b`; immutable freeze storage
-  forecast `5bb9c4c`; monitoring-plane recovery
+- latest implementation commit: streaming transient retry `0412590`; SAM duplicate-resume/orphan guard
+  `46cdced`; Sapiens duplicate-resume guard `30a051d`; marker ctime cutoff attestation `6e802b1`;
+  sentinel loaded-code identity `60eadb8`; deadline marker identity binding `e31098c`; premature
+  deadline publication gate `ddd3461`; durable latest-completion event `a0ad72c`; remaining deadline
+  order audit `f8f603b`; immutable freeze storage forecast `5bb9c4c`; monitoring-plane recovery
   watchdog `16a8600` + default-path validation
   fix `5c93d4e`; SAM output storage forecast `b24f509`; quality follower recovery
   watchdog `4600dff`; empirical downstream
@@ -303,4 +310,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-12 13:54 KST
+- 2026-08-12 13:59 KST

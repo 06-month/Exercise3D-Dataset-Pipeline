@@ -616,6 +616,22 @@
 - Implementation commit `46cdced`를 push했다. Supervisor PID 1701200과 Sapiens PID 373049에는
   signal/restart가 없었으며, 다음 normal SAM subprocess가 on-disk guarded entrypoint를 자동 load한다.
 
+### Streaming transient sequence retry
+
+- 기존 supervisor는 Sapiens가 살아 있는 동안 pose-ready sequence가 한 번 실패하면 hot-loop 방지를 위해
+  해당 sequence를 teacher 종료까지 제외했다. SAM 내부 camera retry가 있어도 Phase 7, derived stage,
+  orphan-guard refusal 같은 transient failure는 여러 시간 뒤에야 다시 시도될 수 있어 deadline freeze
+  coverage를 불필요하게 낮출 수 있었다.
+- Future recovered supervisor에 최초 시도 + 1회로 제한된 sequence retry와 기본 300초 backoff를 추가했다.
+  Backoff 중에는 frozen order에서 다음으로 준비된 sequence를 실행해 GPU를 놀리지 않으며, retry 가능
+  시각 전에는 같은 sequence를 hot-loop하지 않는다. Stage는 기존 completion/resume gate를 그대로 사용하고
+  attempt, max attempt, `retry_not_before_utc`, privacy-safe pending retry를 atomic supervisor state에 남긴다.
+- Backoff order, elapsed retry eligibility, exhaustion, pending-state regression을 추가했다. 전체 149 tests,
+  Python compile, CLI help와 publication-safety가 PASS했고 implementation commit `0412590`을 push했다.
+- Current supervisor PID 1701200과 Sapiens/SAM에는 signal/restart가 없었다. Live supervisor는 변경 전 code를
+  load한 상태이며, 정상 process를 중단해 활성화하지 않는다. 향후 watchdog recovery가 동일 persisted
+  command로 current entrypoint를 시작할 때 defaults가 자동 적용된다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화
