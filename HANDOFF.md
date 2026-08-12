@@ -27,17 +27,16 @@
   현재 exact PID/stage는 dashboard/handoff state가 source of truth다.
 - 2026-08-12 10:46 KST dashboard snapshot: `latpulldown_0003` end-to-end 완료 후
   supervisor는 `WAIT_RUNNING_SAPIENS2`; 다음 pose-ready sequence를 기다림
-- Sapiens durable 34/78 camera, current partial 포함 22,106/65,430 crop; PID 373049 alive,
+- Sapiens durable 34/78 camera, current partial 포함 22,362/65,430 crop; PID 373049 alive,
   current `benchpress_0001/cam2`
-- Sapiens recent-chunk throughput 0.222 crop/s; 병렬 effective 0.213 crop/s;
-  projected ETA는 deadline 약 3시간 58분 후 risk
+- Sapiens recent-chunk throughput 0.216 crop/s; projected ETA는 deadline 약 5시간 15분 후 risk
 - SAM durable 33/78 camera, 21,441/65,595 frame, 11/26 full sequence; aggregate 0.585 frame/s;
   current SAM child는 없으며 Sapiens GPU utilization 100%
 - GPU: A100 80GB, combined snapshot 62,693 MiB/100%; observed OOM/retry 없음
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
 - handoff monitor PID 608232: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
   `updated_at_utc` 증가와 exact active/resume command/stage count 보존 확인 완료
-- deadline snapshot sentinel PID 607755: 2026-08-14 13:00 KST에 completed sequence와
+- deadline snapshot sentinel PID 1834674: 2026-08-14 13:00 KST에 completed sequence와
   `INCOMPLETE` 목록을 별도 versioned private build로 export; local state는
   `.runtime/deadline_snapshot_state.json`, 현재 `WAITING_DEADLINE`
   Exporter는 hidden `.<build_id>.inprogress`에서 checksum-resume한 뒤 전수 integrity PASS 시 final
@@ -45,8 +44,9 @@
   제거하고 actual tree↔manifest/sequence ownership exact-match를 검증한다. Existing final manifest는
   검증 후 reuse하며 같은 ID를 덮어쓰지 않는다.
   Deadline membership은 body fit NPZ/metadata + Mode-C assessment marker mtime이 cutoff 이하인
-  sequence로 고정하며 post-deadline completion은 INCOMPLETE로 유지한다. Transient export failure은
-  hidden staging에서 30초 간격/최대 3회 checksum-resume한다.
+  sequence로 고정하며 post-deadline completion은 INCOMPLETE로 유지한다. Cutoff-eligible
+  INCOMPLETE은 derived sidecar lag을 위해 최대 3회/30초 간격으로 staging checksum-resume하고,
+  네 번째 최종 시도에는 truthful INCOMPLETE snapshot을 반드시 publish한다.
 - dashboard monitor: `tools/monitor_autonomous_generation.py`; atomic state는
   `.runtime/dashboard_state.json`. `--once`는 snapshot, 기본은 Rich live, `--quiet`는 state-only daemon이다.
 - Phase 11 CPU follower PID 1819560: complete body-fit/Mode-C dependency만 감지해 quality를
@@ -98,7 +98,7 @@ Public-safe Sapiens command 형태:
 
 ## Remaining work
 
-- Sapiens2: 44/78 camera, current partial 포함 43,324 target crops
+- Sapiens2: 44/78 camera, current partial 포함 43,068 target crops
 - Phase 7 이후: `latpulldown_0003` 및 이후 pose-complete sequence
 - SAM full: 33/78 camera PASS, full-complete sequence 11/26; 다음 `benchpress_0001` pose dependency 대기
 - critical path: pose-complete sequence → Phase 7 gate → Mode B → compact prior → body fit → Mode C candidate QA → export

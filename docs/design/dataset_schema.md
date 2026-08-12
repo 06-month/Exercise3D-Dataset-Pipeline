@@ -21,6 +21,9 @@ cutoff 이하인 sequence만 validation/export 후보다. Deadline 후 완료된
 retry 중에 새로 보이더라도 `INCOMPLETE`로 유지한다. Quality와 manifest는 pre-deadline
 terminal payload에서 deadline 후 파생할 수 있지만, sequence manifest에 세 terminal marker의
 mtime provenance를 남기고 verifier가 cutoff을 다시 확인한다.
+Cutoff-eligible sequence가 quality/provenance sidecar lag로 INCOMPLETE이면 sentinel은 initial attempt +
+3회 retry 동안 publish를 defer한다. 최종 시도에는 defer flag를 제거해 sidecar가 여전히
+누락됐더라도 해당 sequence를 INCOMPLETE로 보존한 immutable manifest를 반드시 생성한다.
 
 ```text
 <build_id>/

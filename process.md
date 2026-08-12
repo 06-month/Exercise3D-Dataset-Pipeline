@@ -135,6 +135,17 @@
 - Exporter가 final verified manifest를 만들지 못한 transient failure에는 기존 hidden staging을
   checksum-resume하며 30초 간격으로 최대 3회 재시도한다. Parseable final integrity error는
   immutable build을 덮어쓰지 않고 즉시 attention으로 종료한다.
+- Cutoff-eligible이지만 quality/provenance sidecar lag로 INCOMPLETE인 sequence는 초기 3회에서
+  manifest publish를 defer한다. 네 번째 최종 시도에는 defer를 해제해 recovery가 불가해도
+  INCOMPLETE를 숨기지 않은 point-in-time snapshot을 생성한다.
+- Clean commit `868c0a1`에서 cutoff smoke를 실행했다. `barbellrow_0000`은 REVIEW,
+  terminal marker가 없던 `benchpress_0001`은 INCOMPLETE로 고정됐다. Final build는
+  2 sequence/36 files/28,993,641 bytes, REVIEW 1/INCOMPLETE 1, exact-tree/marker/SHA error 0,
+  `git_worktree_dirty=false`, `freeze_eligible=false`로 정직하게 publish됐다.
+- Cutoff/retry/final truthful publish regression을 포함한 전체 81개 unit test와 publication-safety가 PASS했다.
+- CPU sleeper sentinel만 PID 1834674로 교체했다. Persistent state는 `WAITING_DEADLINE`,
+  point-in-time policy와 `--export-retries 3 --retry-seconds 30`을 보존한다. GPU inference/supervisor는
+  중단/재시작하지 않았다.
 
 ### Source-of-truth 재검증
 
