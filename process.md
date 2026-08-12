@@ -527,6 +527,22 @@
   않는다. Cutoff 없는 predeadline checkpoint와 global/nonterminal source copy semantics는 변하지 않는다.
   Eligibility identity capture와 replacement rejection regression을 포함한 전체 131 tests가 PASS했다.
 
+### Deadline sentinel loaded-code identity
+
+- Live sentinel PID 1882473의 `/proc` start time은 2026-08-12 03:08 UTC이고 sentinel/exporter hardening
+  file mtime은 04:22/04:27 UTC라, exact argv가 같아도 process 내부 verifier는 이전 Python code를
+  유지한다는 사실을 확인했다. Export subprocess는 deadline에 current file을 load하지만 premature
+  final-build 검사까지 live sentinel에서 활성화됐다고 주장할 수는 없었다.
+- Sentinel이 process start 시 읽은 `run_deadline_snapshot.py`와 `export_private_dataset.py` SHA-256을
+  `implementation` state에 모든 atomic cycle마다 보존하도록 했다. Hash는 매 cycle disk에서 다시 읽지
+  않아 loaded-code identity가 current file 변경을 따라가며 위장되지 않는다.
+- Dashboard는 runtime loaded SHA와 current on-disk SHA를 비교하고 sentinel이 아직 필요한 상태에서
+  missing/mismatch이면 `DEADLINE_SENTINEL_CODE_DRIFT` attention을 낸다. Deadline section에도 loaded/current
+  pair와 exact boolean을 machine-readable하게 노출한다.
+- Missing/mismatch/exact helper와 live-dashboard attention regression을 추가했고 전체 133 tests가 PASS했다.
+  GPU inference/SAM/supervisor에는 변화가 없으며 CPU-only sentinel activation은 watchdog recovery gate로
+  별도 수행한다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화

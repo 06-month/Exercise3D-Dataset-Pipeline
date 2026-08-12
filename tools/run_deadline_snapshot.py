@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import hashlib
 import json
 import os
 import subprocess
@@ -21,6 +22,22 @@ except ModuleNotFoundError:
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+LOADED_IMPLEMENTATION = {
+    "sentinel_tool_sha256": sha256_file(Path(__file__).resolve()),
+    "exporter_tool_sha256": sha256_file(
+        PROJECT_ROOT / "tools" / "export_private_dataset.py"
+    ),
+}
 
 
 def atomic_json(path: Path, payload: dict[str, Any]) -> None:
@@ -154,6 +171,7 @@ def deadline_state_base(
         "updated_at_utc": now.isoformat(),
         "deadline_utc": deadline.isoformat(),
         "build_id": args.build_id,
+        "implementation": dict(LOADED_IMPLEMENTATION),
         "point_in_time_policy": (
             "terminal body-fit and Mode-C marker mtimes must not exceed deadline; "
             "post-deadline sequences remain INCOMPLETE"

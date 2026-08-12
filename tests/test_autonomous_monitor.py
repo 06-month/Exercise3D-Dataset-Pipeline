@@ -13,6 +13,7 @@ from tools.monitor_autonomous_generation import (
     build_dashboard,
     checkpoint_export_storage_forecast,
     deadline_freeze_upper_bound,
+    deadline_sentinel_implementation_status,
     export_progress,
     first_incomplete_camera,
     latest_durable_completion_event,
@@ -26,6 +27,23 @@ from tools.monitor_autonomous_generation import (
 
 
 class AutonomousMonitorTest(unittest.TestCase):
+    def test_deadline_sentinel_implementation_detects_missing_and_exact_sha(self) -> None:
+        missing = deadline_sentinel_implementation_status({})
+        self.assertFalse(missing["exact"])
+        exact = deadline_sentinel_implementation_status(
+            {"implementation": missing["current"]}
+        )
+        self.assertTrue(exact["exact"])
+        drifted = deadline_sentinel_implementation_status(
+            {
+                "implementation": {
+                    **missing["current"],
+                    "sentinel_tool_sha256": "0" * 64,
+                }
+            }
+        )
+        self.assertFalse(drifted["exact"])
+
     def test_latest_completed_event_uses_durable_artifact_not_poll_state(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -611,9 +629,16 @@ class AutonomousMonitorTest(unittest.TestCase):
                 root / "supervisor.json",
                 {"stage": "WAIT_RUNNING_SAPIENS2", "active_sequence": None},
             )
+            deadline_implementation = deadline_sentinel_implementation_status(
+                {}
+            )["current"]
             atomic_json(
                 root / "deadline.json",
-                {"deadline_utc": (now + timedelta(days=2)).isoformat(), "status": "WAITING_DEADLINE"},
+                {
+                    "deadline_utc": (now + timedelta(days=2)).isoformat(),
+                    "status": "WAITING_DEADLINE",
+                    "implementation": deadline_implementation,
+                },
             )
             atomic_json(
                 root / "quality_follower.json",
@@ -720,6 +745,36 @@ class AutonomousMonitorTest(unittest.TestCase):
             self.assertEqual(state["quality_control"]["freeze_ready_sequences"], 0)
 
             atomic_json(
+                args.deadline_state,
+                {
+                    "deadline_utc": (now + timedelta(days=2)).isoformat(),
+                    "status": "WAITING_DEADLINE",
+                    "implementation": {
+                        **deadline_implementation,
+                        "sentinel_tool_sha256": "0" * 64,
+                    },
+                },
+            )
+            drifted_sentinel = build_dashboard(
+                args,
+                now=now,
+                processes=processes,
+                gpu={"available": True, "utilization_pct": 95.0, "devices": []},
+            )
+            self.assertIn(
+                "DEADLINE_SENTINEL_CODE_DRIFT",
+                {row["code"] for row in drifted_sentinel["attention_reasons"]},
+            )
+            atomic_json(
+                args.deadline_state,
+                {
+                    "deadline_utc": (now + timedelta(days=2)).isoformat(),
+                    "status": "WAITING_DEADLINE",
+                    "implementation": deadline_implementation,
+                },
+            )
+
+            atomic_json(
                 args.monitoring_watchdog_state,
                 {
                     "updated_at_utc": now.isoformat(),
@@ -770,6 +825,7 @@ class AutonomousMonitorTest(unittest.TestCase):
                     "deadline_utc": (now + timedelta(days=2)).isoformat(),
                     "status": "EXPORT_INTEGRITY_FAILED",
                     "integrity_errors": ["sha256_mismatch:payload"],
+                    "implementation": deadline_implementation,
                 },
             )
             failed_snapshot = build_dashboard(
@@ -788,6 +844,7 @@ class AutonomousMonitorTest(unittest.TestCase):
                 {
                     "deadline_utc": (now + timedelta(days=2)).isoformat(),
                     "status": "WAITING_DEADLINE",
+                    "implementation": deadline_implementation,
                 },
             )
             atomic_json(

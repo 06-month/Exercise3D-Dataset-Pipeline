@@ -23,6 +23,8 @@ from typing import Any, BinaryIO, Iterable
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 KST = timezone(timedelta(hours=9), name="KST")
+DEADLINE_SENTINEL_TOOL = PROJECT_ROOT / "tools" / "run_deadline_snapshot.py"
+DEADLINE_EXPORTER_TOOL = PROJECT_ROOT / "tools" / "export_private_dataset.py"
 CAMERAS = ("cam1", "cam2", "cam3")
 PROCESS_MARKERS = {
     "sapiens": {"sapiens2_target_pipeline.py", "sapiens2_pose_pipeline.py"},
@@ -116,6 +118,40 @@ def safe_float(value: Any) -> float | None:
         return result if result == result else None
     except (TypeError, ValueError):
         return None
+
+
+def file_sha256(path: Path) -> str | None:
+    try:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
+def deadline_sentinel_implementation_status(
+    state: dict[str, Any],
+) -> dict[str, Any]:
+    loaded = state.get("implementation", {})
+    loaded = loaded if isinstance(loaded, dict) else {}
+    current = {
+        "sentinel_tool_sha256": file_sha256(DEADLINE_SENTINEL_TOOL),
+        "exporter_tool_sha256": file_sha256(DEADLINE_EXPORTER_TOOL),
+    }
+    exact = bool(
+        all(current.values())
+        and all(loaded.get(key) == value for key, value in current.items())
+    )
+    return {
+        "loaded": {
+            "sentinel_tool_sha256": loaded.get("sentinel_tool_sha256"),
+            "exporter_tool_sha256": loaded.get("exporter_tool_sha256"),
+        },
+        "current": current,
+        "exact": exact,
+    }
 
 
 def selection_workloads(
@@ -1353,6 +1389,9 @@ def build_dashboard(
     quality = quality_progress(args.quality_root, sequences)
     export = export_progress(args.export_root, deadline_state.get("build_id"))
     deadline_snapshot_status = str(deadline_state.get("status", "UNKNOWN"))
+    deadline_implementation = deadline_sentinel_implementation_status(
+        deadline_state
+    )
     export["deadline_snapshot_status"] = deadline_snapshot_status
     workloads, workload_errors = selection_workloads(args.selection_root, sequences)
     workload_target_crops = sum(int(row["target_crops"]) for row in workloads)
@@ -1583,6 +1622,15 @@ def build_dashboard(
         attention(
             "MONITORING_WATCHDOG_DEAD",
             "Generation is incomplete but the dashboard/handoff recovery watchdog is not alive.",
+        )
+    if (
+        deadline_snapshot_status != "COMPLETE"
+        and roots["deadline_sentinel"]
+        and not deadline_implementation["exact"]
+    ):
+        attention(
+            "DEADLINE_SENTINEL_CODE_DRIFT",
+            "The live deadline sentinel loaded-code SHA does not match the current sentinel/exporter tools.",
         )
     if remaining_seconds > 0 and not roots["deadline_sentinel"]:
         attention("DEADLINE_SENTINEL_DEAD", "Deadline snapshot sentinel is not alive.")
@@ -2236,6 +2284,7 @@ def build_dashboard(
             "alive": bool(roots["deadline_sentinel"]),
             "pid": roots["deadline_sentinel"][0]["pid"] if roots["deadline_sentinel"] else None,
             "status": deadline_state.get("status", "UNKNOWN"),
+            "implementation": deadline_implementation,
         },
         "deadline_sentinel_watchdog": {
             "alive": bool(roots["deadline_sentinel_watchdog"]),

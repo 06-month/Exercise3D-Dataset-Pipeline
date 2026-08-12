@@ -68,6 +68,9 @@
   restart/launch 0, attention false. State는 `.runtime/deadline_sentinel_watchdog_state.json`.
   Sentinel lifetime lock은 별도 process probe에서 held로 확인했고 exporter는 build ID별
   lock을 staging mutation 전에 취득한다.
+  Sentinel runtime state는 process 시작 시 loaded sentinel/exporter tool SHA를 고정하고 dashboard가
+  current on-disk SHA와 비교한다. Mismatch/missing은 `DEADLINE_SENTINEL_CODE_DRIFT`이며 exact argv만으로
+  loaded Python implementation이 최신이라고 간주하지 않는다.
 - dashboard monitor: `tools/monitor_autonomous_generation.py`; atomic state는
   `.runtime/dashboard_state.json`. Quiet daemon PID 2044638이며 `--once`는 snapshot,
   기본은 Rich live, `--quiet`는 state-only daemon이다. Export section은 final deadline
@@ -269,7 +272,7 @@ tmux new-window -n exercise3d-dashboard \
 ## Git state
 
 - branch: `agent/phase-5-1-pushup-0003-recovery`
-- latest implementation commit: premature deadline publication gate `ddd3461`; durable latest-completion event `a0ad72c`; remaining deadline order audit `f8f603b`; immutable freeze storage
+- latest implementation commit: deadline marker identity binding `e31098c`; premature deadline publication gate `ddd3461`; durable latest-completion event `a0ad72c`; remaining deadline order audit `f8f603b`; immutable freeze storage
   forecast `5bb9c4c`; monitoring-plane recovery
   watchdog `16a8600` + default-path validation
   fix `5c93d4e`; SAM output storage forecast `b24f509`; quality follower recovery

@@ -8,9 +8,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tools.run_deadline_snapshot import (
+    LOADED_IMPLEMENTATION,
     acquire_sentinel_lock,
     atomic_json,
     export_command,
+    deadline_state_base,
     read_manifest,
     run_export_with_retries,
     verified_manifest,
@@ -18,6 +20,19 @@ from tools.run_deadline_snapshot import (
 
 
 class DeadlineSnapshotTest(unittest.TestCase):
+    def test_runtime_state_records_loaded_sentinel_and_exporter_code(self) -> None:
+        args = Namespace(build_id="deadline-build")
+        now = datetime(2026, 8, 12, tzinfo=timezone.utc)
+        deadline = datetime(2026, 8, 14, 4, tzinfo=timezone.utc)
+        state = deadline_state_base(args, deadline, now)
+        self.assertEqual(state["implementation"], LOADED_IMPLEMENTATION)
+        self.assertRegex(
+            state["implementation"]["sentinel_tool_sha256"], r"^[0-9a-f]{64}$"
+        )
+        self.assertRegex(
+            state["implementation"]["exporter_tool_sha256"], r"^[0-9a-f]{64}$"
+        )
+
     def test_sentinel_lifetime_lock_refuses_duplicate(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "sentinel.lock"
