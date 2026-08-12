@@ -34,6 +34,7 @@ PROCESS_MARKERS = (
     "run_deadline_snapshot.py",
     "run_deadline_sentinel_watchdog.py",
     "run_predeadline_checkpoint_follower.py",
+    "run_predeadline_checkpoint_follower_watchdog.py",
 )
 RESUMABLE_MARKERS = tuple(
     marker for marker in PROCESS_MARKERS if marker != "checkpoint_handoff_state.py"

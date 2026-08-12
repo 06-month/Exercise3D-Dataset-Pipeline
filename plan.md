@@ -350,6 +350,9 @@
 - predeadline checkpoint follower: `ACTIVE`; 기존 contract-v2 build를 byte/SHA로 전수 검증해 largest durable
   set을 정하고, freeze-ready가 그 집합의 strict superset일 때만 frozen order 기반 deterministic
   immutable build를 CPU-only export; 동일/축소/비-superset set은 재export하지 않음
+- checkpoint follower continuity: exact live/resume argv digest pin, 3-cycle absence confirmation,
+  final rescan, follower lifetime lock과 capped detached restart를 사용하는 CPU-only watchdog;
+  deadline 이후에는 restart하지 않음
 - deadline boundary: body-fit NPZ/metadata + Mode-C assessment terminal marker mtime을 UTC cutoff으로
   고정해 post-deadline completion은 INCOMPLETE 유지; cutoff-eligible derived lag/transient export는
   staging checksum-resume 3회 재시도 후 최종 truthful snapshot publish

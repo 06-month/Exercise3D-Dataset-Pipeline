@@ -240,6 +240,7 @@ class AutonomousMonitorTest(unittest.TestCase):
             self.assertIn("SUPERVISOR_DEAD", codes)
             self.assertIn("QUALITY_FOLLOWER_DEAD", codes)
             self.assertIn("PREDEADLINE_CHECKPOINT_FOLLOWER_DEAD", codes)
+            self.assertIn("PREDEADLINE_CHECKPOINT_FOLLOWER_WATCHDOG_DEAD", codes)
             self.assertIn("DISK_RESERVE_LOW", codes)
             self.assertIn("VALIDATION_FAIL", codes)
             self.assertIn("SEQUENCE_PIPELINE_FAILED", codes)
@@ -303,6 +304,7 @@ class AutonomousMonitorTest(unittest.TestCase):
                 self._process(6, "supervisor_watchdog"),
                 self._process(7, "deadline_sentinel_watchdog"),
                 self._process(8, "checkpoint_follower"),
+                self._process(9, "checkpoint_follower_watchdog"),
             ]
             args = self._args(root)
             atomic_json(
@@ -334,6 +336,17 @@ class AutonomousMonitorTest(unittest.TestCase):
                     "attention_reasons": [],
                     "last_event": "WAITING_FOR_NEW_FREEZE_READY_SEQUENCE",
                     "ready_sequence_count": 0,
+                },
+            )
+            atomic_json(
+                args.checkpoint_follower_watchdog_state,
+                {
+                    "updated_at_utc": now.isoformat(),
+                    "status": "RUNNING",
+                    "attention_required": False,
+                    "attention_reasons": [],
+                    "last_event": "CHECKPOINT_FOLLOWER_OBSERVED",
+                    "restart_count_in_window": 0,
                 },
             )
             state = build_dashboard(
@@ -455,6 +468,77 @@ class AutonomousMonitorTest(unittest.TestCase):
             codes = {row["code"] for row in state["attention_reasons"]}
             self.assertNotIn("PREDEADLINE_CHECKPOINT_FOLLOWER_DEAD", codes)
             self.assertNotIn("PREDEADLINE_CHECKPOINT_FOLLOWER_STATE_STALE", codes)
+            self.assertNotIn(
+                "PREDEADLINE_CHECKPOINT_FOLLOWER_WATCHDOG_DEAD", codes
+            )
+
+    def test_checkpoint_follower_is_required_for_unexported_ready_set(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            now = datetime(2026, 8, 13, tzinfo=timezone.utc)
+            handoff = {
+                "updated_at_utc": now.isoformat(),
+                "deadline_utc": (now + timedelta(days=1)).isoformat(),
+                "completed": ["one"],
+                "remaining": [],
+                "pose": {
+                    "completed_cameras": ["one/cam1", "one/cam2", "one/cam3"],
+                    "processed_target_crops": 100,
+                    "total_target_crops": 100,
+                },
+                "sam": {
+                    "completed_cameras": ["one/cam1", "one/cam2", "one/cam3"],
+                    "processed_frames": 200,
+                    "total_frames": 200,
+                },
+                "triangulation": {"count": 1, "status": {"one": "PASS"}},
+                "body_fit": {"count": 1, "status": {"one": "REVIEW"}},
+            }
+            atomic_json(root / "handoff.json", handoff)
+            atomic_json(
+                root / "deadline.json",
+                {
+                    "deadline_utc": (now + timedelta(days=1)).isoformat(),
+                    "status": "WAITING_DEADLINE",
+                },
+            )
+            args = self._args(root)
+            quality = args.quality_root / "one"
+            quality.mkdir(parents=True)
+            (quality / "quality_vector.npz").touch()
+            atomic_json(
+                quality / "metadata.json",
+                {"qa": {"sequence_status": "REVIEW", "frame_count": 10}},
+            )
+            atomic_json(
+                args.quality_follower_state,
+                {
+                    "updated_at_utc": now.isoformat(),
+                    "freeze_readiness": {
+                        "ready_sequence_count": 1,
+                        "status_counts": {"PASS": 0, "REVIEW": 1},
+                        "ready": [{"sequence": "one", "status": "REVIEW"}],
+                        "waiting": [],
+                        "failures": [],
+                    },
+                },
+            )
+            atomic_json(
+                args.checkpoint_follower_state,
+                {
+                    "updated_at_utc": now.isoformat(),
+                    "best_checkpoint": {"completed_sequence_count": 0},
+                },
+            )
+            state = build_dashboard(
+                args,
+                now=now,
+                processes=[],
+                gpu={"available": True, "utilization_pct": 0.0, "devices": []},
+            )
+            codes = {row["code"] for row in state["attention_reasons"]}
+            self.assertIn("PREDEADLINE_CHECKPOINT_FOLLOWER_DEAD", codes)
+            self.assertIn("PREDEADLINE_CHECKPOINT_FOLLOWER_WATCHDOG_DEAD", codes)
 
     @staticmethod
     def _process(pid: int, group: str) -> dict[str, object]:
@@ -479,6 +563,8 @@ class AutonomousMonitorTest(unittest.TestCase):
             supervisor_watchdog_state=root / "supervisor_watchdog.json",
             deadline_watchdog_state=root / "deadline_watchdog.json",
             checkpoint_follower_state=root / "checkpoint_follower.json",
+            checkpoint_follower_watchdog_state=root
+            / "checkpoint_follower_watchdog.json",
             deadline_state=root / "deadline.json",
             quality_follower_state=root / "quality_follower.json",
             sequence_status=root / "sequences.csv",

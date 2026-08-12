@@ -35,6 +35,9 @@ PROCESS_MARKERS = {
     "deadline_sentinel": {"run_deadline_snapshot.py"},
     "deadline_sentinel_watchdog": {"run_deadline_sentinel_watchdog.py"},
     "checkpoint_follower": {"run_predeadline_checkpoint_follower.py"},
+    "checkpoint_follower_watchdog": {
+        "run_predeadline_checkpoint_follower_watchdog.py"
+    },
 }
 
 
@@ -662,6 +665,9 @@ def build_dashboard(
     deadline_state = read_json(args.deadline_state)
     deadline_watchdog_state = read_json(args.deadline_watchdog_state)
     checkpoint_follower_state = read_json(args.checkpoint_follower_state)
+    checkpoint_follower_watchdog_state = read_json(
+        args.checkpoint_follower_watchdog_state
+    )
     quality_follower_state = read_json(args.quality_follower_state)
     freeze_readiness = dict(quality_follower_state.get("freeze_readiness", {}))
     previous = read_json(args.output)
@@ -847,6 +853,16 @@ def build_dashboard(
     incomplete_pose = sapiens_done < sapiens_total
     incomplete_body = int(body_source.get("count", 0)) < total_sequences
     incomplete_quality = quality["completed_sequences"] < total_sequences
+    checkpoint_ready_count = int(
+        freeze_readiness.get("ready_sequence_count", 0) or 0
+    )
+    checkpoint_best = checkpoint_follower_state.get("best_checkpoint") or {}
+    checkpoint_best_count = int(
+        checkpoint_best.get("completed_sequence_count", 0) or 0
+    )
+    checkpoint_work_remaining = bool(
+        incomplete_quality or checkpoint_ready_count > checkpoint_best_count
+    )
     if incomplete_pose and not roots["sapiens"]:
         attention("SAPIENS_PROCESS_DEAD", "Sapiens output is incomplete but no matching live process exists.")
     if (incomplete_pose or incomplete_body) and not roots["supervisor"]:
@@ -873,12 +889,21 @@ def build_dashboard(
         )
     if (
         remaining_seconds > 0
-        and incomplete_quality
+        and checkpoint_work_remaining
         and not roots["checkpoint_follower"]
     ):
         attention(
             "PREDEADLINE_CHECKPOINT_FOLLOWER_DEAD",
             "Quality/freeze output is incomplete but the durable checkpoint follower is not alive.",
+        )
+    if (
+        remaining_seconds > 0
+        and checkpoint_work_remaining
+        and not roots["checkpoint_follower_watchdog"]
+    ):
+        attention(
+            "PREDEADLINE_CHECKPOINT_FOLLOWER_WATCHDOG_DEAD",
+            "The checkpoint follower recovery watchdog is not alive before the deadline.",
         )
     watchdog_updated = parse_datetime(supervisor_watchdog_state.get("updated_at_utc"))
     if (
@@ -950,7 +975,7 @@ def build_dashboard(
     )
     if (
         remaining_seconds > 0
-        and incomplete_quality
+        and checkpoint_work_remaining
         and roots["checkpoint_follower"]
         and (
             checkpoint_follower_updated is None
@@ -979,6 +1004,47 @@ def build_dashboard(
             attention(
                 "PREDEADLINE_CHECKPOINT_FOLLOWER_ATTENTION",
                 "Checkpoint follower requested attention without a structured reason.",
+            )
+    checkpoint_watchdog_updated = parse_datetime(
+        checkpoint_follower_watchdog_state.get("updated_at_utc")
+    )
+    if (
+        remaining_seconds > 0
+        and checkpoint_work_remaining
+        and roots["checkpoint_follower_watchdog"]
+        and (
+            checkpoint_watchdog_updated is None
+            or (now - checkpoint_watchdog_updated).total_seconds()
+            > args.state_stale_seconds
+        )
+    ):
+        age = (
+            "unknown"
+            if checkpoint_watchdog_updated is None
+            else human_duration((now - checkpoint_watchdog_updated).total_seconds())
+        )
+        attention(
+            "PREDEADLINE_CHECKPOINT_FOLLOWER_WATCHDOG_STATE_STALE",
+            f"predeadline checkpoint follower watchdog state age is {age}.",
+        )
+    if checkpoint_follower_watchdog_state.get("attention_required"):
+        checkpoint_watchdog_reasons = checkpoint_follower_watchdog_state.get(
+            "attention_reasons", []
+        )
+        if checkpoint_watchdog_reasons:
+            for reason in checkpoint_watchdog_reasons:
+                attention(
+                    str(
+                        reason.get(
+                            "code", "PREDEADLINE_CHECKPOINT_FOLLOWER_WATCHDOG_ATTENTION"
+                        )
+                    ),
+                    str(reason.get("message", reason)),
+                )
+        else:
+            attention(
+                "PREDEADLINE_CHECKPOINT_FOLLOWER_WATCHDOG_ATTENTION",
+                "Checkpoint follower watchdog requested attention without a structured reason.",
             )
     quality_follower_updated = parse_datetime(quality_follower_state.get("updated_at_utc"))
     if (
@@ -1036,6 +1102,7 @@ def build_dashboard(
         "supervisor_watchdog",
         "deadline_sentinel_watchdog",
         "checkpoint_follower",
+        "checkpoint_follower_watchdog",
     ):
         if len(roots[group]) > 1:
             attention(
@@ -1144,6 +1211,7 @@ def build_dashboard(
             "supervisor_watchdog",
             "quality_follower",
             "checkpoint_follower",
+            "checkpoint_follower_watchdog",
         )
     ):
         overall_status = "RUNNING"
@@ -1315,6 +1383,33 @@ def build_dashboard(
                 "attention_reasons", []
             ),
         },
+        "predeadline_checkpoint_follower_watchdog": {
+            "alive": bool(roots["checkpoint_follower_watchdog"]),
+            "pid": (
+                roots["checkpoint_follower_watchdog"][0]["pid"]
+                if roots["checkpoint_follower_watchdog"]
+                else None
+            ),
+            "status": checkpoint_follower_watchdog_state.get(
+                "status", "UNKNOWN"
+            ),
+            "updated_at": checkpoint_follower_watchdog_state.get(
+                "updated_at_utc"
+            ),
+            "last_event": checkpoint_follower_watchdog_state.get("last_event"),
+            "restart_count_in_window": int(
+                checkpoint_follower_watchdog_state.get(
+                    "restart_count_in_window", 0
+                )
+                or 0
+            ),
+            "expected_command_sha256": checkpoint_follower_watchdog_state.get(
+                "expected_command_sha256"
+            ),
+            "attention_reasons": checkpoint_follower_watchdog_state.get(
+                "attention_reasons", []
+            ),
+        },
         "gpu": gpu,
         "disk": disk,
         "last_progress_timestamp": last_progress.isoformat(),
@@ -1410,13 +1505,18 @@ def render_rich(state: dict[str, Any], console: Any | None = None) -> Any:
     forecast = deadline.get("freeze_forecast", {})
     checkpoint = export.get("durable_checkpoint", {})
     checkpoint_follower = state.get("predeadline_checkpoint_follower", {})
+    checkpoint_watchdog = state.get(
+        "predeadline_checkpoint_follower_watchdog", {}
+    )
     table.add_row(
         "Export / freeze",
         f"deadline {export['completed_sequences']} | "
         f"checkpoint {checkpoint.get('completed_sequences', 0)} sequences",
         f"{export['latest_build_id'] or '-'} | follower PID "
         f"{checkpoint_follower.get('pid') or '-'} "
-        f"{checkpoint_follower.get('status', 'UNKNOWN')}",
+        f"{checkpoint_follower.get('status', 'UNKNOWN')} | watchdog PID "
+        f"{checkpoint_watchdog.get('pid') or '-'} "
+        f"{checkpoint_watchdog.get('status', 'UNKNOWN')}",
         "-",
         f"{export['deadline_snapshot_status']} | "
         f"checkpoint={checkpoint.get('build_id') or '-'} "
@@ -1491,6 +1591,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=PROJECT_ROOT
         / ".runtime"
         / "predeadline_checkpoint_follower_state.json",
+    )
+    parser.add_argument(
+        "--checkpoint-follower-watchdog-state",
+        type=Path,
+        default=PROJECT_ROOT
+        / ".runtime"
+        / "predeadline_checkpoint_follower_watchdog_state.json",
     )
     parser.add_argument(
         "--sequence-status",

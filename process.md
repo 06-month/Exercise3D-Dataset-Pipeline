@@ -295,6 +295,22 @@
   감지해 SAM Mode B PID 1930239를 정상 시작했으며, Sapiens는 36/78 camera 완료 후
   `benchpress_0002/cam1`로 진행했다. GPU inference/supervisor는 signal/restart하지 않았다.
 
+### Predeadline checkpoint follower recovery watchdog
+
+- Predeadline checkpoint follower는 lifetime singleton lock과 internal export retry를 갖지만,
+  terminal/session 자체가 사라진 경우 dashboard attention 외에는 자동 복구 경로가 없었다.
+- `tools/run_predeadline_checkpoint_follower_watchdog.py`를 추가해 repository-local live process와
+  handoff에 보존된 exact resume argv SHA를 pin한다. 3회 연속 absence와 2초 final rescan 뒤에만
+  detached recovery하며, 최대 3회/시간으로 제한한다. Live process에는 절대 signal하지 않는다.
+- Follower 자체 lifetime lock이 watchdog/manual launch race를 닫는다. Watchdog command는 `--once`를
+  거부하고 follower와 동일한 timezone-aware deadline만 허용하며, deadline 도달 후에는 restart하지
+  않고 `COMPLETE`로 종료한다.
+- Dashboard는 deadline 전 아직 quality 또는 unexported ready set이 남은 동안 watchdog의
+  dead/stale/duplicate/structured attention을 검사한다. Quality 26/26이더라도 ready count가 durable
+  checkpoint보다 크면 follower/watchdog 사망을 숨기지 않는다.
+- 실제 live follower PID 1916854에 대한 one-shot은 expected/resume command SHA exact-match,
+  missing 0, launch/restart 0, attention false로 identity pin을 완료했다. 전체 111 tests가 PASS했다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화
