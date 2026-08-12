@@ -13,8 +13,8 @@
 - 이미 완료된 4개 pilot sequence output은 검증 후 재사용하고 재추론하지 않음
 - GPU scheduling: Sapiens2-5B는 계속 실행하고, pose-complete sequence의 Mode B를 겹쳐
   end-to-end 완결 sequence를 확보한다. 첫 full camera 병렬 peak 61,821 MiB와 completion PASS 확인
-- current projection: 2026-08-12 14:06 KST Sapiens current partial 포함 25,074/65,430 crop,
-  recent 0.227 crop/s, 전량 ETA 2026-08-14 15:26 KST; 약 -2.43 h deadline margin을
+- current projection: 2026-08-12 14:23 KST Sapiens current partial 포함 25,074/65,430 crop,
+  recent 0.227 crop/s, 전량 ETA는 deadline 약 2.68 h 후; negative deadline margin을
   end-to-end complete sequence 확보와
   명시적 INCOMPLETE provenance로 관리
 - SAM policy: Mode B default, Mode C는 실제 failure/occlusion escalation evidence가 있는 경우만 REVIEW
@@ -30,6 +30,9 @@
   abstention-vs-valid bbox, finite confidence와 strictly increasing PTS 계약을 모두 통과하고,
   mesh/numeric 및 존재하는 focal/render object root의 유일한 real object directory `1`, recursive
   extra payload 0, numeric `object_id==1`을 강제해야 함
+- Phase 7 initial/final triangulation은 pose/camera/frame-shape/temporal/VGGT/config/tool source signature,
+  selected camera source와 atomic `IN_PROGRESS`→`COMPLETE` marker가 exact할 때만 resume skip한다.
+  실행 중 dependency가 바뀌면 COMPLETE로 승격하지 않고 bounded retry 대상으로 남긴다.
 - compact SAM prior는 provenance/numeric inventory의 size/mtime/ctime signature와 output
   frame/PTS/identity/finite/QA 계약이 exact할 때만 resume skip하고 drift 시 atomic rebuild
 - body-fit은 canonical triangulation + 3-view prior + gate config + fitting parameter signature와

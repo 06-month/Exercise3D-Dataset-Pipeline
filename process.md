@@ -716,6 +716,24 @@
   GPU/supervisor에는 signal/restart가 없었다. 다음 새 sequence assessment부터 source-bound marker가
   자동 생성된다.
 
+### Source-bound Phase 7 triangulation resume
+
+- Phase 7 streaming은 기존 initial/final `metadata.json`과 finite canonical payload만 확인해, pose 또는
+  selected camera artifact가 교체된 stale triangulation도 재사용할 수 있었다.
+- 실제 triangulator가 읽는 3-view pose NPZ/metadata, selected camera refinement/validation, camera별 첫
+  source frame, temporal alignment report, 단일 VGGT metadata, canonical config와 tool file의 privacy-safe
+  size/mtime_ns/ctime_ns inventory를 SHA-256 signature로 묶는다. Absolute private path는 sidecar에 쓰지 않는다.
+- Initial/final output별 atomic `.phase7_source_identity.json`은 selected camera source와 상태를 함께
+  저장한다. 재실행 직전 `IN_PROGRESS`, output schema/finite 검증과 실행 전후 dependency signature가 모두
+  같을 때만 `COMPLETE`로 승격한다. Missing/mismatch, symlink dependency 또는 실행 중 source replacement는
+  fail-closed이며 다음 supervisor bounded retry에서만 다시 계산한다.
+- Missing/matching/mismatching marker, dependency drift, in-progress 상태와 symlink rejection regression을
+  추가했다. 전체 157 tests, compile, staged publication-safety가 PASS했다. Implementation `fadd5c7`과
+  in-flight source race guard `c55bc5c`를 push했다.
+- 기존 12 completed sequence는 supervisor successful-row gate가 Phase 7 호출 자체를 skip하므로 재계산하지
+  않았다. Current Sapiens/SAM/supervisor에는 signal/restart/duplicate launch가 없으며, 다음 새
+  pose-complete sequence부터 current Phase 7 subprocess가 source-bound marker를 생성한다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화
