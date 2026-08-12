@@ -1,4 +1,6 @@
+import argparse
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,11 +12,29 @@ from tools.build_pseudolabel_quality import (
     QUALITY_FLAG_BITS,
     compute_quality_vectors,
     finite_row_median,
+    quality_dependency_paths,
+    quality_dependency_signature,
     summarize_quality_outputs,
 )
 
 
 class PseudolabelQualityTest(unittest.TestCase):
+    def make_dependency_args(self, root: Path) -> argparse.Namespace:
+        args = argparse.Namespace(
+            selection_root=root / "selection",
+            pose_root=root / "pose",
+            triangulation_root=root / "triangulation",
+            sam_prior_root=root / "sam_prior",
+            sam_mode_c_review_root=root / "mode_c",
+            body_fit_root=root / "body",
+        )
+        for label, path in quality_dependency_paths(args, "sequence").items():
+            if label.startswith("tool/"):
+                continue
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(label.encode("utf-8"))
+        return args
+
     def test_quality_vector_preserves_component_reasons(self) -> None:
         frame_index = np.asarray([0, 1], dtype=np.int32)
         timestamp = np.asarray([0.0, 1.0 / 30.0], dtype=np.float64)
@@ -172,6 +192,33 @@ class PseudolabelQualityTest(unittest.TestCase):
             self.assertEqual(summary["frame_count"], 5)
             self.assertEqual(summary["pass_count"], 1)
             self.assertEqual(summary["review_count"], 1)
+
+    def test_quality_source_signature_changes_with_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = self.make_dependency_args(root)
+            before = quality_dependency_signature(args, "sequence")
+            dependency = (
+                args.selection_root
+                / "sequence"
+                / "cam2"
+                / "target_selection.npz"
+            )
+            dependency.write_bytes(b"changed selection")
+            after = quality_dependency_signature(args, "sequence")
+            self.assertNotEqual(before, after)
+
+    def test_quality_source_signature_rejects_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = self.make_dependency_args(root)
+            dependency = args.pose_root / "sequence" / "cam1" / "poses_2d.npz"
+            target = root / "outside.npz"
+            target.write_bytes(b"pose")
+            dependency.unlink()
+            os.symlink(target, dependency)
+            with self.assertRaisesRegex(RuntimeError, "unsafe quality dependency"):
+                quality_dependency_signature(args, "sequence")
 
 
 if __name__ == "__main__":

@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import hashlib
 import json
 import os
+import stat
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -139,6 +141,73 @@ def finite_nan_contract(points: np.ndarray, valid: np.ndarray) -> bool:
     return bool(np.isfinite(points[valid]).all() and np.isnan(points[~valid]).all())
 
 
+def quality_dependency_paths(
+    args: argparse.Namespace, sequence: str
+) -> dict[str, Path]:
+    paths = {
+        "tool/build_pseudolabel_quality.py": Path(__file__).resolve(),
+        "triangulation/triangulated_3d.npz": (
+            args.triangulation_root.resolve() / sequence / "triangulated_3d.npz"
+        ),
+        "triangulation/canonical_3d.npz": (
+            args.triangulation_root.resolve() / sequence / "canonical_3d.npz"
+        ),
+        "triangulation/metadata.json": (
+            args.triangulation_root.resolve() / sequence / "metadata.json"
+        ),
+        "body/body_fit.npz": (
+            args.body_fit_root.resolve() / sequence / "body_fit.npz"
+        ),
+        "body/metadata.json": (
+            args.body_fit_root.resolve() / sequence / "metadata.json"
+        ),
+        "mode_c/mode_c_escalation.json": (
+            args.sam_mode_c_review_root.resolve()
+            / sequence
+            / "mode_c_escalation.json"
+        ),
+    }
+    for camera in CAMERAS:
+        paths[f"selection/{camera}/target_selection.npz"] = (
+            args.selection_root.resolve()
+            / sequence
+            / camera
+            / "target_selection.npz"
+        )
+        paths[f"pose/{camera}/poses_2d.npz"] = (
+            args.pose_root.resolve() / sequence / camera / "poses_2d.npz"
+        )
+        paths[f"sam_prior/{camera}/sam_body_prior.npz"] = (
+            args.sam_prior_root.resolve()
+            / sequence
+            / camera
+            / "sam_body_prior.npz"
+        )
+    return paths
+
+
+def quality_dependency_signature(args: argparse.Namespace, sequence: str) -> str:
+    inventory = []
+    for label, path in sorted(quality_dependency_paths(args, sequence).items()):
+        try:
+            file_stat = path.lstat()
+        except OSError as error:
+            raise RuntimeError(f"missing quality dependency {label}: {path}") from error
+        if stat.S_ISLNK(file_stat.st_mode) or not stat.S_ISREG(file_stat.st_mode):
+            raise RuntimeError(f"unsafe quality dependency {label}: {path}")
+        inventory.append(
+            (
+                label,
+                file_stat.st_size,
+                file_stat.st_mtime_ns,
+                file_stat.st_ctime_ns,
+            )
+        )
+    return hashlib.sha256(
+        json.dumps(inventory, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
 def mode_c_reference_mask(metadata: dict[str, Any], frame_count: int) -> np.ndarray:
     result = np.zeros((frame_count, len(CAMERAS)), dtype=np.bool_)
     cameras = {str(row.get("camera")): row for row in metadata.get("cameras", [])}
@@ -152,7 +221,9 @@ def mode_c_reference_mask(metadata: dict[str, Any], frame_count: int) -> np.ndar
 
 
 def validate_quality_output(
-    output_root: Path, body_path: Path
+    output_root: Path,
+    body_path: Path,
+    dependency_signature: str | None = None,
 ) -> tuple[bool, list[str], dict[str, Any] | None]:
     reasons: list[str] = []
     metadata_path = output_root / "metadata.json"
@@ -161,12 +232,17 @@ def validate_quality_output(
         metadata = read_json(metadata_path)
         quality = read_npz(vector_path)
         body = read_npz(body_path)
-    except (OSError, ValueError, KeyError, json.JSONDecodeError):
+    except (OSError, EOFError, ValueError, KeyError, json.JSONDecodeError):
         return False, ["missing_or_invalid_quality_output"], None
     missing = sorted(REQUIRED_QUALITY_FIELDS - set(quality))
     if missing:
         reasons.extend(f"missing_field:{key}" for key in missing)
         return False, reasons, metadata
+    if (
+        dependency_signature is not None
+        and metadata.get("source_dependency_signature") != dependency_signature
+    ):
+        reasons.append("source_dependency_signature_mismatch")
     frame_count = len(body["frame_index"])
     if not np.array_equal(quality["frame_index"], body["frame_index"]):
         reasons.append("frame_index_mismatch")
@@ -485,7 +561,10 @@ def _build_sequence_quality_unlocked(
 ) -> dict[str, Any]:
     output = args.output_root.resolve() / sequence
     body_path = args.body_fit_root.resolve() / sequence / "body_fit.npz"
-    complete, _, existing = validate_quality_output(output, body_path)
+    dependency_signature = quality_dependency_signature(args, sequence)
+    complete, _, existing = validate_quality_output(
+        output, body_path, dependency_signature
+    )
     if complete and existing is not None:
         return {**existing, "resume_skipped": True}
     selections = {}
@@ -521,10 +600,20 @@ def _build_sequence_quality_unlocked(
             / "mode_c_escalation.json"
         ),
     )
-    metadata = {"created_at_utc": utc_now(), "sequence": sequence, **metadata}
+    completed_signature = quality_dependency_signature(args, sequence)
+    if completed_signature != dependency_signature:
+        raise RuntimeError(f"quality dependencies changed during build: {sequence}")
+    metadata = {
+        "created_at_utc": utc_now(),
+        "sequence": sequence,
+        "source_dependency_signature": completed_signature,
+        **metadata,
+    }
     atomic_npz(output / "quality_vector.npz", arrays)
     atomic_json(output / "metadata.json", metadata)
-    complete, reasons, _ = validate_quality_output(output, body_path)
+    complete, reasons, _ = validate_quality_output(
+        output, body_path, completed_signature
+    )
     if not complete:
         raise RuntimeError("quality output validation failed: " + ";".join(reasons))
     return {**metadata, "resume_skipped": False}

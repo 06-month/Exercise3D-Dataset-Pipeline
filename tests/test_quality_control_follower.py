@@ -1,4 +1,5 @@
 import io
+import json
 import tempfile
 import unittest
 from argparse import ArgumentTypeError, Namespace
@@ -7,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tools.run_quality_control_follower import (
+    completed_quality_still_current,
     dependency_paths,
     main,
     parse_list,
@@ -125,7 +127,7 @@ class QualityControlFollowerTest(unittest.TestCase):
             quality = args.output_root / "sequence"
             quality.mkdir(parents=True)
             (quality / "quality_vector.npz").touch()
-            (quality / "metadata.json").touch()
+            (quality / "metadata.json").write_text("{}", encoding="utf-8")
             completed = {"sequence": "REVIEW"}
             readiness_state: dict[str, dict] = {}
             result = {
@@ -169,7 +171,7 @@ class QualityControlFollowerTest(unittest.TestCase):
             quality = args.output_root / "sequence"
             quality.mkdir(parents=True)
             (quality / "quality_vector.npz").touch()
-            (quality / "metadata.json").touch()
+            (quality / "metadata.json").write_text("{}", encoding="utf-8")
             completed = {"sequence": "REVIEW"}
             freeze_ready = {
                 "sequence": {
@@ -231,6 +233,37 @@ class QualityControlFollowerTest(unittest.TestCase):
             self.assertIn("synthetic failure", first["failures"][0]["reason"])
             self.assertIn("synthetic failure", second["failures"][0]["reason"])
             self.assertEqual(second["failures"][0]["retry_in_seconds"], 20.0)
+
+    def test_signed_completion_is_invalidated_by_source_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            args = self.args(Path(temporary))
+            self.materialize_dependencies(args)
+            quality = args.output_root / "sequence"
+            quality.mkdir(parents=True)
+            (quality / "quality_vector.npz").touch()
+            with patch(
+                "tools.run_quality_control_follower.quality_dependency_signature",
+                return_value="current",
+            ):
+                (quality / "metadata.json").write_text(
+                    json.dumps({"source_dependency_signature": "current"}),
+                    encoding="utf-8",
+                )
+                self.assertTrue(completed_quality_still_current(args, "sequence"))
+            with patch(
+                "tools.run_quality_control_follower.quality_dependency_signature",
+                return_value="changed",
+            ):
+                self.assertFalse(completed_quality_still_current(args, "sequence"))
+
+    def test_unsigned_persisted_completion_is_grandfathered(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            args = self.args(Path(temporary))
+            quality = args.output_root / "sequence"
+            quality.mkdir(parents=True)
+            (quality / "quality_vector.npz").touch()
+            (quality / "metadata.json").write_text("{}", encoding="utf-8")
+            self.assertTrue(completed_quality_still_current(args, "sequence"))
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ try:
     from tools.build_pseudolabel_quality import (
         atomic_json,
         build_sequence_quality,
+        quality_dependency_signature,
         summarize_quality_outputs,
         validate_quality_output,
     )
@@ -24,6 +25,7 @@ except ModuleNotFoundError:
     from build_pseudolabel_quality import (
         atomic_json,
         build_sequence_quality,
+        quality_dependency_signature,
         summarize_quality_outputs,
         validate_quality_output,
     )
@@ -178,13 +180,46 @@ def export_dependency_signature(
 def validate_existing(args: argparse.Namespace, sequence: str) -> tuple[bool, str]:
     output = args.output_root.resolve() / sequence
     body_path = args.body_fit_root.resolve() / sequence / "body_fit.npz"
-    valid, reasons, metadata = validate_quality_output(output, body_path)
+    signature = quality_dependency_signature(quality_args(args), sequence)
+    valid, reasons, metadata = validate_quality_output(output, body_path, signature)
     if not valid or metadata is None:
         return False, ";".join(reasons) or "invalid quality output"
     status = str(metadata.get("qa", {}).get("sequence_status", "UNKNOWN"))
     if status not in {"PASS", "REVIEW"}:
         return False, f"quality sequence status is {status}"
     return True, status
+
+
+def completed_quality_still_current(
+    args: argparse.Namespace, sequence: str
+) -> bool:
+    """Fast source check for a persisted completion.
+
+    Unsigned outputs already recorded complete before source-bound resume was
+    introduced remain grandfathered.  Newly signed outputs must continue to
+    match every input before the follower skips their full validation.
+    """
+
+    output = args.output_root.resolve() / sequence
+    vector = output / "quality_vector.npz"
+    metadata_path = output / "metadata.json"
+    if not vector.is_file() or vector.is_symlink():
+        return False
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+    if not isinstance(metadata, dict):
+        return False
+    signature = metadata.get("source_dependency_signature")
+    if signature is None:
+        return True
+    try:
+        return signature == quality_dependency_signature(
+            quality_args(args), sequence
+        )
+    except RuntimeError:
+        return False
 
 
 def run_cycle(
@@ -207,9 +242,7 @@ def run_cycle(
     builder_args = quality_args(args)
 
     for sequence in args.sequences:
-        vector = args.output_root.resolve() / sequence / "quality_vector.npz"
-        metadata = args.output_root.resolve() / sequence / "metadata.json"
-        if sequence in completed and vector.is_file() and metadata.is_file():
+        if sequence in completed and completed_quality_still_current(args, sequence):
             continue
         completed.pop(sequence, None)
 
@@ -246,7 +279,14 @@ def run_cycle(
             newly_validated.append(sequence)
             if built:
                 materialized.append(sequence)
-        except (OSError, ValueError, KeyError, RuntimeError, json.JSONDecodeError) as error:
+        except (
+            OSError,
+            EOFError,
+            ValueError,
+            KeyError,
+            RuntimeError,
+            json.JSONDecodeError,
+        ) as error:
             reason = f"{type(error).__name__}: {error}"
             retry_state[sequence] = {
                 "not_before_monotonic": now + args.retry_seconds,
