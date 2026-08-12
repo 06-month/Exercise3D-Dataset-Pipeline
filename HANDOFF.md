@@ -14,6 +14,7 @@
 
 - DONE: Phase 0–5, Phase 6 pilot/target selector, Phase 8 A/B/C pilot와 checkpoint integrity
 - RUNNING: Phase 6 full 5B inference, pose-complete sequence의 Phase 7→SAM Mode B→Phase 9 streaming
+- RUNNING: Phase 11 quality vector 10/26 sequence; live supervisor는 유지하고 exporter fallback 연결
 - TODO: remaining triangulation, SAM prior consolidation, body fitting/QC, deadline private export/freeze
 - BLOCKED: 없음
 - REVIEW/FAIL: camera PASS 11/REVIEW 15/FAIL 0; body fit REVIEW 10/FAIL 0
@@ -24,10 +25,12 @@
 - autonomous supervisor는 2026-08-12 08:45 KST 이후 사라진 것을 live process와
   stale state로 확인한 뒤, 중복/child 부재를 재확인하고 exact resumable command로 09:44 KST 복구했다.
   현재 exact PID/stage는 dashboard/handoff state가 source of truth다.
-- 2026-08-12 09:53 KST snapshot: current streaming sequence `latpulldown_0003`, SAM Mode B child active
-- Sapiens durable 33/78 camera, current partial 포함 21,433/65,430 crop
-- Sapiens recent-chunk throughput 0.23401 crop/s; 병렬 effective 0.21348 crop/s
-- SAM durable 30/78 camera, 19,455/65,595 frame, 10/26 full sequence; aggregate 0.58671 frame/s
+- 2026-08-12 10:20 KST dashboard snapshot: current streaming sequence `latpulldown_0003`,
+  SAM Mode B child PID 1705755 (`cam2`) active
+- Sapiens durable 33/78 camera, current partial 포함 21,945/65,430 crop; PID 373049 alive
+- Sapiens recent-chunk throughput 0.22555 crop/s; 병렬 effective 0.21568 crop/s;
+  projected ETA 2026-08-14 15:53 KST로 deadline 약 2시간 53분 risk
+- SAM durable 31/78 camera, 20,117/65,595 frame, 10/26 full sequence; aggregate 0.586 frame/s
 - GPU: A100 80GB, combined snapshot 62,693 MiB/100%; observed OOM/retry 없음
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
 - handoff monitor PID 608232: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
@@ -72,13 +75,16 @@ Public-safe Sapiens command 형태:
   `freeze_eligible=true`
 - completed Sapiens 33 camera와 SAM 30 camera의 `run_provenance.json` materialize PASS;
   model/checkpoint/config/source/selection/tool/exact-resume identity 포함
+- Phase 11: body-fit complete 10 sequence/6,485 reference frame, REVIEW 10/FAIL 0;
+  target abstention/SAM rejection view 8/8, missing/prior-only joint frame 0
 
 ## Remaining work
 
-- Sapiens2: 45/78 camera, current partial 포함 43,997 target crops
+- Sapiens2: 45/78 camera, current partial 포함 43,485 target crops
 - Phase 7 이후: `latpulldown_0003` 및 이후 pose-complete sequence
-- SAM full: 30/78 camera PASS, `latpulldown_0003` RUNNING, full-complete sequence 10/26
+- SAM full: 31/78 camera PASS, `latpulldown_0003/cam2` RUNNING, full-complete sequence 10/26
 - critical path: pose-complete sequence → Phase 7 gate → Mode B → compact prior → body fit → Mode C candidate QA → export
+- Phase 11은 body fit/Mode C 뒤 CPU-only로 생성하며 deadline exporter가 누락 output을 자동 materialize한다.
 
 ## Resume instructions
 

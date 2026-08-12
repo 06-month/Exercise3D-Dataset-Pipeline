@@ -320,6 +320,29 @@ def metadata_statuses(
     return statuses
 
 
+def quality_progress(root: Path, sequences: list[str]) -> dict[str, Any]:
+    statuses: dict[str, str] = {}
+    frame_count = 0
+    for sequence in sequences:
+        output = root / sequence
+        metadata = read_json(output / "metadata.json")
+        if not (output / "quality_vector.npz").is_file() or not metadata:
+            continue
+        qa = metadata.get("qa", {})
+        status = str(qa.get("sequence_status", "UNKNOWN"))
+        statuses[sequence] = status
+        try:
+            frame_count += int(qa.get("frame_count", 0))
+        except (TypeError, ValueError):
+            pass
+    return {
+        "completed_sequences": len(statuses),
+        "completed_frames": frame_count,
+        "status_counts": status_counts(statuses.values()),
+        "statuses": statuses,
+    }
+
+
 def sam_retry_summary(runtime_dir: Path) -> tuple[int, list[dict[str, Any]]]:
     retry_count = 0
     failures: list[dict[str, Any]] = []
@@ -506,6 +529,7 @@ def build_dashboard(
     ) or dict(body_source.get("status", {}))
     triangulation_counts = status_counts(triangulation_status.values())
     body_counts = status_counts(body_status.values())
+    quality = quality_progress(args.quality_root, sequences)
     export = export_progress(args.export_root, deadline_state.get("build_id"))
     deadline_snapshot_status = str(deadline_state.get("status", "UNKNOWN"))
     export["deadline_snapshot_status"] = deadline_snapshot_status
@@ -534,6 +558,7 @@ def build_dashboard(
         "sam_cameras": int(sam_source.get("completed_camera_count", 0)),
         "triangulation_sequences": int(triangulation_source.get("count", 0)),
         "body_fit_sequences": int(body_source.get("count", 0)),
+        "quality_sequences": int(quality["completed_sequences"]),
         "export_sequences": int(export["completed_sequences"]),
     }
     signature = hashlib.sha256(
@@ -644,10 +669,12 @@ def build_dashboard(
     for error in errors:
         code = str(error.get("code", "RUNTIME_ERROR"))
         attention(code, str(error.get("message") or error.get("reason") or error), severity="ERROR")
-    if body_counts["FAIL"] or triangulation_counts["FAIL"]:
+    if body_counts["FAIL"] or triangulation_counts["FAIL"] or quality["status_counts"]["FAIL"]:
         attention(
             "VALIDATION_FAIL",
-            f"Validation FAIL counts: triangulation={triangulation_counts['FAIL']}, body_fit={body_counts['FAIL']}.",
+            "Validation FAIL counts: "
+            f"triangulation={triangulation_counts['FAIL']}, "
+            f"body_fit={body_counts['FAIL']}, quality={quality['status_counts']['FAIL']}.",
         )
 
     if int(body_source.get("count", 0)) >= total_sequences and export.get("freeze_eligible"):
@@ -728,6 +755,10 @@ def build_dashboard(
             "completed_sequences": int(body_source.get("count", 0)),
             "total_sequences": total_sequences,
             "status_counts": body_counts,
+        },
+        "quality_control": {
+            **quality,
+            "total_sequences": total_sequences,
         },
         "export": export,
         "supervisor": {
@@ -812,7 +843,11 @@ def render_rich(state: dict[str, Any], console: Any | None = None) -> Any:
         f"{cell(sam['throughput_frames_per_second'])} frame/s",
         sam["eta_kst"] or "waiting",
     )
-    for key, label in (("triangulation", "Triangulation"), ("body_fit", "Body fit")):
+    for key, label in (
+        ("triangulation", "Triangulation"),
+        ("body_fit", "Body fit"),
+        ("quality_control", "Quality control"),
+    ):
         row = state[key]
         counts = row["status_counts"]
         table.add_row(
@@ -882,6 +917,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sam-output-root", type=Path, default=PROJECT_ROOT / "outputs/sam_body4d_full")
     parser.add_argument("--triangulation-root", type=Path, default=PROJECT_ROOT / "outputs/triangulation_final")
     parser.add_argument("--body-fit-root", type=Path, default=PROJECT_ROOT / "outputs/body_fit_full")
+    parser.add_argument("--quality-root", type=Path, default=PROJECT_ROOT / "outputs/quality_control_full")
     parser.add_argument("--export-root", type=Path, default=PROJECT_ROOT / "outputs/private_dataset_freeze")
     parser.add_argument("--disk-path", type=Path, default=PROJECT_ROOT / "outputs")
     parser.add_argument("--output", type=Path, default=PROJECT_ROOT / ".runtime/dashboard_state.json")

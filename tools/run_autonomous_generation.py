@@ -62,6 +62,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sam-prior-root", type=Path, required=True)
     parser.add_argument("--sam-mode-c-review-root", type=Path, required=True)
     parser.add_argument("--body-fit-root", type=Path, required=True)
+    parser.add_argument(
+        "--quality-root",
+        type=Path,
+        default=PROJECT_ROOT / "outputs" / "quality_control_full",
+    )
     parser.add_argument("--export-root", type=Path, required=True)
     parser.add_argument("--runtime-dir", type=Path, required=True)
     parser.add_argument("--build-id", required=True)
@@ -442,6 +447,21 @@ def mode_c_assessment_command(args: argparse.Namespace, sequence: str) -> list[s
     ]
 
 
+def quality_command(args: argparse.Namespace, sequence: str) -> list[str]:
+    return [
+        sys.executable,
+        str(PROJECT_ROOT / "tools" / "build_pseudolabel_quality.py"),
+        "--selection-root", str(args.selection_root.resolve()),
+        "--pose-root", str(args.pose_root.resolve()),
+        "--triangulation-root", str(args.triangulation_root.resolve()),
+        "--sam-prior-root", str(args.sam_prior_root.resolve()),
+        "--sam-mode-c-review-root", str(args.sam_mode_c_review_root.resolve()),
+        "--body-fit-root", str(args.body_fit_root.resolve()),
+        "--output-root", str(args.quality_root.resolve()),
+        "--sequences", sequence,
+    ]
+
+
 def export_command(args: argparse.Namespace) -> list[str]:
     return [
         sys.executable,
@@ -453,6 +473,7 @@ def export_command(args: argparse.Namespace) -> list[str]:
         "--sam-prior-root", str(args.sam_prior_root.resolve()),
         "--sam-mode-c-review-root", str(args.sam_mode_c_review_root.resolve()),
         "--body-fit-root", str(args.body_fit_root.resolve()),
+        "--quality-root", str(args.quality_root.resolve()),
         "--output-root", str(args.export_root.resolve()),
         "--build-id", args.build_id,
         "--sequences", ",".join(args.sequences),
@@ -506,6 +527,8 @@ def run_sequence_pipeline(
         row["failed_stage"] = "BODY_FIT"
     elif run(mode_c_assessment_command(args, sequence)) != 0:
         row["failed_stage"] = "MODE_C_ASSESSMENT"
+    elif run(quality_command(args, sequence)) != 0:
+        row["failed_stage"] = "PHASE11_QUALITY_CONTROL"
     else:
         metadata_path = args.body_fit_root.resolve() / sequence / "metadata.json"
         try:

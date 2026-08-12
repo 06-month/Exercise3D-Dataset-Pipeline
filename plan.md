@@ -306,12 +306,16 @@
 
 ## Phase 11 — Pseudo-label Quality Control
 
-- 상태: `TODO`
+- 상태: `IN_PROGRESS_STREAMING`; 완료 body-fit 10 sequence/6,485 frame materialize, FAIL 0
 - 목적: label과 reliability를 함께 저장
 - 입력: camera, temporal, teacher, triangulation, fitting diagnostics
 - 출력: frame/sequence quality vector와 overall policy
 - 주요 방법: uncertainty를 누락하지 않고 source별 provenance 유지
 - Acceptance: 모든 label에 quality metadata와 invalid/review reason 존재
+- 구현: scalar accuracy probability를 만들지 않고 target/pose/SAM/triangulation/body component와
+  explicit bitmask reason을 reference frame별로 저장; exact frame/PTS/schema/count validation 후 resume
+- streaming: 새 supervisor 실행은 Mode C assessment 직후 생성하며, 현재 live supervisor는 중단하지 않고
+  deadline/final exporter가 누락 sequence를 CPU-only로 materialize하는 fallback 유지
 - 다음 gate: 외부 ground-truth validation
 
 ## Phase 12 — Fit3D Validation

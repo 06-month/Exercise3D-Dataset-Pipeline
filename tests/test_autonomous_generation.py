@@ -14,6 +14,7 @@ from tools.run_autonomous_generation import (
     free_gib,
     load_successful_rows,
     process_alive,
+    quality_command,
     sam_smoke_complete,
     sapiens_progress,
 )
@@ -109,6 +110,22 @@ class AutonomousGenerationTest(unittest.TestCase):
             self.assertAlmostEqual(
                 progress["recent_completed_camera_crops_per_second"], 1.0
             )
+
+    def test_quality_command_is_sequence_scoped(self) -> None:
+        root = Path("root")
+        args = Namespace(
+            selection_root=root / "selection",
+            pose_root=root / "pose",
+            triangulation_root=root / "triangulation",
+            sam_prior_root=root / "sam",
+            sam_mode_c_review_root=root / "mode_c",
+            body_fit_root=root / "body",
+            quality_root=root / "quality",
+        )
+        command = quality_command(args, "sequence")
+        self.assertIn("build_pseudolabel_quality.py", command[1])
+        self.assertEqual(command[command.index("--sequences") + 1], "sequence")
+        self.assertEqual(Path(command[command.index("--output-root") + 1]).name, "quality")
 
 
 if __name__ == "__main__":

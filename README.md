@@ -78,7 +78,10 @@ camera calibration을 구분합니다.
 | 7. Timestamp-aware Triangulation | RUNNING | pilot 4/4 final schema PASS; pose-complete sequence CPU streaming, NO_GO에만 held-out recovery |
 | 8. SAM Body Runtime Feasibility | FULL RUNNING/REVIEW | 22.387 GiB integrity PASS, A/B/C 6-run 완료; Mode B 2 sequence/5,571 frame PASS |
 | 9. Sequence Body Fitting | RUNNING/REVIEW | 2 sequence 완료; schema PASS, camera/displacement REVIEW 2/FAIL 0 |
-| 10–13 | IMPLEMENTED PARTIAL/SMOKE PASS | 첫 private export 34 files, SHA/size mismatch 0; deadline build 입력 누적 중 |
+| 10. Body Shape / Proportion | IMPLEMENTED PARTIAL | sequence-level shape/scale provenance 보존; evidence-backed subject mapping 부재로 cross-sequence fusion 안 함 |
+| 11. Pseudo-label Quality Control | RUNNING | 10 sequence/6,485 frame, REVIEW 10/FAIL 0; source-specific vector/bitmask, scalar accuracy score 없음 |
+| 12. Fit3D Validation | IMPLEMENTED/WAITING DATA | metric regression PASS; local Fit3D payload 부재로 실제 score 미주장 |
+| 13. Final Dataset Freeze | IMPLEMENTED/SMOKE PASS | 34-file immutable smoke integrity PASS; deadline build 입력 누적 중 |
 
 `pushup_0003`은 Phase 5.1에서 observation, initialization, objective와 gate를 그대로 두고
 Stage 2 budget만 300에서 600으로 확장했습니다. 실제 322 evaluations에서 `xtol`로 수렴했고,
@@ -284,6 +287,7 @@ Sapiens2 Pose 5B single-image smoke:
 | `tools/assess_sam_mode_c_escalation.py` | Mode B failure/outlier 기반 bounded Mode C review clip 선정 | ignored private output 생성 |
 | `tools/verify_mhr_parameter_replay.py` | compact 204-d MHR parameter의 official model exact replay 검사 | ignored aggregate 생성 |
 | `tools/fit_sequence_body.py` | geometry-dominant staged sequence body fit과 S0 | ignored private output 생성 |
+| `tools/build_pseudolabel_quality.py` | target/pose/SAM/geometry/body evidence의 frame/sequence quality vector | ignored private output 생성 |
 | `tools/export_private_dataset.py` | versioned private dataset export와 byte/SHA/schema 검증 | ignored private output 생성 |
 | `tools/evaluate_fit3d_metrics.py` | prepared Fit3D pair의 MPJPE/N-MPJPE/PA-MPJPE 분리 평가 | ignored aggregate 생성 |
 | `tools/summarize_sam_body_runtime.py` | A/B/C ratio, occlusion 증가와 best/expected/worst runtime 집계 | redacted aggregate 생성 |

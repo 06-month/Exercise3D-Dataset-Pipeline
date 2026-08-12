@@ -28,12 +28,15 @@ reuse만 허용한다. Corrupt/불일치 final build를 같은 ID로 덮어쓰�
     │   ├── triangulated_3d.npz
     │   ├── canonical_3d.npz
     │   └── metadata.json
-    └── body/
-        ├── cam{1,2,3}_sam_body_prior.npz
-        ├── cam{1,2,3}_sam_body_metadata.json
-        ├── body_fit.npz
-        ├── metadata.json
-        └── mode_c_escalation.json
+    ├── body/
+    │   ├── cam{1,2,3}_sam_body_prior.npz
+    │   ├── cam{1,2,3}_sam_body_metadata.json
+    │   ├── body_fit.npz
+    │   ├── metadata.json
+    │   └── mode_c_escalation.json
+    └── quality/
+        ├── quality_vector.npz
+        └── metadata.json
 ```
 
 ## 핵심 array semantics
@@ -47,6 +50,8 @@ reuse만 허용한다. Corrupt/불일치 final build를 같은 ID로 덮어쓰�
   127 joint coordinate/global rotation, 204-d replayable parameter
 - sequence fit: canonical 3D/confidence, evidence code, geometry/prior residual, temporal fit,
   sequence shape/scale consensus와 별도 scale-invariant `S0`
+- quality: frame별 target/pose/SAM/triangulation/body component vector, categorical flag bitmask,
+  PASS/REVIEW/FAIL. Calibrated accuracy probability나 합성 scalar score로 해석하지 않음
 
 모든 valid numeric payload는 finite여야 하고 invalid point는 NaN이다. `PASS`, `REVIEW`, `FAIL`,
 `INCOMPLETE`를 분리하며 REVIEW를 PASS로 승격하지 않는다. Camera geometry가 observation-conditioned면

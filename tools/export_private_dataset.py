@@ -22,8 +22,17 @@ from typing import Any
 
 import numpy as np
 
+try:
+    from tools.build_pseudolabel_quality import (
+        build_sequence_quality,
+        validate_quality_output,
+    )
+except ModuleNotFoundError:
+    from build_pseudolabel_quality import build_sequence_quality, validate_quality_output
+
 
 CAMERAS = ("cam1", "cam2", "cam3")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def utc_now() -> str:
@@ -46,6 +55,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sam-prior-root", type=Path, required=True)
     parser.add_argument("--sam-mode-c-review-root", type=Path, required=True)
     parser.add_argument("--body-fit-root", type=Path, required=True)
+    parser.add_argument(
+        "--quality-root",
+        type=Path,
+        default=PROJECT_ROOT / "outputs" / "quality_control_full",
+    )
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--build-id", required=True)
     parser.add_argument("--sequences", type=parse_list, required=True)
@@ -300,7 +314,31 @@ def sequence_dependencies(args: argparse.Namespace, sequence: str) -> dict[str, 
     files["body/mode_c_escalation.json"] = (
         args.sam_mode_c_review_root.resolve() / sequence / "mode_c_escalation.json"
     )
+    quality = args.quality_root.resolve() / sequence
+    files["quality/quality_vector.npz"] = quality / "quality_vector.npz"
+    files["quality/metadata.json"] = quality / "metadata.json"
     return files
+
+
+def ensure_quality_output(args: argparse.Namespace, sequence: str) -> dict[str, Any] | None:
+    body_path = args.body_fit_root.resolve() / sequence / "body_fit.npz"
+    mode_c_path = (
+        args.sam_mode_c_review_root.resolve()
+        / sequence
+        / "mode_c_escalation.json"
+    )
+    if not body_path.is_file() or not mode_c_path.is_file():
+        return None
+    quality_args = argparse.Namespace(
+        selection_root=args.selection_root,
+        pose_root=args.pose_root,
+        triangulation_root=args.triangulation_root,
+        sam_prior_root=args.sam_prior_root,
+        sam_mode_c_review_root=args.sam_mode_c_review_root,
+        body_fit_root=args.body_fit_root,
+        output_root=args.quality_root,
+    )
+    return build_sequence_quality(quality_args, sequence)
 
 
 def validate_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]:
@@ -391,6 +429,14 @@ def validate_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]
         reasons.append("triangulation_not_eligible")
     if str(body_metadata["qa"]["status"]).startswith("FAIL"):
         reasons.append("body_fit_fail")
+    quality_ok, quality_reasons, quality_metadata = validate_quality_output(
+        args.quality_root.resolve() / sequence,
+        args.body_fit_root.resolve() / sequence / "body_fit.npz",
+    )
+    if not quality_ok:
+        reasons.extend(f"quality:{reason}" for reason in quality_reasons)
+    elif str(quality_metadata["qa"]["sequence_status"]).startswith("FAIL"):
+        reasons.append("quality_control_fail")
     status = "FAIL" if reasons else (
         "REVIEW"
         if body_metadata["qa"]["status"].startswith("REVIEW")
@@ -489,6 +535,21 @@ def main() -> int:
 
     sequence_rows = []
     for sequence in args.sequences:
+        try:
+            ensure_quality_output(args, sequence)
+        except (OSError, ValueError, KeyError, RuntimeError, json.JSONDecodeError) as error:
+            print(
+                json.dumps(
+                    {
+                        "sequence": sequence,
+                        "stage": "PHASE11_QUALITY_CONTROL",
+                        "status": "INCOMPLETE",
+                        "reason": str(error),
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
         validation = validate_sequence(args, sequence)
         row = {
             "sequence": sequence,

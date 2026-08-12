@@ -46,6 +46,22 @@
 - Dashboard는 sentinel의 `EXPORT_FAILED`, `EXPORT_INTEGRITY_FAILED`, `EXISTING_BUILD_INVALID`와
   구체적 integrity error를 `DEADLINE_SNAPSHOT_FAILED` attention으로 승격하도록 연결했다.
 
+### Phase 11 pseudo-label quality vector streaming 시작
+
+- 기존 Phase 6–9 output의 frame/PTS와 component evidence를 감사하고
+  `tools/build_pseudolabel_quality.py`를 구현했다. Correlated learned signal을 calibrated accuracy
+  probability나 단일 scalar로 축약하지 않고 source별 vector와 explicit reason bitmask를 저장한다.
+- 완료된 10 sequence/6,485 reference frame을 CPU-only materialize했다. Sequence REVIEW 10/FAIL 0,
+  target abstention/unmapped 8 view, SAM rejected/unmapped 8 view이며 prior-only/body-missing/
+  triangulation-missing joint frame은 0이다. `pushup_0001` ambiguity 7은 강제 target 없이 그대로 남았다.
+- Required field/shape/frame index/PTS/status count validation을 통과한 output만 resume-skip한다.
+  실제 single-sequence 재호출에서 `resume_skipped=true`와 전역 10-sequence summary 보존을 확인했다.
+- New supervisor code는 Mode C assessment 뒤 Phase 11을 호출한다. 현재 살아 있는 supervisor는 restart하지
+  않았고, updated deadline/final exporter가 quality 누락 sequence를 CPU-only materialize한 뒤
+  `quality/quality_vector.npz`와 metadata를 immutable private build에 포함한다.
+- 현재 10 sequence 모두 final exporter validation REVIEW, dependency reason 0이다.
+- Phase 11 unit/integration regression을 포함한 전체 65개 unit test가 PASS했다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화

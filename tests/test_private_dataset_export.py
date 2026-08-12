@@ -2,6 +2,7 @@ import csv
 import json
 import tempfile
 import unittest
+from argparse import Namespace
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +11,7 @@ from tools.export_private_dataset import (
     copy_exact,
     finite_nan_contract,
     publish_staged_build,
+    sequence_dependencies,
     sha256,
     validate_path_component,
     verify_frozen_build,
@@ -98,6 +100,27 @@ class PrivateDatasetExportTest(unittest.TestCase):
         for unsafe in ("", ".", "..", "../escape", "nested/path"):
             with self.assertRaises(RuntimeError):
                 validate_path_component(unsafe, "build id")
+
+    def test_sequence_dependencies_include_quality_payload(self) -> None:
+        root = Path("root")
+        args = Namespace(
+            selection_root=root / "selection",
+            pose_root=root / "pose",
+            triangulation_root=root / "triangulation",
+            sam_prior_root=root / "sam",
+            sam_mode_c_review_root=root / "mode_c",
+            body_fit_root=root / "body",
+            quality_root=root / "quality",
+        )
+        dependencies = sequence_dependencies(args, "sequence")
+        self.assertEqual(
+            dependencies["quality/quality_vector.npz"].name,
+            "quality_vector.npz",
+        )
+        self.assertEqual(
+            dependencies["quality/metadata.json"].name,
+            "metadata.json",
+        )
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ from tools.monitor_autonomous_generation import (
     export_progress,
     first_incomplete_camera,
     metadata_statuses,
+    quality_progress,
 )
 
 
@@ -61,6 +62,26 @@ class AutonomousMonitorTest(unittest.TestCase):
                 metadata_statuses(root, ["one"], ("quality_status", "status")),
                 {"one": "REVIEW_CAMERA"},
             )
+
+    def test_quality_progress_preserves_review_and_fail(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for sequence, status, frames in (
+                ("one", "REVIEW", 3),
+                ("two", "FAIL", 2),
+            ):
+                output = root / sequence
+                output.mkdir()
+                (output / "quality_vector.npz").touch()
+                atomic_json(
+                    output / "metadata.json",
+                    {"qa": {"sequence_status": status, "frame_count": frames}},
+                )
+            progress = quality_progress(root, ["one", "two", "pending"])
+            self.assertEqual(progress["completed_sequences"], 2)
+            self.assertEqual(progress["completed_frames"], 5)
+            self.assertEqual(progress["status_counts"]["REVIEW"], 1)
+            self.assertEqual(progress["status_counts"]["FAIL"], 1)
 
     def test_dashboard_detects_dead_jobs_disk_and_validation_fail(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -224,6 +245,7 @@ class AutonomousMonitorTest(unittest.TestCase):
             sam_output_root=outputs / "sam",
             triangulation_root=outputs / "triangulation",
             body_fit_root=outputs / "body_fit",
+            quality_root=outputs / "quality",
             export_root=outputs / "export",
             disk_path=outputs,
             output=root / "dashboard.json",
