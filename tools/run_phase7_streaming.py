@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
+import stat
 import subprocess
 import sys
 import time
@@ -25,6 +27,8 @@ import numpy as np
 
 CAMERAS = ("cam1", "cam2", "cam3")
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SOURCE_IDENTITY_FILENAME = ".phase7_source_identity.json"
+SOURCE_IDENTITY_SCHEMA_VERSION = 1
 
 
 def utc_now() -> str:
@@ -90,7 +94,152 @@ def sequence_ready(dataset_root: Path, pose_root: Path, sequence: str) -> bool:
     )
 
 
-def read_triangulation(output_root: Path, sequence: str) -> dict[str, Any] | None:
+def _regular_file_identity(path: Path, label: str) -> dict[str, Any]:
+    try:
+        file_stat = path.lstat()
+    except OSError as error:
+        raise RuntimeError(f"missing Phase 7 dependency {label}: {path}") from error
+    if stat.S_ISLNK(file_stat.st_mode) or not stat.S_ISREG(file_stat.st_mode):
+        raise RuntimeError(f"unsafe Phase 7 dependency {label}: {path}")
+    return {
+        "label": label,
+        "size_bytes": file_stat.st_size,
+        "mtime_ns": file_stat.st_mtime_ns,
+        "ctime_ns": file_stat.st_ctime_ns,
+    }
+
+
+def triangulation_source_identity(
+    args: argparse.Namespace, sequence: str, camera_root: Path
+) -> dict[str, Any]:
+    """Describe every file and fixed parameter consumed by triangulation.
+
+    Labels deliberately avoid absolute paths so the durable sidecar remains
+    publication-safe.  Nanosecond stat identity, including ctime, makes an
+    in-place source replacement invalidate reuse without hashing large private
+    pose arrays on every streaming pass.
+    """
+
+    dataset_root = args.dataset_root.expanduser().resolve()
+    pose_root = args.pose_root.expanduser().resolve()
+    camera_root = camera_root.expanduser().resolve()
+    canonical_config = PROJECT_ROOT / "configs" / "sapiens2_canonical_joints.json"
+    dependencies = [
+        _regular_file_identity(
+            PROJECT_ROOT / "tools" / "triangulate_sapiens2.py",
+            "tool/triangulate_sapiens2.py",
+        ),
+        _regular_file_identity(
+            canonical_config,
+            "config/sapiens2_canonical_joints.json",
+        ),
+        _regular_file_identity(
+            dataset_root / "reports" / "temporal_alignment" / "pair_summary.csv",
+            "temporal_alignment/pair_summary.csv",
+        ),
+        _regular_file_identity(
+            camera_root / sequence / "cameras_refined.json",
+            "camera/cameras_refined.json",
+        ),
+        _regular_file_identity(
+            camera_root / sequence / "validation.json",
+            "camera/validation.json",
+        ),
+    ]
+    vggt_candidates = list(
+        (dataset_root / "outputs" / "vggt").glob(f"*/*/{sequence}/metadata.json")
+    )
+    if len(vggt_candidates) != 1:
+        raise RuntimeError(
+            f"expected one VGGT metadata dependency for {sequence}, "
+            f"found {len(vggt_candidates)}"
+        )
+    dependencies.append(
+        _regular_file_identity(vggt_candidates[0], "vggt/metadata.json")
+    )
+    for camera in CAMERAS:
+        camera_dir = pose_root / sequence / camera
+        dependencies.extend(
+            [
+                _regular_file_identity(
+                    camera_dir / "metadata.json", f"pose/{camera}/metadata.json"
+                ),
+                _regular_file_identity(
+                    camera_dir / "poses_2d.npz", f"pose/{camera}/poses_2d.npz"
+                ),
+            ]
+        )
+        images = sorted(frame_directory(dataset_root, sequence, camera).glob("*.jpg"))
+        if not images:
+            raise RuntimeError(f"missing source frames for {sequence}/{camera}")
+        dependencies.append(
+            _regular_file_identity(images[0], f"source_frame/{camera}/first.jpg")
+        )
+    unsigned = {
+        "schema_version": SOURCE_IDENTITY_SCHEMA_VERSION,
+        "sequence": sequence,
+        "parameters": {
+            "min_confidence": 0.30,
+            "huber_scale_px": 10.0,
+            "max_bracket_gap_seconds": 0.050,
+            "cameras": list(CAMERAS),
+            "reference_camera": "cam1",
+        },
+        "dependencies": dependencies,
+    }
+    encoded = json.dumps(
+        unsigned, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return {
+        **unsigned,
+        "dependency_signature_sha256": hashlib.sha256(encoded).hexdigest(),
+    }
+
+
+def write_triangulation_source_identity(
+    output_root: Path,
+    sequence: str,
+    identity: dict[str, Any],
+    camera_source: str,
+) -> None:
+    payload = {
+        **identity,
+        "camera_source": camera_source,
+        "status": "COMPLETE",
+        "created_at_utc": utc_now(),
+    }
+    atomic_text(
+        output_root / sequence / SOURCE_IDENTITY_FILENAME,
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+    )
+
+
+def mark_triangulation_in_progress(
+    output_root: Path, sequence: str, camera_source: str
+) -> None:
+    atomic_text(
+        output_root / sequence / SOURCE_IDENTITY_FILENAME,
+        json.dumps(
+            {
+                "schema_version": SOURCE_IDENTITY_SCHEMA_VERSION,
+                "sequence": sequence,
+                "camera_source": camera_source,
+                "status": "IN_PROGRESS",
+                "created_at_utc": utc_now(),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+    )
+
+
+def read_triangulation(
+    output_root: Path,
+    sequence: str,
+    expected_identity: dict[str, Any] | None = None,
+    expected_camera_source: str | None = None,
+) -> dict[str, Any] | None:
     metadata_path = output_root / sequence / "metadata.json"
     canonical_path = output_root / sequence / "canonical_3d.npz"
     if not metadata_path.is_file() or not canonical_path.is_file():
@@ -102,6 +251,18 @@ def read_triangulation(output_root: Path, sequence: str) -> dict[str, Any] | Non
         qa = metadata["qa"]
         if qa["schema_status"] != "PASS" or not finite:
             return None
+        if expected_identity is not None:
+            identity_path = output_root / sequence / SOURCE_IDENTITY_FILENAME
+            identity = json.loads(identity_path.read_text(encoding="utf-8"))
+            if (
+                identity.get("schema_version") != SOURCE_IDENTITY_SCHEMA_VERSION
+                or identity.get("sequence") != sequence
+                or identity.get("status") != "COMPLETE"
+                or identity.get("dependency_signature_sha256")
+                != expected_identity["dependency_signature_sha256"]
+                or identity.get("camera_source") != expected_camera_source
+            ):
+                return None
         return metadata
     except (OSError, ValueError, KeyError, json.JSONDecodeError):
         return None
@@ -179,8 +340,19 @@ def atomic_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 
 def process_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]:
-    initial = read_triangulation(args.initial_output_root.resolve(), sequence)
+    initial_identity = triangulation_source_identity(args, sequence, args.camera_root)
+    initial = read_triangulation(
+        args.initial_output_root.resolve(),
+        sequence,
+        initial_identity,
+        "PHASE5_BACKGROUND_BA",
+    )
     if initial is None:
+        mark_triangulation_in_progress(
+            args.initial_output_root.resolve(),
+            sequence,
+            "PHASE5_BACKGROUND_BA",
+        )
         run_checked(
             triangulate_command(
                 args,
@@ -191,6 +363,19 @@ def process_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]:
             )
         )
         initial = read_triangulation(args.initial_output_root.resolve(), sequence)
+        if initial is not None:
+            write_triangulation_source_identity(
+                args.initial_output_root.resolve(),
+                sequence,
+                initial_identity,
+                "PHASE5_BACKGROUND_BA",
+            )
+            initial = read_triangulation(
+                args.initial_output_root.resolve(),
+                sequence,
+                initial_identity,
+                "PHASE5_BACKGROUND_BA",
+            )
     if initial is None:
         raise RuntimeError(f"invalid initial triangulation output: {sequence}")
     initial_status = initial["qa"]["pose_camera_consistency_status"]
@@ -204,15 +389,19 @@ def process_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]:
     camera_source = (
         "REVIEW_OBSERVATION_CONDITIONED" if use_recovery and recovery_ok else "PHASE5_BACKGROUND_BA"
     )
-    final = read_triangulation(args.final_output_root.resolve(), sequence)
-    final_source = None if final is None else final.get("camera_uncertainty_provenance", {}).get(
-        "observation_conditioned_acceptance_status"
+    final_identity = triangulation_source_identity(
+        args, sequence, selected_camera_root
     )
-    must_rerun = final is None or (
-        camera_source == "REVIEW_OBSERVATION_CONDITIONED"
-        and final_source != "REVIEW_OBSERVATION_CONDITIONED"
+    final = read_triangulation(
+        args.final_output_root.resolve(),
+        sequence,
+        final_identity,
+        camera_source,
     )
-    if must_rerun:
+    if final is None:
+        mark_triangulation_in_progress(
+            args.final_output_root.resolve(), sequence, camera_source
+        )
         run_checked(
             triangulate_command(
                 args,
@@ -223,6 +412,19 @@ def process_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]:
             )
         )
         final = read_triangulation(args.final_output_root.resolve(), sequence)
+        if final is not None:
+            write_triangulation_source_identity(
+                args.final_output_root.resolve(),
+                sequence,
+                final_identity,
+                camera_source,
+            )
+            final = read_triangulation(
+                args.final_output_root.resolve(),
+                sequence,
+                final_identity,
+                camera_source,
+            )
     if final is None:
         raise RuntimeError(f"invalid final triangulation output: {sequence}")
     return {
