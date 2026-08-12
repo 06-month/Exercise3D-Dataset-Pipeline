@@ -26,7 +26,8 @@
   completion metadata/schema PASS item만 skip하고 incomplete/corrupt item만 resume
 - autonomous monitoring: `.runtime/dashboard_state.json`에 process/GPU/progress/deadline/attention을
   atomic 기록하고 Rich live/`--once`/state-only mode를 제공; selector workload와 measured rate 기반
-  overhead-free deadline sequence upper bound를 별도 표시; 정상 generation은 AI polling 금지
+  overhead-free deadline sequence upper bound 및 completed provenance의 post-SAM p90-adjusted schedule을
+  별도 표시; 정상 generation은 AI polling 금지
 - expensive camera output별 atomic `run_provenance.json`: checkpoint/config/source/selection/tool/command
   identity를 보존하며 기존 PASS output에는 재추론 없이 sidecar만 materialize
 - deadline sentinel: 2026-08-14 13:00 KST에 별도 immutable build ID로 private snapshot/export를

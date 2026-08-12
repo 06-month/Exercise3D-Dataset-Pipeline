@@ -17,6 +17,9 @@ payload는 공개하지 않습니다. 저장소에는 재현 가능한 코드, �
 Dashboard는 frozen selector summary의 exact crop/frame workload와 live measured stage rate를 결합해
 deadline까지 terminal 가능 sequence 수의 `OPTIMISTIC_UPPER_BOUND`도 표시합니다. 이 값은
 triangulation/body-fit/quality/export overhead를 제외한 ceiling이며 완료 약속으로 해석하지 않습니다.
+완료된 sequence의 SAM-complete→body-fit/Mode-C terminal provenance에서 관측한 post-SAM latency도
+별도로 집계해 `EMPIRICAL_P90_POST_SAM_ADJUSTED` schedule을 함께 표시합니다. 이 값 역시
+미래 rate/latency 보장이 아니라 deadline risk 범위입니다.
 Phase 11 CPU follower는 quality가 완료된 sequence에 대해 final exporter과 동일 validation을
 미리 수행하고 dashboard에 `freeze-ready` count와 지속 dependency failure를 보고합니다.
 별도 CPU-only predeadline checkpoint follower는 이 ready 집합이 기존 byte-verified

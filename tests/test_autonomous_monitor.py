@@ -14,6 +14,7 @@ from tools.monitor_autonomous_generation import (
     export_progress,
     first_incomplete_camera,
     metadata_statuses,
+    observed_post_sam_overhead,
     quality_progress,
     selection_workloads,
 )
@@ -76,6 +77,64 @@ class AutonomousMonitorTest(unittest.TestCase):
         self.assertEqual(forecast["estimated_completed_sequences_by_deadline"], 2)
         self.assertEqual(forecast["first_sequence_after_deadline"], "three")
         self.assertIn("overhead excluded", forecast["assumptions"][-1])
+        adjusted = deadline_freeze_upper_bound(
+            workloads,
+            terminal_sequences={"one"},
+            accepted_sequences={"one"},
+            completed_sam_cameras={"two/cam1"},
+            current_sam=("two", "cam2"),
+            current_sam_frames=1,
+            pose_completed_crops=10,
+            pose_rate=1.0,
+            sam_rate=1.0,
+            now=now,
+            deadline=now + timedelta(seconds=25),
+            per_sequence_overhead_seconds=11.0,
+            kind="EMPIRICAL_P90_POST_SAM_ADJUSTED",
+        )
+        self.assertEqual(adjusted["estimated_completed_sequences_by_deadline"], 1)
+        self.assertEqual(adjusted["per_sequence_overhead_seconds"], 11.0)
+
+    def test_observed_post_sam_overhead_uses_terminal_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sam_root = root / "sam"
+            body_root = root / "body"
+            mode_c_root = root / "mode_c"
+            base = datetime(2026, 8, 12, tzinfo=timezone.utc)
+            for sequence, delay in (("one", 10), ("two", 30)):
+                for camera_index, camera in enumerate(("cam1", "cam2", "cam3")):
+                    directory = sam_root / sequence / camera
+                    directory.mkdir(parents=True)
+                    with (directory / "sam_body_benchmark.csv").open(
+                        "w", newline="", encoding="utf-8"
+                    ) as handle:
+                        writer = csv.DictWriter(handle, fieldnames=["created_at_utc"])
+                        writer.writeheader()
+                        writer.writerow(
+                            {
+                                "created_at_utc": (
+                                    base + timedelta(seconds=camera_index)
+                                ).isoformat()
+                            }
+                        )
+                terminal = base + timedelta(seconds=2 + delay)
+                atomic_json(
+                    body_root / sequence / "metadata.json",
+                    {"created_at_utc": terminal.isoformat()},
+                )
+                atomic_json(
+                    mode_c_root / sequence / "mode_c_escalation.json",
+                    {"created_at_utc": terminal.isoformat()},
+                )
+            result = observed_post_sam_overhead(
+                sam_root, body_root, mode_c_root, ["one", "two"]
+            )
+            self.assertTrue(result["available"])
+            self.assertEqual(result["sample_count"], 2)
+            self.assertEqual(result["median_seconds"], 20)
+            self.assertEqual(result["p90_seconds"], 30)
+            self.assertEqual(result["errors"], [])
 
     def test_first_incomplete_camera_respects_frozen_order(self) -> None:
         self.assertEqual(
@@ -244,6 +303,106 @@ class AutonomousMonitorTest(unittest.TestCase):
             self.assertIn("DISK_RESERVE_LOW", codes)
             self.assertIn("VALIDATION_FAIL", codes)
             self.assertIn("SEQUENCE_PIPELINE_FAILED", codes)
+
+    def test_dashboard_exposes_empirical_adjusted_deadline_forecast(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            now = datetime(2026, 8, 12, tzinfo=timezone.utc)
+            args = self._args(root)
+            sequences = ["one", "two"]
+            for sequence in sequences:
+                for camera in ("cam1", "cam2", "cam3"):
+                    atomic_json(
+                        args.selection_root / sequence / camera / "summary.json",
+                        {
+                            "sequence": sequence,
+                            "camera": camera,
+                            "status": "PASS",
+                            "frame_count": 10,
+                            "target_only_sapiens_crops": 10,
+                        },
+                    )
+            for index, camera in enumerate(("cam1", "cam2", "cam3")):
+                directory = args.sam_output_root / "one" / camera
+                directory.mkdir(parents=True)
+                with (directory / "sam_body_benchmark.csv").open(
+                    "w", newline="", encoding="utf-8"
+                ) as handle:
+                    writer = csv.DictWriter(handle, fieldnames=["created_at_utc"])
+                    writer.writeheader()
+                    writer.writerow(
+                        {
+                            "created_at_utc": (
+                                now + timedelta(seconds=index)
+                            ).isoformat()
+                        }
+                    )
+            terminal = now + timedelta(seconds=12)
+            atomic_json(
+                args.body_fit_root / "one" / "metadata.json",
+                {"created_at_utc": terminal.isoformat(), "status": "REVIEW"},
+            )
+            atomic_json(
+                args.sam_mode_c_review_root / "one" / "mode_c_escalation.json",
+                {"created_at_utc": terminal.isoformat()},
+            )
+            atomic_json(
+                args.handoff_state,
+                {
+                    "updated_at_utc": now.isoformat(),
+                    "deadline_utc": (now + timedelta(seconds=20)).isoformat(),
+                    "completed": ["one"],
+                    "remaining": ["two"],
+                    "pose": {
+                        "completed_cameras": [
+                            "one/cam1",
+                            "one/cam2",
+                            "one/cam3",
+                        ],
+                        "processed_target_crops": 30,
+                        "total_target_crops": 60,
+                        "recent_chunk_crops_per_second": 1.0,
+                    },
+                    "sam": {
+                        "completed_cameras": [
+                            "one/cam1",
+                            "one/cam2",
+                            "one/cam3",
+                        ],
+                        "processed_frames": 30,
+                        "total_frames": 60,
+                        "measured_frames_per_second": 1.0,
+                    },
+                    "triangulation": {"count": 1, "status": {"one": "PASS"}},
+                    "body_fit": {"count": 1, "status": {"one": "REVIEW"}},
+                },
+            )
+            atomic_json(
+                args.deadline_state,
+                {
+                    "deadline_utc": (now + timedelta(seconds=20)).isoformat(),
+                    "status": "WAITING_DEADLINE",
+                },
+            )
+            state = build_dashboard(
+                args,
+                now=now,
+                processes=[],
+                gpu={"available": True, "utilization_pct": 0.0, "devices": []},
+            )
+            forecast = state["deadline"]["freeze_forecast"]
+            self.assertTrue(forecast["available"])
+            self.assertEqual(
+                forecast["observed_post_sam_overhead"]["p90_seconds"], 10
+            )
+            self.assertEqual(
+                forecast["empirical_p90_adjusted"]["kind"],
+                "EMPIRICAL_P90_POST_SAM_ADJUSTED",
+            )
+            reasons = {
+                row["code"]: row["message"] for row in state["attention_reasons"]
+            }
+            self.assertIn("Empirical p90", reasons["DEADLINE_FREEZE_COVERAGE_AT_RISK"])
 
     def test_dashboard_healthy_live_jobs_preserve_policy(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -573,6 +732,7 @@ class AutonomousMonitorTest(unittest.TestCase):
             selection_root=outputs / "selection",
             pose_root=outputs / "pose",
             sam_output_root=outputs / "sam",
+            sam_mode_c_review_root=outputs / "mode_c",
             triangulation_root=outputs / "triangulation",
             body_fit_root=outputs / "body_fit",
             quality_root=outputs / "quality",

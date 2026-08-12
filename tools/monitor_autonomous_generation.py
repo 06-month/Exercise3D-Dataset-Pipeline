@@ -7,11 +7,13 @@ import argparse
 import csv
 import hashlib
 import json
+import math
 import os
 import re
 import shlex
 import shutil
 import subprocess
+import statistics
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -136,6 +138,68 @@ def selection_workloads(
     return rows, errors
 
 
+def observed_post_sam_overhead(
+    sam_root: Path,
+    body_root: Path,
+    mode_c_root: Path,
+    sequences: list[str],
+) -> dict[str, Any]:
+    """Summarize durable SAM-complete to body/Mode-C terminal latency."""
+    samples: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for sequence in sequences:
+        sam_completed: list[datetime] = []
+        for camera in CAMERAS:
+            path = sam_root / sequence / camera / "sam_body_benchmark.csv"
+            try:
+                with path.open(newline="", encoding="utf-8") as handle:
+                    rows = list(csv.DictReader(handle))
+                value = rows[0]["created_at_utc"] if len(rows) == 1 else None
+                parsed = parse_datetime(value)
+            except (OSError, KeyError, csv.Error):
+                parsed = None
+            if parsed is None:
+                errors.append(f"missing_sam_completion:{sequence}/{camera}")
+            else:
+                sam_completed.append(parsed)
+        body = read_json(body_root / sequence / "metadata.json")
+        mode_c = read_json(mode_c_root / sequence / "mode_c_escalation.json")
+        terminal_values = [
+            parsed
+            for parsed in (
+                parse_datetime(body.get("created_at_utc")),
+                parse_datetime(mode_c.get("created_at_utc")),
+            )
+            if parsed is not None
+        ]
+        if len(sam_completed) != len(CAMERAS) or len(terminal_values) != 2:
+            errors.append(f"missing_terminal_timing:{sequence}")
+            continue
+        seconds = (max(terminal_values) - max(sam_completed)).total_seconds()
+        if seconds < 0 or seconds > 6 * 3600:
+            errors.append(f"invalid_post_sam_latency:{sequence}:{seconds:.3f}")
+            continue
+        samples.append({"sequence": sequence, "seconds": seconds})
+    if not samples:
+        return {
+            "available": False,
+            "sample_count": 0,
+            "errors": errors,
+        }
+    values = sorted(float(row["seconds"]) for row in samples)
+    p90_index = max(0, math.ceil(0.9 * len(values)) - 1)
+    return {
+        "available": True,
+        "sample_count": len(values),
+        "median_seconds": statistics.median(values),
+        "p90_seconds": values[p90_index],
+        "minimum_seconds": values[0],
+        "maximum_seconds": values[-1],
+        "samples": samples,
+        "errors": errors,
+    }
+
+
 def deadline_freeze_upper_bound(
     workloads: list[dict[str, Any]],
     *,
@@ -149,6 +213,8 @@ def deadline_freeze_upper_bound(
     sam_rate: float | None,
     now: datetime,
     deadline: datetime,
+    per_sequence_overhead_seconds: float = 0.0,
+    kind: str = "OPTIMISTIC_UPPER_BOUND",
 ) -> dict[str, Any]:
     """Optimistic sequence bound from dependency order and measured stage rates.
 
@@ -158,7 +224,7 @@ def deadline_freeze_upper_bound(
     if not workloads or not pose_rate or pose_rate <= 0 or not sam_rate or sam_rate <= 0:
         return {
             "available": False,
-            "kind": "OPTIMISTIC_UPPER_BOUND",
+            "kind": kind,
             "reason": "workload inventory or measured stage rate unavailable",
         }
     remaining_to_deadline = (deadline - now).total_seconds()
@@ -190,8 +256,10 @@ def deadline_freeze_upper_bound(
                 int(workload["cameras"][current_camera]["frames"]),
             )
         remaining_sam_frames = max(0, int(workload["frames"]) - completed_frames)
-        finish_seconds = max(pose_ready_seconds, sam_cursor_seconds) + (
-            remaining_sam_frames / sam_rate
+        finish_seconds = (
+            max(pose_ready_seconds, sam_cursor_seconds)
+            + remaining_sam_frames / sam_rate
+            + max(0.0, per_sequence_overhead_seconds)
         )
         sam_cursor_seconds = finish_seconds
         before_deadline = finish_seconds <= remaining_to_deadline
@@ -212,7 +280,7 @@ def deadline_freeze_upper_bound(
     )
     return {
         "available": True,
-        "kind": "OPTIMISTIC_UPPER_BOUND",
+        "kind": kind,
         "completed_now": len(accepted_sequences),
         "terminal_nonaccepted_now": len(terminal_sequences - accepted_sequences),
         "estimated_completed_sequences_by_deadline": len(predicted),
@@ -221,18 +289,26 @@ def deadline_freeze_upper_bound(
         ),
         "total_sequences": len(workloads),
         "first_sequence_after_deadline": first_after,
-        "all_sequences_optimistic_terminal_utc": (
+        "all_sequences_projected_terminal_utc": (
             (now + timedelta(seconds=sam_cursor_seconds)).isoformat()
             if projections
             else now.isoformat()
         ),
         "pose_rate_crops_per_second": pose_rate,
         "sam_rate_frames_per_second": sam_rate,
+        "per_sequence_overhead_seconds": max(
+            0.0, per_sequence_overhead_seconds
+        ),
         "assumptions": [
             "frozen sequence order",
             "measured pose and SAM rates remain constant",
             "one sequential SAM stream starts immediately when pose is ready",
-            "triangulation/body-fit/quality/export overhead excluded",
+            (
+                "constant empirical per-sequence post-SAM overhead applied; pre-SAM, "
+                "quality/export, and variance beyond the selected statistic excluded"
+                if per_sequence_overhead_seconds > 0
+                else "triangulation/body-fit/quality/export overhead excluded"
+            ),
         ],
         "next_sequences": projections[:5],
     }
@@ -773,26 +849,46 @@ def build_dashboard(
             "inventory_errors": workload_errors,
         }
     else:
-        freeze_forecast = deadline_freeze_upper_bound(
-            workloads,
-            terminal_sequences=set(body_status),
-            accepted_sequences={
+        forecast_inputs = {
+            "terminal_sequences": set(body_status),
+            "accepted_sequences": {
                 sequence
                 for sequence, status in body_status.items()
                 if str(status).upper().startswith(("PASS", "REVIEW"))
             },
-            completed_sam_cameras=set(sam_completed),
-            current_sam=sam_current,
-            current_sam_frames=current_sam_frames,
-            pose_completed_crops=sapiens_done,
-            pose_rate=(
+            "completed_sam_cameras": set(sam_completed),
+            "current_sam": sam_current,
+            "current_sam_frames": current_sam_frames,
+            "pose_completed_crops": sapiens_done,
+            "pose_rate": (
                 safe_float(pose.get("recent_chunk_crops_per_second"))
                 or safe_float(pose.get("effective_new_crops_per_second"))
             ),
-            sam_rate=sam_rate,
-            now=now,
-            deadline=deadline,
+            "sam_rate": sam_rate,
+            "now": now,
+            "deadline": deadline,
+        }
+        freeze_forecast = deadline_freeze_upper_bound(
+            workloads, **forecast_inputs
         )
+        post_sam_overhead = observed_post_sam_overhead(
+            args.sam_output_root,
+            args.body_fit_root,
+            args.sam_mode_c_review_root,
+            [sequence for sequence in sequences if sequence in body_status],
+        )
+        freeze_forecast["observed_post_sam_overhead"] = post_sam_overhead
+        if post_sam_overhead.get("available"):
+            freeze_forecast["empirical_p90_adjusted"] = (
+                deadline_freeze_upper_bound(
+                    workloads,
+                    **forecast_inputs,
+                    per_sequence_overhead_seconds=float(
+                        post_sam_overhead["p90_seconds"]
+                    ),
+                    kind="EMPIRICAL_P90_POST_SAM_ADJUSTED",
+                )
+            )
 
     try:
         disk_usage = shutil.disk_usage(args.disk_path)
@@ -1157,6 +1253,15 @@ def build_dashboard(
     forecast_count = freeze_forecast.get(
         "estimated_completed_sequences_by_deadline"
     )
+    adjusted_count = freeze_forecast.get("empirical_p90_adjusted", {}).get(
+        "estimated_completed_sequences_by_deadline"
+    )
+    adjusted_detail = (
+        f" Empirical p90 post-SAM adjustment estimates "
+        f"{adjusted_count}/{total_sequences}."
+        if isinstance(adjusted_count, int)
+        else ""
+    )
     if (
         freeze_forecast.get("available")
         and remaining_seconds > 0
@@ -1168,7 +1273,8 @@ def build_dashboard(
             f"Even the overhead-free schedule upper bound reaches only "
             f"{forecast_count}/{total_sequences} sequences by the deadline; "
             f"first projected late sequence is "
-            f"{freeze_forecast.get('first_sequence_after_deadline') or 'unknown'}.",
+            f"{freeze_forecast.get('first_sequence_after_deadline') or 'unknown'}."
+            f"{adjusted_detail}",
             severity="WARNING",
         )
     if deadline_snapshot_status in {
@@ -1503,6 +1609,7 @@ def render_rich(state: dict[str, Any], console: Any | None = None) -> Any:
         )
     export = state["export"]
     forecast = deadline.get("freeze_forecast", {})
+    adjusted_forecast = forecast.get("empirical_p90_adjusted", {})
     checkpoint = export.get("durable_checkpoint", {})
     checkpoint_follower = state.get("predeadline_checkpoint_follower", {})
     checkpoint_watchdog = state.get(
@@ -1523,7 +1630,9 @@ def render_rich(state: dict[str, Any], console: Any | None = None) -> Any:
         f"freeze={checkpoint.get('freeze_eligible', False)} | "
         f"deadline upper-bound "
         f"{forecast.get('estimated_completed_sequences_by_deadline', '-')}/"
-        f"{forecast.get('total_sequences', '-')}",
+        f"{forecast.get('total_sequences', '-')} | p90-adjusted "
+        f"{adjusted_forecast.get('estimated_completed_sequences_by_deadline', '-')}/"
+        f"{adjusted_forecast.get('total_sequences', '-')}",
     )
     gpu = state["gpu"]
     disk = state["disk"]
@@ -1617,6 +1726,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--pose-root", type=Path, default=PROJECT_ROOT / "outputs/sapiens2_target_only_full")
     parser.add_argument("--sam-output-root", type=Path, default=PROJECT_ROOT / "outputs/sam_body4d_full")
+    parser.add_argument(
+        "--sam-mode-c-review-root",
+        type=Path,
+        default=PROJECT_ROOT / "outputs" / "sam_mode_c_review_full",
+    )
     parser.add_argument("--triangulation-root", type=Path, default=PROJECT_ROOT / "outputs/triangulation_final")
     parser.add_argument("--body-fit-root", type=Path, default=PROJECT_ROOT / "outputs/body_fit_full")
     parser.add_argument("--quality-root", type=Path, default=PROJECT_ROOT / "outputs/quality_control_full")

@@ -295,6 +295,21 @@
   감지해 SAM Mode B PID 1930239를 정상 시작했으며, Sapiens는 36/78 camera 완료 후
   `benchpress_0002/cam1`로 진행했다. GPU inference/supervisor는 signal/restart하지 않았다.
 
+### Empirical post-SAM deadline adjustment
+
+- Overhead-free upper bound가 실제 terminal body-fit 시각을 낙관하는 정도를 정량화하기 위해,
+  완료 11 sequence의 세 camera `sam_body_benchmark.csv.created_at_utc`와 body-fit/Mode-C
+  `created_at_utc`를 frozen provenance에서 읽었다. Source payload나 output은 수정하지 않았다.
+- SAM 최종 camera 완료→body-fit/Mode-C terminal latency는 median 998.73초, p90 1,399.83초,
+  최소 847.06초/최대 2,037.30초였다. 음수·6시간 초과·누락 timing은 sample로 사용하지 않고
+  machine-readable error로 남긴다.
+- 기존 `OPTIMISTIC_UPPER_BOUND`는 그대로 보존하고, 각 future sequence에 관측 p90을 더해
+  supervisor의 sequential post-SAM stage를 반영하는 `EMPIRICAL_P90_POST_SAM_ADJUSTED`를 추가했다.
+  Pre-SAM/quality/export와 p90 밖 variance는 여전히 제외됨을 assumptions에 명시한다.
+- 실제 snapshot에서는 upper/adjusted 모두 deadline 25/26, 첫 late `squat_0003`이었다. Count는 같지만
+  adjusted all-sequence terminal은 upper보다 약 23분 늦어져 risk 해석을 더 보수적으로 만든다.
+- Provenance timing, p90 schedule, dashboard available-forecast integration을 포함한 전체 113 tests가 PASS했다.
+
 ### Predeadline checkpoint follower recovery watchdog
 
 - Predeadline checkpoint follower는 lifetime singleton lock과 internal export retry를 갖지만,
