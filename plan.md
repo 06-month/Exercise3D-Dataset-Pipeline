@@ -355,6 +355,9 @@
   34 files, payload 28,960,929 bytes, SHA/size mismatch 0, freeze-eligible 확인
 - quality/exact-tree smoke: clean commit `250ee73`에서 REVIEW 1/FAIL 0/INCOMPLETE 0,
   36 files/28,993,394 bytes, actual-tree/ownership/hash error 0, immutable reuse PASS
+- deadline contract v2 partial smoke: clean commit `7b54214`에서 requested 2-sequence
+  universe/order exact bind, REVIEW 1/INCOMPLETE 1, 36 files/28,993,641 bytes,
+  verifier error 0, dirty false, freeze eligible false
 - 다음 gate: downstream 연구 사용 승인
 
 ## Phase별 Git Definition of Done

@@ -160,6 +160,13 @@
   한다. Internal manifest와 tree에서 둘 다 누락한 payload도 이제 verifier가 거부한다.
 - Missing INCOMPLETE row, order mutation, required quality payload omission regression을 포함한 전체
   83개 unit test와 publication-safety가 PASS했다.
+- Clean commit `7b54214`에서 deadline partial smoke를 실행했다. Contract v2가 requested
+  `barbellrow_0000,benchpress_0001` universe/order를 exact bind했고 REVIEW 1/INCOMPLETE 1,
+  36 files/28,993,641 bytes, verifier error 0, dirty false, freeze eligible false로 검증됐다.
+- 기존 CPU sleeper PID 1834674의 exact command와 child 0을 확인한 뒤 그 sentinel만
+  TERM하고 PID 1846229로 교체했다. 새 process는 `WAITING_DEADLINE`이며 고정된
+  26-sequence list를 final verifier에 별도로 전달하는 contract v2 code를 load했다.
+  GPU inference와 autonomous supervisor는 중단·재시작하지 않았다.
 
 ### Source-of-truth 재검증
 
