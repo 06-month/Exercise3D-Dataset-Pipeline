@@ -632,6 +632,23 @@
   load한 상태이며, 정상 process를 중단해 활성화하지 않는다. 향후 watchdog recovery가 동일 persisted
   command로 current entrypoint를 시작할 때 defaults가 자동 적용된다.
 
+### SAM camera provenance completion gate
+
+- Downstream consolidation/export는 SAM prior finite·abstention 계약을 강제했지만 camera-level
+  `completion_status`는 provenance field 존재와 frame 수만 확인했다. 따라서 손상된 source index,
+  forced ambiguous target, invalid bbox/PTS가 downstream에서 거부되기 전까지 durable camera PASS와
+  progress count에 잠시 포함될 수 있었다.
+- Camera gate에 모든 provenance array의 expected length, exact zero-based source index, first accepted
+  seed, `target_valid`과 ambiguous/no-target 비중첩, valid bbox finite/positive extent, abstention bbox
+  all-NaN, confidence finite/[0,1], PTS finite/strictly increasing 검사를 추가했다. Numeric payload는
+  primary runner와 downstream consolidation이 전수 finite 검사하므로 deadline overhead를 늘리는
+  두 번째 full array decode는 추가하지 않았다.
+- Invalid forced-target/bbox/confidence/PTS regression을 포함해 전체 150 tests, compile과
+  publication-safety가 PASS했다. 마지막 완료 `benchpress_0001/cam3` 673-frame output에 신규 gate를
+  read-only 적용해 모든 check가 PASS했다.
+- Implementation commit `11a91ca`를 push했다. Current inference/supervisor에는 signal/restart가 없고,
+  다음 정상 SAM coordinator child가 current on-disk gate를 자동 load한다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화

@@ -53,6 +53,10 @@
   Legacy coordinator/orphan child가 남았거나 process table을 검사할 수 없으면 fail-closed로 거부한다.
   13:51 KST read-only probe는 dashboard와 동일하게 matching child 0을 확인했으며, supervisor는
   restart하지 않아 다음 normal subprocess부터 current guarded entrypoint가 자동 적용된다.
+  Camera PASS gate는 benchmark/profile/mesh/numeric schema뿐 아니라 target provenance의 exact frame
+  lengths/source indices, first accepted seed, forced ambiguous/no-target 금지, valid finite bbox와 abstention
+  NaN bbox, finite bounded confidence, strictly increasing finite PTS를 확인한다. 마지막 완료
+  `benchpress_0001/cam3` 673-frame output은 신규 checks 전부 PASS했다.
 - GPU: A100 80GB, Sapiens-only dependency-wait snapshot 36,375 MiB/100%, 366.59 W, 56°C;
   observed OOM/retry 없음
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
@@ -290,7 +294,8 @@ tmux new-window -n exercise3d-dashboard \
 ## Git state
 
 - branch: `agent/phase-5-1-pushup-0003-recovery`
-- latest implementation commit: streaming transient retry `0412590`; SAM duplicate-resume/orphan guard
+- latest implementation commit: SAM provenance completion gate `11a91ca`; streaming transient retry
+  `0412590`; SAM duplicate-resume/orphan guard
   `46cdced`; Sapiens duplicate-resume guard `30a051d`; marker ctime cutoff attestation `6e802b1`;
   sentinel loaded-code identity `60eadb8`; deadline marker identity binding `e31098c`; premature
   deadline publication gate `ddd3461`; durable latest-completion event `a0ad72c`; remaining deadline
@@ -310,4 +315,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-12 13:59 KST
+- 2026-08-12 14:04 KST

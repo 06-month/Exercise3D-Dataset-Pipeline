@@ -26,6 +26,8 @@
   future recovered supervisor는 transient sequence failure를 300초 backoff/1회 retry하며 backoff 중
   later ready work를 진행하고 attempt state를 atomic checkpoint
 - SAM full 직전 8-frame Mode B numeric smoke에서 source PTS/mesh/MHR compact schema exact gate 요구
+- SAM camera durable PASS는 numeric schema/count와 함께 provenance length/source-index/seed,
+  abstention-vs-valid bbox, finite confidence와 strictly increasing PTS 계약을 모두 통과해야 함
 - deadline에 미완료된 sequence는 `INCOMPLETE_DEADLINE`로 명시하고 PASS로 위장하지 않음
 - Fit3D exhaustive tolerance/ablation은 final private dataset critical path를 방해하면 freeze 이후로 이동
 - persistent handoff: `HANDOFF.md` + ignored `.runtime/handoff_state.json` 30초 atomic checkpoint;
