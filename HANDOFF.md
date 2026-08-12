@@ -14,10 +14,10 @@
 
 - DONE: Phase 0–5, Phase 6 pilot/target selector, Phase 8 A/B/C pilot와 checkpoint integrity
 - RUNNING: Phase 6 full 5B inference, pose-complete sequence의 Phase 7→SAM Mode B→Phase 9 streaming
-- RUNNING: Phase 11 quality vector 10/26 sequence; live supervisor는 유지하고 exporter fallback 연결
+- RUNNING: Phase 11 quality/freeze-readiness 11/26 sequence; CPU follower + exporter fallback 연결
 - TODO: remaining triangulation, SAM prior consolidation, body fitting/QC, deadline private export/freeze
 - BLOCKED: 없음
-- REVIEW/FAIL: camera PASS 11/REVIEW 15/FAIL 0; body fit REVIEW 10/FAIL 0
+- REVIEW/FAIL: camera PASS 11/REVIEW 15/FAIL 0; body fit REVIEW 11/FAIL 0
 
 ## Active job
 
@@ -25,13 +25,14 @@
 - autonomous supervisor는 2026-08-12 08:45 KST 이후 사라진 것을 live process와
   stale state로 확인한 뒤, 중복/child 부재를 재확인하고 exact resumable command로 09:44 KST 복구했다.
   현재 exact PID/stage는 dashboard/handoff state가 source of truth다.
-- 2026-08-12 10:30 KST dashboard snapshot: current streaming sequence `latpulldown_0003`,
-  SAM Mode B child PID 1705755 (`cam3`) active
+- 2026-08-12 10:46 KST dashboard snapshot: `latpulldown_0003` end-to-end 완료 후
+  supervisor는 `WAIT_RUNNING_SAPIENS2`; 다음 pose-ready sequence를 기다림
 - Sapiens durable 34/78 camera, current partial 포함 22,106/65,430 crop; PID 373049 alive,
   current `benchpress_0001/cam2`
-- Sapiens recent-chunk throughput 0.222 crop/s; 병렬 effective 0.216 crop/s;
-  projected ETA 2026-08-14 16:42 KST로 deadline 약 3시간 42분 risk
-- SAM durable 32/78 camera, 20,779/65,595 frame, 10/26 full sequence; aggregate 0.586 frame/s
+- Sapiens recent-chunk throughput 0.222 crop/s; 병렬 effective 0.213 crop/s;
+  projected ETA는 deadline 약 3시간 58분 후 risk
+- SAM durable 33/78 camera, 21,441/65,595 frame, 11/26 full sequence; aggregate 0.585 frame/s;
+  current SAM child는 없으며 Sapiens GPU utilization 100%
 - GPU: A100 80GB, combined snapshot 62,693 MiB/100%; observed OOM/retry 없음
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
 - handoff monitor PID 608232: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
@@ -45,10 +46,11 @@
   검증 후 reuse하며 같은 ID를 덮어쓰지 않는다.
 - dashboard monitor: `tools/monitor_autonomous_generation.py`; atomic state는
   `.runtime/dashboard_state.json`. `--once`는 snapshot, 기본은 Rich live, `--quiet`는 state-only daemon이다.
-- Phase 11 CPU follower PID 1786236: complete body-fit/Mode-C dependency만 감지해 quality를
-  atomic materialize/validate한다. State는 `.runtime/quality_follower_state.json`; 2026-08-12 10:27 KST
-  10/26 REVIEW, failure 0, remaining 16은 dependency wait. Exact resume command/cwd도 같은 state에
-  보존하며 GPU work는 하지 않는다.
+- Phase 11 CPU follower PID 1819560: complete body-fit/Mode-C dependency만 감지해 quality를
+  atomic materialize/validate한다. Final exporter와 동일 sequence validation도 미리 수행해
+  `freeze-ready`를 출력한다. State는 `.runtime/quality_follower_state.json`; 2026-08-12 10:46 KST
+  quality 11/26 REVIEW, freeze-ready 11/26 REVIEW, failure/reason 0, remaining 15는 dependency wait.
+  Exact resume command/cwd도 같은 state에 보존하며 GPU work는 하지 않는다.
 
 Public-safe Sapiens command 형태:
 
@@ -66,7 +68,7 @@ Public-safe Sapiens command 형태:
 ## Completed work
 
 - full selector: 65,595 frame, target 65,430, ambiguity 139, `NO_TARGET` 26, identity/integrity failure 0
-- Sapiens2 pose: complete 33 camera와 current partial 합계 21,433 accepted target crops;
+- Sapiens2 pose: complete 34 camera와 current partial 합계 22,106 accepted target crops;
   `latpulldown_0003`까지 11 sequence 3-view schema/finite PASS
 - Phase 7 final: 11 sequence schema PASS/body-fit eligible, NO_GO 0
 - concurrent Mode B 8-frame smoke: mesh/numeric/PTS schema PASS, combined peak 48,525 MiB
@@ -83,16 +85,19 @@ Public-safe Sapiens command 형태:
 - quality/exact-tree private smoke: commit `250ee73`, REVIEW 1/FAIL 0/INCOMPLETE 0,
   36 files/28,993,394 bytes, `git_worktree_dirty=false`, exact-tree error 0;
   same build ID rerun은 `IMMUTABLE_BUILD_REUSED`
-- completed Sapiens 34 camera와 SAM 32 camera의 `run_provenance.json` materialize PASS;
+- completed Sapiens 34 camera와 SAM 33 camera의 `run_provenance.json` materialize PASS;
   model/checkpoint/config/source/selection/tool/exact-resume identity 포함
-- Phase 11: body-fit complete 10 sequence/6,485 reference frame, REVIEW 10/FAIL 0;
-  target abstention/SAM rejection view 8/8, missing/prior-only joint frame 0
+- `latpulldown_0003`: 662×26, coverage/alignment 1.0, prior-only/missing 0,
+  displacement p95 0.07748 + camera uncertainty로 REVIEW; Mode C candidate 79, 실행/채택 0
+- Phase 11: body-fit complete 11 sequence/7,147 reference frame, REVIEW 11/FAIL 0;
+  frame PASS 1,019/REVIEW 6,128/FAIL 0, target abstention/SAM rejection view 8/8,
+  missing/prior-only joint frame 0, freeze-ready 11/11
 
 ## Remaining work
 
 - Sapiens2: 44/78 camera, current partial 포함 43,324 target crops
 - Phase 7 이후: `latpulldown_0003` 및 이후 pose-complete sequence
-- SAM full: 32/78 camera PASS, `latpulldown_0003/cam3` RUNNING, full-complete sequence 10/26
+- SAM full: 33/78 camera PASS, full-complete sequence 11/26; 다음 `benchpress_0001` pose dependency 대기
 - critical path: pose-complete sequence → Phase 7 gate → Mode B → compact prior → body fit → Mode C candidate QA → export
 - Phase 11은 body fit/Mode C 뒤 CPU-only로 생성하며 deadline exporter가 누락 output을 자동 materialize한다.
 
@@ -116,6 +121,9 @@ Public-safe Sapiens command 형태:
 10. body-fit count가 quality count보다 큰데 quality follower가 없으면
     `.runtime/quality_follower_state.json`과 dashboard의 exact command/process evidence를 확인한 뒤
     `tools/run_quality_control_follower.py`를 resume한다. Valid sequence는 재계산하지 않는다.
+11. `freeze_readiness.failures`는 completed quality의 export validation failure이다. 5분 유예 후
+    누락 sidecar가 지속되거나 FAIL이면 dashboard `FREEZE_READINESS_FAILED`를 보고한다.
+    Quality/acceptance threshold를 낮추지 말고 reason의 source stage만 recovery한다.
 
 Dashboard 사용:
 

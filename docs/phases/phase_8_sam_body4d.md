@@ -5,6 +5,8 @@
 `FULL_IN_PROGRESS_REVIEW`. Gated checkpoint access, 22.387 GiB payload integrity, primary-target
 adapter, control/severe Mode A/B/C pilot를 완료했고, pose-ready sequence는 Sapiens2와 동시에
 Mode B로 처리한다. 동시 실행은 first full sequence에서 OOM과 output corruption 없이 통과했다.
+2026-08-12 10:46 KST 기준 full Mode B는 11 sequence/33 camera/21,441 frame을 완료했고
+OOM/retry/schema failure는 0이다.
 
 검증한 upstream은 다음과 같다.
 

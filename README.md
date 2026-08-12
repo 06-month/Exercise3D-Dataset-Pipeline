@@ -14,6 +14,8 @@ payload는 공개하지 않습니다. 저장소에는 재현 가능한 코드, �
 실행하지 않는 startup 순서는 [`AGENTS.md`](AGENTS.md)에 고정했습니다.
 사람용 live dashboard와 machine-readable attention state는
 `tools/monitor_autonomous_generation.py`가 `.runtime/dashboard_state.json`에 atomic 저장합니다.
+Phase 11 CPU follower는 quality가 완료된 sequence에 대해 final exporter과 동일 validation을
+미리 수행하고 dashboard에 `freeze-ready` count와 지속 dependency failure를 보고합니다.
 완료된 expensive camera output에는 checkpoint/config/source/selection/tool/command identity를
 담은 `run_provenance.json`을 별도 atomic sidecar로 남깁니다.
 고정 deadline에는 별도 private snapshot build가 현재 PASS/REVIEW/FAIL/INCOMPLETE 상태를 보존하며,
@@ -76,10 +78,10 @@ camera calibration을 구분합니다.
 | 6-1A. Primary Target Selection | DONE | 9,732 frame, identity switch 0, ambiguity 7, crop 50.37% 감소 |
 | 6-2. Target-only Runtime Gate | RUNNING | full selector `GO_FULL_DATASET`; 78 view/65,595 frame, target 65,430, identity/integrity failure 0; 5B batch 16 실행 중 |
 | 7. Timestamp-aware Triangulation | RUNNING | pilot 4/4 final schema PASS; pose-complete sequence CPU streaming, NO_GO에만 held-out recovery |
-| 8. SAM Body Runtime Feasibility | FULL RUNNING/REVIEW | 22.387 GiB integrity PASS, A/B/C 6-run 완료; Mode B 2 sequence/5,571 frame PASS |
-| 9. Sequence Body Fitting | RUNNING/REVIEW | 2 sequence 완료; schema PASS, camera/displacement REVIEW 2/FAIL 0 |
+| 8. SAM Body Runtime Feasibility | FULL RUNNING/REVIEW | 22.387 GiB integrity PASS; Mode B 11 sequence/21,441 camera-frame complete |
+| 9. Sequence Body Fitting | RUNNING/REVIEW | 11 sequence/7,147 reference frame; schema PASS, REVIEW 11/FAIL 0 |
 | 10. Body Shape / Proportion | IMPLEMENTED PARTIAL | sequence-level shape/scale provenance 보존; evidence-backed subject mapping 부재로 cross-sequence fusion 안 함 |
-| 11. Pseudo-label Quality Control | RUNNING | 10 sequence/6,485 frame, REVIEW 10/FAIL 0; source-specific vector/bitmask, scalar accuracy score 없음 |
+| 11. Pseudo-label Quality Control | RUNNING | 11 sequence/7,147 frame, REVIEW 11/FAIL 0; freeze-ready 11/11, scalar accuracy score 없음 |
 | 12. Fit3D Validation | IMPLEMENTED/WAITING DATA | metric regression PASS; local Fit3D payload 부재로 실제 score 미주장 |
 | 13. Final Dataset Freeze | IMPLEMENTED/SMOKE PASS | quality-inclusive 36-file exact-tree smoke PASS; deadline build 입력 누적 중 |
 

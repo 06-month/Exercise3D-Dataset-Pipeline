@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -25,6 +26,17 @@ except ModuleNotFoundError:
         build_sequence_quality,
         summarize_quality_outputs,
         validate_quality_output,
+    )
+
+try:
+    from tools.export_private_dataset import (
+        sequence_dependencies as export_sequence_dependencies,
+        validate_sequence as validate_export_sequence,
+    )
+except ModuleNotFoundError:
+    from export_private_dataset import (
+        sequence_dependencies as export_sequence_dependencies,
+        validate_sequence as validate_export_sequence,
     )
 
 
@@ -103,6 +115,61 @@ def quality_args(args: argparse.Namespace) -> argparse.Namespace:
     )
 
 
+def export_args(args: argparse.Namespace) -> argparse.Namespace:
+    return argparse.Namespace(
+        selection_root=args.selection_root,
+        pose_root=args.pose_root,
+        triangulation_root=args.triangulation_root,
+        sam_prior_root=args.sam_prior_root,
+        sam_mode_c_review_root=args.sam_mode_c_review_root,
+        body_fit_root=args.body_fit_root,
+        quality_root=args.output_root,
+    )
+
+
+def assess_freeze_readiness(
+    args: argparse.Namespace, sequence: str
+) -> dict[str, Any]:
+    result = validate_export_sequence(export_args(args), sequence)
+    status = str(result.get("status", "UNKNOWN"))
+    if status not in {"PASS", "REVIEW", "FAIL", "INCOMPLETE"}:
+        raise RuntimeError(f"unexpected export-readiness status {status}")
+    reasons = result.get("reasons", [])
+    if not isinstance(reasons, list):
+        raise RuntimeError("export-readiness reasons must be a list")
+    return {
+        "sequence": sequence,
+        "status": status,
+        "reasons": [str(reason) for reason in reasons],
+        "reference_frame_count": int(result.get("reference_frame_count", 0) or 0),
+        "body_fit_status": str(result.get("body_fit_status", "")),
+        "camera_geometry_status": str(result.get("camera_geometry_status", "")),
+        "sam_mode_c_review_status": str(
+            result.get("sam_mode_c_review_status", "")
+        ),
+        "dependency_signature": export_dependency_signature(args, sequence),
+    }
+
+
+def export_dependency_signature(
+    args: argparse.Namespace, sequence: str
+) -> str | None:
+    rows: list[tuple[str, int, int]] = []
+    for label, path in sorted(
+        export_sequence_dependencies(export_args(args), sequence).items()
+    ):
+        try:
+            stat = path.stat()
+        except OSError:
+            return None
+        if not path.is_file() or path.is_symlink():
+            return None
+        rows.append((label, stat.st_size, stat.st_mtime_ns))
+    return hashlib.sha256(
+        json.dumps(rows, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
 def validate_existing(args: argparse.Namespace, sequence: str) -> tuple[bool, str]:
     output = args.output_root.resolve() / sequence
     body_path = args.body_fit_root.resolve() / sequence / "body_fit.npz"
@@ -119,14 +186,19 @@ def run_cycle(
     args: argparse.Namespace,
     completed: dict[str, str],
     retry_state: dict[str, dict[str, Any]],
+    freeze_ready: dict[str, dict[str, Any]] | None = None,
+    readiness_state: dict[str, dict[str, Any]] | None = None,
     *,
     monotonic_now: float | None = None,
 ) -> dict[str, Any]:
     now = time.monotonic() if monotonic_now is None else monotonic_now
+    freeze_ready = {} if freeze_ready is None else freeze_ready
+    readiness_state = {} if readiness_state is None else readiness_state
     waiting: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
     newly_validated: list[str] = []
     materialized: list[str] = []
+    newly_freeze_ready: list[str] = []
     builder_args = quality_args(args)
 
     for sequence in args.sequences:
@@ -187,14 +259,87 @@ def run_cycle(
         summary = summarize_quality_outputs(args.output_root.resolve())
         atomic_json(args.output_root.resolve() / "quality_summary.json", summary)
 
+    readiness_waiting: list[dict[str, Any]] = []
+    readiness_failures: list[dict[str, Any]] = []
+    for sequence in args.sequences:
+        if sequence not in completed:
+            freeze_ready.pop(sequence, None)
+            readiness_state.pop(sequence, None)
+            continue
+        if sequence in freeze_ready:
+            current_signature = export_dependency_signature(args, sequence)
+            unchanged = (
+                current_signature is not None
+                and current_signature
+                == freeze_ready[sequence].get("dependency_signature")
+            )
+            if unchanged:
+                continue
+            freeze_ready.pop(sequence, None)
+        prior = readiness_state.get(sequence, {})
+        next_attempt = float(prior.get("next_attempt_monotonic", 0.0))
+        if next_attempt > now:
+            row = {
+                "sequence": sequence,
+                "status": str(prior.get("status", "UNKNOWN")),
+                "reasons": list(prior.get("reasons", [])),
+                "age_seconds": max(
+                    0.0, now - float(prior.get("first_seen_monotonic", now))
+                ),
+                "retry_in_seconds": next_attempt - now,
+            }
+        else:
+            try:
+                row = assess_freeze_readiness(args, sequence)
+            except (
+                OSError,
+                ValueError,
+                KeyError,
+                RuntimeError,
+                json.JSONDecodeError,
+            ) as error:
+                row = {
+                    "sequence": sequence,
+                    "status": "FAIL",
+                    "reasons": [f"{type(error).__name__}: {error}"],
+                    "reference_frame_count": 0,
+                }
+            if row["status"] in {"PASS", "REVIEW"}:
+                freeze_ready[sequence] = row
+                readiness_state.pop(sequence, None)
+                newly_freeze_ready.append(sequence)
+                continue
+            first_seen = float(prior.get("first_seen_monotonic", now))
+            row["age_seconds"] = max(0.0, now - first_seen)
+            row["retry_in_seconds"] = args.retry_seconds
+            readiness_state[sequence] = {
+                "status": row["status"],
+                "reasons": row["reasons"],
+                "first_seen_monotonic": first_seen,
+                "next_attempt_monotonic": now + args.retry_seconds,
+            }
+        if row["age_seconds"] >= args.readiness_grace_seconds or row["status"] == "FAIL":
+            readiness_failures.append(row)
+        else:
+            readiness_waiting.append(row)
+
     completed_rows = [
         {"sequence": sequence, "status": completed[sequence]}
         for sequence in args.sequences
         if sequence in completed
     ]
-    if failures:
+    freeze_ready_rows = [
+        freeze_ready[sequence]
+        for sequence in args.sequences
+        if sequence in freeze_ready
+    ]
+    freeze_status_counts = {
+        status_name: sum(row["status"] == status_name for row in freeze_ready_rows)
+        for status_name in ("PASS", "REVIEW")
+    }
+    if failures or readiness_failures:
         status = "ATTENTION"
-    elif len(completed_rows) == len(args.sequences):
+    elif len(freeze_ready_rows) == len(args.sequences):
         status = "COMPLETE"
     else:
         status = "RUNNING"
@@ -207,7 +352,10 @@ def run_cycle(
         "cwd": str(Path.cwd()),
         "command": [sys.executable, *sys.argv],
         "gpu_work": False,
-        "resume_policy": "validate existing quality; build only complete dependencies; retry failures",
+        "resume_policy": (
+            "validate existing quality; build only complete dependencies; validate export "
+            "readiness; retry failures without recomputing valid output"
+        ),
         "completed_sequence_count": len(completed_rows),
         "total_sequence_count": len(args.sequences),
         "completed": completed_rows,
@@ -215,8 +363,20 @@ def run_cycle(
         "materialized": materialized,
         "waiting": waiting,
         "failures": failures,
+        "freeze_readiness": {
+            "ready_sequence_count": len(freeze_ready_rows),
+            "total_sequence_count": len(args.sequences),
+            "status_counts": freeze_status_counts,
+            "ready": freeze_ready_rows,
+            "newly_ready": newly_freeze_ready,
+            "waiting": readiness_waiting,
+            "failures": readiness_failures,
+            "grace_seconds": args.readiness_grace_seconds,
+        },
         "last_event": (
-            f"QUALITY_MATERIALIZED:{materialized[-1]}"
+            f"FREEZE_READY:{newly_freeze_ready[-1]}"
+            if newly_freeze_ready
+            else f"QUALITY_MATERIALIZED:{materialized[-1]}"
             if materialized
             else f"QUALITY_VALIDATED:{newly_validated[-1]}"
             if newly_validated
@@ -272,20 +432,35 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sequences", type=parse_list, required=True)
     parser.add_argument("--poll-seconds", type=float, default=30.0)
     parser.add_argument("--retry-seconds", type=float, default=300.0)
+    parser.add_argument("--readiness-grace-seconds", type=float, default=300.0)
     parser.add_argument("--once", action="store_true")
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
-    if args.poll_seconds <= 0 or args.retry_seconds <= 0:
-        raise RuntimeError("poll-seconds and retry-seconds must be positive")
+    if (
+        args.poll_seconds <= 0
+        or args.retry_seconds <= 0
+        or args.readiness_grace_seconds < 0
+    ):
+        raise RuntimeError(
+            "poll-seconds/retry-seconds must be positive and readiness grace nonnegative"
+        )
     completed: dict[str, str] = {}
     retry_state: dict[str, dict[str, Any]] = {}
+    freeze_ready: dict[str, dict[str, Any]] = {}
+    readiness_state: dict[str, dict[str, Any]] = {}
     state: dict[str, Any] = {}
     try:
         while True:
-            state = run_cycle(args, completed, retry_state)
+            state = run_cycle(
+                args,
+                completed,
+                retry_state,
+                freeze_ready,
+                readiness_state,
+            )
             atomic_json(args.runtime_state.resolve(), state)
             if args.once or state["status"] == "COMPLETE":
                 return 0 if state["status"] != "ATTENTION" else 2

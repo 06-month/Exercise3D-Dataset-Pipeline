@@ -46,15 +46,26 @@ quality는 검증 후 skip하고, concurrent exporter/future supervisor와의 �
 advisory lock으로 방지한다. 실패는 `.runtime/quality_follower_state.json`에 reason을 보존하고
 5분 cooldown 후 자동 재시도한다.
 
+Quality validation 후에는 동일 follower가 final exporter의 `validate_sequence()`를 호출해 pose/SAM
+run provenance, target/pose/SAM frame/PTS, finite/NaN, triangulation/body/quality gate까지 미리
+검증한다. PASS/REVIEW만 `freeze-ready`로 기록하며 INCOMPLETE dependency는 5분 유예
+후에도 지속될 때, FAIL은 즉시 dashboard attention으로 올린다. 이로써 deadline
+exporter와 같은 validation 계약을 사용하면서 payload copy는 deadline까지 지연한다.
+Freeze-ready 후에도 dependency path/size/mtime signature를 lightweight 비교하며, completed payload가
+바뀌면 해당 sequence만 validation을 다시 수행한다.
+
 ## 현재 결과
 
-2026-08-12 10:13 KST 기준 완료된 10 sequence, 6,485 reference frame을 materialize했다.
+2026-08-12 10:46 KST 기준 완료된 11 sequence, 7,147 reference frame을 materialize했다.
 
-- sequence REVIEW 10 / FAIL 0
+- sequence REVIEW 11 / FAIL 0; frame PASS 1,019 / REVIEW 6,128 / FAIL 0
 - exporter dependency validation reason 0
 - target abstention/unmapped view 8, SAM rejected/unmapped view 8
 - prior-only/body-missing/triangulation-missing joint frame 0
 - `pushup_0001`의 기존 ambiguity 7은 identity/target/SAM rejection reason으로 그대로 유지
 - 기존 body/camera REVIEW를 PASS로 승격하지 않음
+- 11/11 completed quality sequence가 exporter preflight `freeze-ready REVIEW`; dependency reason/FAIL 0
+- `latpulldown_0003` 662 frame은 occlusion/camera REVIEW를 보존하고 Mode C candidate 79를
+  metadata로만 유지; Mode C 실행/채택 0
 
 Output은 private ignored root에만 있고 public Git에는 code, schema, aggregate만 포함한다.

@@ -272,7 +272,8 @@
 
 ## Phase 9 — Sequence-Level Body Fitting
 
-- 상태: `IN_PROGRESS_REVIEW`; first full-input sequence 완료, 나머지는 Mode B dependency 대기/streaming
+- 상태: `IN_PROGRESS_REVIEW`; 11 sequence/7,147 reference frame, REVIEW 11/FAIL 0,
+  나머지는 Mode B dependency 대기/streaming
 - 목적: multi-view geometry, time, body constraint를 결합한 최종 body parameter
 - 입력: 2D/3D joints, human prior, silhouettes, contacts
 - 출력: subject shape, frame pose, global orientation/translation, optional global scale와 residual
@@ -306,7 +307,8 @@
 
 ## Phase 11 — Pseudo-label Quality Control
 
-- 상태: `IN_PROGRESS_STREAMING`; 완료 body-fit 10 sequence/6,485 frame materialize, FAIL 0
+- 상태: `IN_PROGRESS_STREAMING`; 완료 body-fit 11 sequence/7,147 frame materialize,
+  REVIEW 11/FAIL 0, exporter preflight freeze-ready 11/11
 - 목적: label과 reliability를 함께 저장
 - 입력: camera, temporal, teacher, triangulation, fitting diagnostics
 - 출력: frame/sequence quality vector와 overall policy
@@ -342,6 +344,8 @@
   source inventory/frame/PTS/camera/temporal/identity/2D/3D/body provenance 검증
 - publication integrity: hidden resumable staging의 symlink/mount traversal 차단, unlisted stale payload prune,
   actual tree↔global/sequence manifest exact-match, Git dirty/diff provenance 보존 후 atomic rename
+- streaming preflight: quality 완료 sequence는 exporter와 동일 cross-stage validation으로
+  `freeze-ready` PASS/REVIEW를 미리 확정; 5분 지속 dependency 누락/FAIL은 dashboard attention
 - first smoke: complete `barbellrow_0000`만 사용해 REVIEW 1/FAIL 0/INCOMPLETE 0,
   34 files, payload 28,960,929 bytes, SHA/size mismatch 0, freeze-eligible 확인
 - quality/exact-tree smoke: clean commit `250ee73`에서 REVIEW 1/FAIL 0/INCOMPLETE 0,

@@ -2,8 +2,9 @@
 
 ## 상태와 역할
 
-상태는 `IN_PROGRESS_REVIEW`다. 구현과 synthetic test에 더해 첫 full SAM Mode B sequence의
-실제 fit을 완료했으며, 나머지는 Mode B input이 생성되는 순서대로 streaming한다.
+상태는 `IN_PROGRESS_REVIEW`다. 2026-08-12 10:46 KST 기준 11 sequence/
+7,147 reference frame을 완료했고 REVIEW 11/FAIL 0이며, 나머지는 Mode B input이
+생성되는 순서대로 streaming한다.
 
 Phase 9의 목표는 SAM 출력을 복사해 GT로 부르는 것이 아니다. timestamp-aware 3-view geometry를
 가장 강한 observation으로 유지하면서 MHR body/pose와 시간 연속성을 약한 prior로 결합한다.
@@ -66,6 +67,11 @@ outlier이며, current Mode B output을 교체할 품질 증거로 사용하지 
 prior-only fraction 0, median bone-length CV 0.02327, finite/NaN contract PASS다. Normalized
 observation displacement p95 0.07936과 observation-conditioned camera uncertainty 때문에
 `REVIEW_BODY_FIT_QUALITY`이며 FAIL은 없다. Mode C candidate는 0이고 Mode B를 동결했다.
+
+11번째 `latpulldown_0003`은 662 reference timestamp×26 joint, coverage/alignment 1.0,
+prior-only/missing 0, displacement p95 0.07748이다. Camera uncertainty와 displacement REVIEW를
+그대로 전파했고 FAIL은 0이다. Mode C candidate 79 frame은 review metadata로만 보존하고
+Mode C를 실행/채택하지 않았다.
 
 ## 사전 동결 quality gate
 

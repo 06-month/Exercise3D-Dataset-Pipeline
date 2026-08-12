@@ -25,6 +25,7 @@ class QualityControlFollowerTest(unittest.TestCase):
             sequences=["sequence"],
             poll_seconds=1.0,
             retry_seconds=30.0,
+            readiness_grace_seconds=60.0,
             once=True,
         )
 
@@ -64,13 +65,124 @@ class QualityControlFollowerTest(unittest.TestCase):
                     "tools.run_quality_control_follower.build_sequence_quality",
                     return_value={"qa": {"sequence_status": "REVIEW"}},
                 ) as build,
+                patch(
+                    "tools.run_quality_control_follower.assess_freeze_readiness",
+                    return_value={
+                        "sequence": "sequence",
+                        "status": "REVIEW",
+                        "reasons": [],
+                        "reference_frame_count": 2,
+                    },
+                ),
             ):
-                state = run_cycle(args, completed, {}, monotonic_now=10.0)
+                freeze_ready: dict[str, dict] = {}
+                state = run_cycle(
+                    args,
+                    completed,
+                    {},
+                    freeze_ready,
+                    {},
+                    monotonic_now=10.0,
+                )
             build.assert_called_once()
             self.assertEqual(completed, {"sequence": "REVIEW"})
             self.assertEqual(state["status"], "COMPLETE")
             self.assertEqual(state["newly_validated"], ["sequence"])
             self.assertEqual(state["materialized"], ["sequence"])
+            self.assertEqual(state["freeze_readiness"]["ready_sequence_count"], 1)
+            self.assertEqual(state["freeze_readiness"]["newly_ready"], ["sequence"])
+
+    def test_incomplete_freeze_readiness_gets_grace_then_attention(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            args = self.args(Path(temporary))
+            self.materialize_dependencies(args)
+            quality = args.output_root / "sequence"
+            quality.mkdir(parents=True)
+            (quality / "quality_vector.npz").touch()
+            (quality / "metadata.json").touch()
+            completed = {"sequence": "REVIEW"}
+            readiness_state: dict[str, dict] = {}
+            result = {
+                "sequence": "sequence",
+                "status": "INCOMPLETE",
+                "reasons": ["missing:view/cam1_pose_run_provenance.json"],
+                "reference_frame_count": 0,
+            }
+            with patch(
+                "tools.run_quality_control_follower.assess_freeze_readiness",
+                return_value=result,
+            ):
+                first = run_cycle(
+                    args,
+                    completed,
+                    {},
+                    {},
+                    readiness_state,
+                    monotonic_now=10.0,
+                )
+                second = run_cycle(
+                    args,
+                    completed,
+                    {},
+                    {},
+                    readiness_state,
+                    monotonic_now=80.0,
+                )
+            self.assertEqual(first["status"], "RUNNING")
+            self.assertEqual(len(first["freeze_readiness"]["waiting"]), 1)
+            self.assertEqual(second["status"], "ATTENTION")
+            self.assertEqual(len(second["freeze_readiness"]["failures"]), 1)
+            self.assertIn(
+                "pose_run_provenance",
+                second["freeze_readiness"]["failures"][0]["reasons"][0],
+            )
+
+    def test_changed_dependency_signature_revalidates_freeze_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            args = self.args(Path(temporary))
+            quality = args.output_root / "sequence"
+            quality.mkdir(parents=True)
+            (quality / "quality_vector.npz").touch()
+            (quality / "metadata.json").touch()
+            completed = {"sequence": "REVIEW"}
+            freeze_ready = {
+                "sequence": {
+                    "sequence": "sequence",
+                    "status": "REVIEW",
+                    "reasons": [],
+                    "dependency_signature": "old",
+                }
+            }
+            result = {
+                "sequence": "sequence",
+                "status": "REVIEW",
+                "reasons": [],
+                "reference_frame_count": 2,
+                "dependency_signature": "new",
+            }
+            with (
+                patch(
+                    "tools.run_quality_control_follower.export_dependency_signature",
+                    return_value="new",
+                ),
+                patch(
+                    "tools.run_quality_control_follower.assess_freeze_readiness",
+                    return_value=result,
+                ) as assess,
+            ):
+                state = run_cycle(
+                    args,
+                    completed,
+                    {},
+                    freeze_ready,
+                    {},
+                    monotonic_now=10.0,
+                )
+            assess.assert_called_once_with(args, "sequence")
+            self.assertEqual(
+                freeze_ready["sequence"]["dependency_signature"], "new"
+            )
+            self.assertEqual(state["freeze_readiness"]["newly_ready"], ["sequence"])
 
     def test_failure_reason_survives_retry_cooldown(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

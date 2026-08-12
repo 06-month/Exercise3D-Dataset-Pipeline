@@ -171,7 +171,17 @@ class AutonomousMonitorTest(unittest.TestCase):
             )
             atomic_json(
                 root / "quality_follower.json",
-                {"updated_at_utc": now.isoformat(), "status": "RUNNING", "failures": []},
+                {
+                    "updated_at_utc": now.isoformat(),
+                    "status": "RUNNING",
+                    "failures": [],
+                    "freeze_readiness": {
+                        "ready_sequence_count": 0,
+                        "status_counts": {"PASS": 0, "REVIEW": 0},
+                        "waiting": [],
+                        "failures": [],
+                    },
+                },
             )
             processes = [
                 self._process(1, "sapiens"),
@@ -191,6 +201,7 @@ class AutonomousMonitorTest(unittest.TestCase):
             self.assertEqual(state["overall_status"], "RUNNING")
             self.assertEqual(state["sam"]["mode"], "B")
             self.assertEqual(state["sam"]["mode_c_policy"], "SELECTIVE_ESCALATION_ONLY")
+            self.assertEqual(state["quality_control"]["freeze_ready_sequences"], 0)
 
             atomic_json(args.output, state)
             transient = build_dashboard(
@@ -222,6 +233,43 @@ class AutonomousMonitorTest(unittest.TestCase):
                 row["code"] for row in failed_snapshot["attention_reasons"]
             }
             self.assertIn("DEADLINE_SNAPSHOT_FAILED", failed_codes)
+
+            atomic_json(
+                args.deadline_state,
+                {
+                    "deadline_utc": (now + timedelta(days=2)).isoformat(),
+                    "status": "WAITING_DEADLINE",
+                },
+            )
+            atomic_json(
+                args.quality_follower_state,
+                {
+                    "updated_at_utc": (now + timedelta(seconds=90)).isoformat(),
+                    "status": "ATTENTION",
+                    "failures": [],
+                    "freeze_readiness": {
+                        "ready_sequence_count": 0,
+                        "status_counts": {"PASS": 0, "REVIEW": 0},
+                        "waiting": [],
+                        "failures": [
+                            {
+                                "sequence": "one",
+                                "reasons": ["missing:pose_provenance"],
+                            }
+                        ],
+                    },
+                },
+            )
+            failed_readiness = build_dashboard(
+                args,
+                now=now + timedelta(seconds=90),
+                processes=processes,
+                gpu={"available": True, "utilization_pct": 95.0, "devices": []},
+            )
+            readiness_codes = {
+                row["code"] for row in failed_readiness["attention_reasons"]
+            }
+            self.assertIn("FREEZE_READINESS_FAILED", readiness_codes)
 
     @staticmethod
     def _process(pid: int, group: str) -> dict[str, object]:

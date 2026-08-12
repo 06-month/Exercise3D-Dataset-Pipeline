@@ -450,6 +450,7 @@ def build_dashboard(
     supervisor = read_json(args.supervisor_state)
     deadline_state = read_json(args.deadline_state)
     quality_follower_state = read_json(args.quality_follower_state)
+    freeze_readiness = dict(quality_follower_state.get("freeze_readiness", {}))
     previous = read_json(args.output)
     sequences = sequence_order(handoff)
     total_sequences = len(sequences) or 26
@@ -623,14 +624,34 @@ def build_dashboard(
             "QUALITY_FOLLOWER_STATE_STALE",
             f"quality_follower_state.json age is {age}.",
         )
-    if quality_follower_state.get("status") == "ATTENTION":
+    quality_failures = quality_follower_state.get("failures", [])
+    readiness_failures = freeze_readiness.get("failures", [])
+    if quality_failures:
         failure_text = "; ".join(
             f"{row.get('sequence')}: {row.get('reason')}"
-            for row in quality_follower_state.get("failures", [])
+            for row in quality_failures
         )
         attention(
             "QUALITY_FOLLOWER_FAILURE",
             failure_text or "Phase 11 quality follower reported ATTENTION.",
+        )
+    if readiness_failures:
+        failure_text = "; ".join(
+            f"{row.get('sequence')}: {','.join(map(str, row.get('reasons', [])))}"
+            for row in readiness_failures
+        )
+        attention(
+            "FREEZE_READINESS_FAILED",
+            failure_text or "One or more completed sequences are not export-ready.",
+        )
+    if (
+        quality_follower_state.get("status") == "ATTENTION"
+        and not quality_failures
+        and not readiness_failures
+    ):
+        attention(
+            "QUALITY_FOLLOWER_FAILURE",
+            "Phase 11 quality follower reported ATTENTION without a structured reason.",
         )
     for group in (
         "sapiens",
@@ -802,6 +823,16 @@ def build_dashboard(
         "quality_control": {
             **quality,
             "total_sequences": total_sequences,
+            "freeze_ready_sequences": int(
+                freeze_readiness.get("ready_sequence_count", 0) or 0
+            ),
+            "freeze_readiness_status_counts": dict(
+                freeze_readiness.get("status_counts", {})
+            ),
+            "freeze_readiness_waiting_count": len(
+                freeze_readiness.get("waiting", [])
+            ),
+            "freeze_readiness_failure_count": len(readiness_failures),
         },
         "quality_follower": {
             "alive": bool(roots["quality_follower"]),
@@ -913,7 +944,12 @@ def render_rich(state: dict[str, Any], console: Any | None = None) -> Any:
             f"{row['completed_sequences']}/{row['total_sequences']} sequences",
             current,
             "-",
-            "-",
+            (
+                f"freeze-ready {row.get('freeze_ready_sequences', 0)}/"
+                f"{row['total_sequences']}"
+                if key == "quality_control"
+                else "-"
+            ),
         )
     export = state["export"]
     table.add_row(

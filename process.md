@@ -96,6 +96,33 @@
 - Exact-tree, stale payload, symlink root/target, INCOMPLETE ownership, Git provenance regression을 포함한
   전체 74개 unit test와 publication-safety가 PASS했다.
 
+### Streaming freeze-readiness preflight
+
+- Quality follower에 final exporter의 동일 `validate_sequence()` preflight를 연결했다. Quality만
+  존재해도 pose/SAM run provenance, frame/PTS/finite, triangulation/body/quality gate 중 하나가
+  깨지면 freeze-ready로 세지 않는다.
+- INCOMPLETE dependency는 provenance monitor와 atomic stage publish의 순간적 lag을 허용하려고 300초
+  grace를 두고, 이후에도 지속되면 `FREEZE_READINESS_FAILED`로 승격한다. Validation
+  FAIL은 즉시 attention이며 valid output을 재계산하지 않는다.
+- Freeze-ready dependency의 path/size/mtime signature를 매 cycle 비교해 completed payload가 교체/삭제되면
+  해당 sequence만 exporter validation을 다시 수행하도록 했다. Numeric payload을 매번 재로드하지
+  않으며 source output을 수정하지 않는다.
+- 실제 10개 completed quality sequence를 CPU-only로 검증해 freeze-ready REVIEW 10,
+  PASS 0/FAIL 0/dependency reason 0을 확인했다. Quality materialization은 0이어서 기존 payload를
+  재계산하지 않았다.
+- Readiness grace/failure/dashboard/dependency-change regression을 포함한 전체 77개 unit test와
+  publication-safety가 PASS했다.
+
+### `latpulldown_0003` autonomous completion
+
+- Live supervisor가 Mode B cam3 완료 후 compact prior, Phase 9 fit, Mode C assessor까지 자동 관통했다.
+  Full Mode B aggregate는 11 sequence/33 camera/21,441 frame이며 OOM/retry는 0이다.
+- Body fit은 662×26, coverage/alignment 1.0, prior-only/missing 0, displacement p95 0.07748이다.
+  Frozen gate에 따라 displacement + camera uncertainty REVIEW, FAIL 0을 유지했다.
+- Mode C candidate 79 frame을 review metadata로 보존했지만 Mode C를 실행/채택하지 않았다.
+  Quality follower가 즉시 662-frame vector와 exporter preflight를 완료해 quality/freeze-ready를
+  11/26 REVIEW로 증가시켰고 failure/dependency reason은 0이다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화
