@@ -3,10 +3,51 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tools.checkpoint_handoff_state import atomic_json, pose_progress, sam_progress
+from tools.checkpoint_handoff_state import (
+    acquire_instance_lock,
+    atomic_json,
+    merge_resume_commands,
+    pose_progress,
+    sam_progress,
+)
 
 
 class HandoffCheckpointTest(unittest.TestCase):
+    def test_resume_commands_include_monitoring_plane_and_preserve_absent(self) -> None:
+        previous = {"resume_commands": {"sapiens2_target_pipeline.py": "old"}}
+        processes = [
+            {
+                "argv": ["python", "tools/monitor_autonomous_generation.py", "--quiet"],
+                "command": "python tools/monitor_autonomous_generation.py --quiet",
+            },
+            {
+                "argv": ["python", "tools/checkpoint_handoff_state.py", "--output", "x"],
+                "command": "python tools/checkpoint_handoff_state.py --output x",
+            },
+            {
+                "argv": ["python", "tools/run_monitoring_watchdog.py"],
+                "command": "python tools/run_monitoring_watchdog.py",
+            },
+        ]
+        commands = merge_resume_commands(previous, processes)
+        self.assertEqual(commands["sapiens2_target_pipeline.py"], "old")
+        self.assertIn("monitor_autonomous_generation.py", commands)
+        self.assertIn("checkpoint_handoff_state.py", commands)
+        self.assertIn("run_monitoring_watchdog.py", commands)
+
+    def test_handoff_monitor_lifetime_lock_rejects_duplicate(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "handoff.lock"
+            first = acquire_instance_lock(path)
+            self.assertIsNotNone(first)
+            self.assertIsNone(acquire_instance_lock(path))
+            assert first is not None
+            first.close()
+            recovered = acquire_instance_lock(path)
+            self.assertIsNotNone(recovered)
+            assert recovered is not None
+            recovered.close()
+
     def test_atomic_json_and_pose_progress(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -5,14 +5,16 @@ from __future__ import annotations
 
 import argparse
 import csv
+import fcntl
 import hashlib
 import json
 import os
+import shlex
 import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 import numpy as np
 
@@ -31,14 +33,21 @@ PROCESS_MARKERS = (
     "run_sam_body4d_full.py",
     "benchmark_sam_body4d.py",
     "checkpoint_handoff_state.py",
+    "monitor_autonomous_generation.py",
+    "run_monitoring_watchdog.py",
     "run_deadline_snapshot.py",
     "run_deadline_sentinel_watchdog.py",
     "run_predeadline_checkpoint_follower.py",
     "run_predeadline_checkpoint_follower_watchdog.py",
     "run_quality_control_follower_watchdog.py",
 )
-RESUMABLE_MARKERS = tuple(
-    marker for marker in PROCESS_MARKERS if marker != "checkpoint_handoff_state.py"
+MONITORING_MARKERS = {
+    "checkpoint_handoff_state.py",
+    "monitor_autonomous_generation.py",
+    "run_monitoring_watchdog.py",
+}
+WORKLOAD_MARKERS = tuple(
+    marker for marker in PROCESS_MARKERS if marker not in MONITORING_MARKERS
 )
 CAMERAS = ("cam1", "cam2", "cam3")
 
@@ -56,6 +65,27 @@ def atomic_json(path: Path, payload: dict[str, Any]) -> None:
     os.replace(temporary, path)
 
 
+def acquire_instance_lock(path: Path) -> BinaryIO | None:
+    """Acquire a lifetime lock without following a substituted symlink."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    handle = os.fdopen(descriptor, "r+b", buffering=0)
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        return None
+    handle.seek(0)
+    handle.truncate()
+    handle.write(f"{os.getpid()}\n".encode("ascii"))
+    handle.flush()
+    os.fsync(handle.fileno())
+    return handle
+
+
 def sha256_files(paths: list[Path]) -> str:
     digest = hashlib.sha256()
     for path in paths:
@@ -70,14 +100,19 @@ def active_processes() -> list[dict[str, Any]]:
         if not entry.name.isdigit():
             continue
         try:
-            parts = (entry / "cmdline").read_bytes().split(b"\0")
-            command = " ".join(part.decode(errors="replace") for part in parts if part)
-            if not command or not any(marker in command for marker in PROCESS_MARKERS):
+            argv = [
+                part.decode(errors="replace")
+                for part in (entry / "cmdline").read_bytes().split(b"\0")
+                if part
+            ]
+            names = {Path(token).name for token in argv}
+            if not argv or not names.intersection(PROCESS_MARKERS):
                 continue
             rows.append(
                 {
                     "pid": int(entry.name),
-                    "command": command,
+                    "command": shlex.join(argv),
+                    "argv": argv,
                     "cwd": str((entry / "cwd").resolve()),
                     "process_dir_ctime_utc": datetime.fromtimestamp(
                         entry.stat().st_ctime, tz=timezone.utc
@@ -94,6 +129,23 @@ def read_json(path: Path) -> dict[str, Any] | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def merge_resume_commands(
+    previous: dict[str, Any], processes: list[dict[str, Any]]
+) -> dict[str, str]:
+    """Preserve last-known commands and replace identities observed live."""
+    commands = {
+        str(key): str(value)
+        for key, value in dict(previous.get("resume_commands", {})).items()
+        if isinstance(value, str)
+    }
+    for process in processes:
+        names = {Path(token).name for token in process.get("argv", [])}
+        for marker in PROCESS_MARKERS:
+            if marker in names:
+                commands[marker] = str(process["command"])
+    return commands
 
 
 def pose_progress(pose_root: Path, sequences: list[str]) -> dict[str, Any]:
@@ -308,7 +360,9 @@ def build_state(args: argparse.Namespace) -> dict[str, Any]:
     in_progress = [
         process["command"]
         for process in processes
-        if any(marker in process["command"] for marker in RESUMABLE_MARKERS)
+        if {Path(token).name for token in process.get("argv", [])}.intersection(
+            WORKLOAD_MARKERS
+        )
     ]
     remaining = [
         sequence for sequence in sequences if sequence not in pose["completed_sequences"]
@@ -363,20 +417,28 @@ def main() -> int:
     parser.add_argument("--sequences", required=True)
     parser.add_argument("--deadline-utc", default="2026-08-14T04:00:00+00:00")
     parser.add_argument("--poll-seconds", type=float, default=30.0)
+    parser.add_argument(
+        "--instance-lock",
+        type=Path,
+        default=PROJECT_ROOT / ".runtime" / "handoff_monitor.lock",
+    )
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
     if args.poll_seconds <= 0:
         raise RuntimeError("poll-seconds must be positive")
+    instance_lock = None
+    if not args.once:
+        instance_lock = acquire_instance_lock(args.instance_lock.resolve())
+        if instance_lock is None:
+            print("handoff monitor is already running", flush=True)
+            return 3
     while True:
         output = args.output.resolve()
         previous = read_json(output) or {}
         state = build_state(args)
-        resume_commands = dict(previous.get("resume_commands", {}))
-        for process in state["active_processes"]:
-            for marker in RESUMABLE_MARKERS:
-                if marker in process["command"]:
-                    resume_commands[marker] = process["command"]
-        state["resume_commands"] = resume_commands
+        state["resume_commands"] = merge_resume_commands(
+            previous, state["active_processes"]
+        )
         atomic_json(output, state)
         provenance_args = argparse.Namespace(
             dataset_root=args.dataset_root,

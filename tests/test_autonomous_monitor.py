@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from tools.monitor_autonomous_generation import (
+    acquire_instance_lock as acquire_dashboard_lock,
     atomic_json,
     build_dashboard,
     deadline_freeze_upper_bound,
@@ -22,6 +23,19 @@ from tools.monitor_autonomous_generation import (
 
 
 class AutonomousMonitorTest(unittest.TestCase):
+    def test_dashboard_lifetime_lock_rejects_duplicate_daemon(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "dashboard.lock"
+            first = acquire_dashboard_lock(path)
+            self.assertIsNotNone(first)
+            self.assertIsNone(acquire_dashboard_lock(path))
+            assert first is not None
+            first.close()
+            recovered = acquire_dashboard_lock(path)
+            self.assertIsNotNone(recovered)
+            assert recovered is not None
+            recovered.close()
+
     def test_sam_storage_forecast_uses_nearest_rank_p90(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -335,6 +349,7 @@ class AutonomousMonitorTest(unittest.TestCase):
             self.assertIn("SUPERVISOR_DEAD", codes)
             self.assertIn("QUALITY_FOLLOWER_DEAD", codes)
             self.assertIn("QUALITY_FOLLOWER_WATCHDOG_DEAD", codes)
+            self.assertIn("MONITORING_WATCHDOG_DEAD", codes)
             self.assertIn("PREDEADLINE_CHECKPOINT_FOLLOWER_DEAD", codes)
             self.assertIn("PREDEADLINE_CHECKPOINT_FOLLOWER_WATCHDOG_DEAD", codes)
             self.assertIn("DISK_RESERVE_LOW", codes)
@@ -502,6 +517,7 @@ class AutonomousMonitorTest(unittest.TestCase):
                 self._process(8, "checkpoint_follower"),
                 self._process(9, "checkpoint_follower_watchdog"),
                 self._process(10, "quality_follower_watchdog"),
+                self._process(11, "monitoring_watchdog"),
             ]
             args = self._args(root)
             atomic_json(
@@ -557,6 +573,17 @@ class AutonomousMonitorTest(unittest.TestCase):
                     "restart_count_in_window": 0,
                 },
             )
+            atomic_json(
+                args.monitoring_watchdog_state,
+                {
+                    "updated_at_utc": now.isoformat(),
+                    "status": "RUNNING",
+                    "attention_required": False,
+                    "attention_reasons": [],
+                    "last_event": "DASHBOARD_OBSERVED;HANDOFF_MONITOR_OBSERVED",
+                    "targets": {},
+                },
+            )
             state = build_dashboard(
                 args,
                 now=now,
@@ -568,6 +595,39 @@ class AutonomousMonitorTest(unittest.TestCase):
             self.assertEqual(state["sam"]["mode"], "B")
             self.assertEqual(state["sam"]["mode_c_policy"], "SELECTIVE_ESCALATION_ONLY")
             self.assertEqual(state["quality_control"]["freeze_ready_sequences"], 0)
+
+            atomic_json(
+                args.monitoring_watchdog_state,
+                {
+                    "updated_at_utc": now.isoformat(),
+                    "status": "ATTENTION",
+                    "attention_required": True,
+                    "attention_reasons": [
+                        {"code": "DASHBOARD_RESTART_EXHAUSTED", "message": "limit"}
+                    ],
+                },
+            )
+            watchdog_attention = build_dashboard(
+                args,
+                now=now,
+                processes=processes,
+                gpu={"available": True, "utilization_pct": 95.0, "devices": []},
+            )
+            self.assertIn(
+                "DASHBOARD_RESTART_EXHAUSTED",
+                {row["code"] for row in watchdog_attention["attention_reasons"]},
+            )
+            atomic_json(
+                args.monitoring_watchdog_state,
+                {
+                    "updated_at_utc": now.isoformat(),
+                    "status": "RUNNING",
+                    "attention_required": False,
+                    "attention_reasons": [],
+                    "last_event": "DASHBOARD_OBSERVED;HANDOFF_MONITOR_OBSERVED",
+                    "targets": {},
+                },
+            )
 
             atomic_json(args.output, state)
             transient = build_dashboard(
@@ -777,6 +837,7 @@ class AutonomousMonitorTest(unittest.TestCase):
             deadline_state=root / "deadline.json",
             quality_follower_state=root / "quality_follower.json",
             quality_follower_watchdog_state=root / "quality_follower_watchdog.json",
+            monitoring_watchdog_state=root / "monitoring_watchdog.json",
             sequence_status=root / "sequences.csv",
             autonomous_runtime_dir=runtime,
             runtime_dir=runtime,

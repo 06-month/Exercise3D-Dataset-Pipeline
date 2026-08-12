@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import fcntl
 import hashlib
 import json
 import math
@@ -17,7 +18,7 @@ import statistics
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, BinaryIO, Iterable
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -35,6 +36,7 @@ PROCESS_MARKERS = {
     "quality_follower": {"run_quality_control_follower.py"},
     "quality_follower_watchdog": {"run_quality_control_follower_watchdog.py"},
     "handoff_monitor": {"checkpoint_handoff_state.py"},
+    "monitoring_watchdog": {"run_monitoring_watchdog.py"},
     "deadline_sentinel": {"run_deadline_snapshot.py"},
     "deadline_sentinel_watchdog": {"run_deadline_sentinel_watchdog.py"},
     "checkpoint_follower": {"run_predeadline_checkpoint_follower.py"},
@@ -65,6 +67,27 @@ def atomic_json(path: Path, payload: dict[str, Any]) -> None:
         handle.flush()
         os.fsync(handle.fileno())
     os.replace(temporary, path)
+
+
+def acquire_instance_lock(path: Path) -> BinaryIO | None:
+    """Acquire and retain the persistent dashboard singleton lock."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    handle = os.fdopen(descriptor, "r+b", buffering=0)
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        return None
+    handle.seek(0)
+    handle.truncate()
+    handle.write(f"{os.getpid()}\n".encode("ascii"))
+    handle.flush()
+    os.fsync(handle.fileno())
+    return handle
 
 
 def parse_datetime(value: Any) -> datetime | None:
@@ -846,6 +869,7 @@ def build_dashboard(
     )
     quality_follower_state = read_json(args.quality_follower_state)
     quality_follower_watchdog_state = read_json(args.quality_follower_watchdog_state)
+    monitoring_watchdog_state = read_json(args.monitoring_watchdog_state)
     freeze_readiness = dict(quality_follower_state.get("freeze_readiness", {}))
     previous = read_json(args.output)
     sequences = sequence_order(handoff)
@@ -1079,6 +1103,11 @@ def build_dashboard(
         )
     if (incomplete_pose or incomplete_body) and not roots["handoff_monitor"]:
         attention("HANDOFF_MONITOR_DEAD", "Persistent handoff checkpoint monitor is not alive.")
+    if (incomplete_pose or incomplete_body) and not roots["monitoring_watchdog"]:
+        attention(
+            "MONITORING_WATCHDOG_DEAD",
+            "Generation is incomplete but the dashboard/handoff recovery watchdog is not alive.",
+        )
     if remaining_seconds > 0 and not roots["deadline_sentinel"]:
         attention("DEADLINE_SENTINEL_DEAD", "Deadline snapshot sentinel is not alive.")
     snapshot_complete = deadline_snapshot_status == "COMPLETE"
@@ -1145,6 +1174,40 @@ def build_dashboard(
             attention(
                 "SUPERVISOR_WATCHDOG_ATTENTION",
                 "Supervisor watchdog requested attention without a structured reason.",
+            )
+    monitoring_watchdog_updated = parse_datetime(
+        monitoring_watchdog_state.get("updated_at_utc")
+    )
+    if (
+        (incomplete_pose or incomplete_body)
+        and roots["monitoring_watchdog"]
+        and (
+            monitoring_watchdog_updated is None
+            or (now - monitoring_watchdog_updated).total_seconds()
+            > args.state_stale_seconds
+        )
+    ):
+        age = (
+            "unknown"
+            if monitoring_watchdog_updated is None
+            else human_duration((now - monitoring_watchdog_updated).total_seconds())
+        )
+        attention(
+            "MONITORING_WATCHDOG_STATE_STALE",
+            f"monitoring_watchdog_state.json age is {age}.",
+        )
+    if monitoring_watchdog_state.get("attention_required"):
+        monitoring_reasons = monitoring_watchdog_state.get("attention_reasons", [])
+        if monitoring_reasons:
+            for reason in monitoring_reasons:
+                attention(
+                    str(reason.get("code", "MONITORING_WATCHDOG_ATTENTION")),
+                    str(reason.get("message", reason)),
+                )
+        else:
+            attention(
+                "MONITORING_WATCHDOG_ATTENTION",
+                "Monitoring watchdog requested attention without a structured reason.",
             )
     deadline_watchdog_updated = parse_datetime(
         deadline_watchdog_state.get("updated_at_utc")
@@ -1345,6 +1408,7 @@ def build_dashboard(
         "quality_follower",
         "quality_follower_watchdog",
         "handoff_monitor",
+        "monitoring_watchdog",
         "deadline_sentinel",
         "supervisor_watchdog",
         "deadline_sentinel_watchdog",
@@ -1637,6 +1701,21 @@ def build_dashboard(
             "pid": roots["handoff_monitor"][0]["pid"] if roots["handoff_monitor"] else None,
             "state_updated_at": handoff.get("updated_at_utc"),
         },
+        "monitoring_watchdog": {
+            "alive": bool(roots["monitoring_watchdog"]),
+            "pid": (
+                roots["monitoring_watchdog"][0]["pid"]
+                if roots["monitoring_watchdog"]
+                else None
+            ),
+            "status": monitoring_watchdog_state.get("status", "UNKNOWN"),
+            "updated_at": monitoring_watchdog_state.get("updated_at_utc"),
+            "last_event": monitoring_watchdog_state.get("last_event"),
+            "targets": monitoring_watchdog_state.get("targets", {}),
+            "attention_reasons": monitoring_watchdog_state.get(
+                "attention_reasons", []
+            ),
+        },
         "deadline_sentinel": {
             "alive": bool(roots["deadline_sentinel"]),
             "pid": roots["deadline_sentinel"][0]["pid"] if roots["deadline_sentinel"] else None,
@@ -1806,6 +1885,7 @@ def render_rich(state: dict[str, Any], console: Any | None = None) -> Any:
     checkpoint_watchdog = state.get(
         "predeadline_checkpoint_follower_watchdog", {}
     )
+    monitoring_watchdog = state.get("monitoring_watchdog", {})
     table.add_row(
         "Export / freeze",
         f"deadline {export['completed_sequences']} | "
@@ -1840,6 +1920,8 @@ def render_rich(state: dict[str, Any], console: Any | None = None) -> Any:
         f"Supervisor PID {state['supervisor']['pid'] or '-'} | "
         f"watchdog PID {state['supervisor_watchdog']['pid'] or '-'} "
         f"({state['supervisor_watchdog']['status']})\n"
+        f"Monitoring watchdog PID {monitoring_watchdog.get('pid') or '-'} "
+        f"({monitoring_watchdog.get('status', 'UNKNOWN')})\n"
         f"Deadline sentinel PID {state['deadline_sentinel']['pid'] or '-'} | "
         f"watchdog PID {state['deadline_sentinel_watchdog']['pid'] or '-'} "
         f"({state['deadline_sentinel_watchdog']['status']})"
@@ -1894,6 +1976,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=PROJECT_ROOT / ".runtime" / "quality_follower_watchdog_state.json",
     )
     parser.add_argument(
+        "--monitoring-watchdog-state",
+        type=Path,
+        default=PROJECT_ROOT / ".runtime" / "monitoring_watchdog_state.json",
+    )
+    parser.add_argument(
         "--checkpoint-follower-state",
         type=Path,
         default=PROJECT_ROOT
@@ -1944,6 +2031,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--state-stale-seconds", type=float, default=180.0)
     parser.add_argument("--eta-worsening-minutes", type=float, default=30.0)
     parser.add_argument("--minimum-free-gib", type=float, default=20.0)
+    parser.add_argument(
+        "--instance-lock",
+        type=Path,
+        default=PROJECT_ROOT / ".runtime" / "dashboard_monitor.lock",
+    )
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--plain", action="store_true", help="print JSON instead of the Rich dashboard")
     parser.add_argument("--quiet", action="store_true", help="refresh state without terminal output")
@@ -1961,6 +2053,13 @@ def main() -> int:
         or args.minimum_free_gib <= 0
     ):
         raise RuntimeError("monitor thresholds and refresh interval must be positive")
+
+    instance_lock = None
+    if not args.once:
+        instance_lock = acquire_instance_lock(args.instance_lock.resolve())
+        if instance_lock is None:
+            print("dashboard monitor is already running", flush=True)
+            return 3
 
     def snapshot() -> dict[str, Any]:
         state = build_dashboard(args)
