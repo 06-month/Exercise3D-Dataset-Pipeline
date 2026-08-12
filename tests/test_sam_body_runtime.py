@@ -444,6 +444,7 @@ completion:
                 (mesh / f"{index}.ply").touch()
                 np.savez_compressed(
                     numeric / f"{index}.npz",
+                    object_id=np.asarray(1, dtype=np.int32),
                     **{
                         key: np.asarray(index, dtype=np.float32)
                         for key in REQUIRED_PRIOR_FIELDS
@@ -455,6 +456,29 @@ completion:
             result = completion_status(root, 2)
             self.assertEqual(result["status"], "INCOMPLETE")
             self.assertIn("numeric_prior_complete", result["reason"])
+
+            np.savez_compressed(
+                numeric / "1.npz",
+                object_id=np.asarray(1, dtype=np.int32),
+                **{
+                    key: np.asarray(1, dtype=np.float32)
+                    for key in REQUIRED_PRIOR_FIELDS
+                },
+            )
+            extra = private / "mhr_numeric" / "2"
+            extra.mkdir()
+            np.savez_compressed(
+                extra / "0.npz",
+                object_id=np.asarray(2, dtype=np.int32),
+                **{
+                    key: np.asarray(2, dtype=np.float32)
+                    for key in REQUIRED_PRIOR_FIELDS
+                },
+            )
+            result = completion_status(root, 2)
+            self.assertEqual(result["status"], "INCOMPLETE")
+            self.assertIn("numeric_prior_no_extra_objects", result["reason"])
+            self.assertIn("primary_object_roots_exact", result["reason"])
 
     def test_full_resume_rejects_numeric_schema_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -525,6 +549,7 @@ completion:
             (mesh / "0.ply").touch()
             np.savez_compressed(
                 numeric / "0.npz",
+                object_id=np.asarray(1, dtype=np.int32),
                 **{
                     key: np.asarray(0.0, dtype=np.float32)
                     for key in REQUIRED_PRIOR_FIELDS

@@ -208,6 +208,22 @@ def read_single_csv(path: Path) -> dict[str, str]:
     return rows[0]
 
 
+def exact_primary_object_root(path: Path, *, required: bool) -> bool:
+    """Accept one real object directory named ``1`` and no sibling payload."""
+    if not path.exists():
+        return not required
+    try:
+        entries = list(path.iterdir())
+    except OSError:
+        return False
+    return bool(
+        len(entries) == 1
+        and entries[0].name == "1"
+        and entries[0].is_dir()
+        and not entries[0].is_symlink()
+    )
+
+
 def completion_status(output_dir: Path, expected_frames: int) -> dict[str, Any]:
     benchmark_path = output_dir / "sam_body_benchmark.csv"
     profile_path = output_dir / "mode_b_profile.json"
@@ -272,10 +288,24 @@ def completion_status(output_dir: Path, expected_frames: int) -> dict[str, Any]:
             provenance_seed = bool(len(target_valid) and target_valid[0])
     except (OSError, TypeError, ValueError, KeyError, RuntimeError) as error:
         return {"status": "INCOMPLETE", "reason": str(error)}
-    mesh_count = len(list((private / "mesh_4d_individual" / "1").glob("*.ply")))
-    numeric_count = len(list((private / "mhr_numeric" / "1").glob("*.npz")))
+    mesh_root = private / "mesh_4d_individual"
+    numeric_root = private / "mhr_numeric"
+    mesh_count = len(list((mesh_root / "1").glob("*.ply")))
+    numeric_count = len(list((numeric_root / "1").glob("*.npz")))
+    mesh_recursive_count = len(list(mesh_root.rglob("*.ply")))
+    numeric_recursive_count = len(list(numeric_root.rglob("*.npz")))
+    primary_object_roots = all(
+        exact_primary_object_root(private / name, required=required)
+        for name, required in (
+            ("mesh_4d_individual", True),
+            ("mhr_numeric", True),
+            ("focal_4d_individual", False),
+            ("rendered_frames_individual", False),
+        )
+    )
     numeric_paths = sorted((private / "mhr_numeric" / "1").glob("*.npz"))
     numeric_schema_complete = len(numeric_paths) == expected_frames
+    numeric_object_id_one = numeric_schema_complete
     if numeric_schema_complete:
         for path in numeric_paths:
             try:
@@ -283,8 +313,15 @@ def completion_status(output_dir: Path, expected_frames: int) -> dict[str, Any]:
                     if not set(REQUIRED_PRIOR_FIELDS) <= set(payload.files):
                         numeric_schema_complete = False
                         break
+                    if "object_id" not in payload.files:
+                        numeric_object_id_one = False
+                    else:
+                        object_id = payload["object_id"]
+                        if object_id.shape != () or int(object_id.item()) != 1:
+                            numeric_object_id_one = False
             except (OSError, ValueError):
                 numeric_schema_complete = False
+                numeric_object_id_one = False
                 break
     temporary_count = len(list(private.rglob("*.tmp*")))
     checks = {
@@ -305,8 +342,12 @@ def completion_status(output_dir: Path, expected_frames: int) -> dict[str, Any]:
         "provenance_confidence": provenance_confidence,
         "provenance_seed": provenance_seed,
         "mesh_complete": mesh_count == expected_frames,
+        "mesh_no_extra_objects": mesh_recursive_count == expected_frames,
         "numeric_prior_complete": numeric_count == expected_frames,
+        "numeric_prior_no_extra_objects": numeric_recursive_count == expected_frames,
         "numeric_prior_schema_complete": numeric_schema_complete,
+        "numeric_prior_object_id_one": numeric_object_id_one,
+        "primary_object_roots_exact": primary_object_roots,
         "no_temporary_files": temporary_count == 0,
     }
     return {
