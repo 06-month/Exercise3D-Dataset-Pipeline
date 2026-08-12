@@ -507,7 +507,8 @@ def build_dashboard(
     triangulation_counts = status_counts(triangulation_status.values())
     body_counts = status_counts(body_status.values())
     export = export_progress(args.export_root, deadline_state.get("build_id"))
-    export["deadline_snapshot_status"] = deadline_state.get("status", "UNKNOWN")
+    deadline_snapshot_status = str(deadline_state.get("status", "UNKNOWN"))
+    export["deadline_snapshot_status"] = deadline_snapshot_status
 
     try:
         disk_usage = shutil.disk_usage(args.disk_path)
@@ -621,6 +622,17 @@ def build_dashboard(
             "DEADLINE_ETA_AT_RISK",
             f"Sapiens ETA is {human_duration((eta - deadline).total_seconds())} after the deadline.",
             severity="WARNING",
+        )
+    if deadline_snapshot_status in {
+        "EXPORT_FAILED",
+        "EXPORT_INTEGRITY_FAILED",
+        "EXISTING_BUILD_INVALID",
+    }:
+        integrity_errors = deadline_state.get("integrity_errors", [])
+        detail = f" Integrity errors: {';'.join(map(str, integrity_errors))}." if integrity_errors else ""
+        attention(
+            "DEADLINE_SNAPSHOT_FAILED",
+            f"Deadline snapshot state is {deadline_snapshot_status}.{detail}",
         )
     previous_eta = parse_datetime(previous.get("sapiens", {}).get("eta_utc"))
     if eta and previous_eta and (eta - previous_eta).total_seconds() > args.eta_worsening_minutes * 60:

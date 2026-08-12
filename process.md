@@ -43,6 +43,8 @@
   현재 살아 있는 sentinel은 deadline에 새 exporter subprocess를 호출하므로 restart하지 않았다.
 - 기존 `exercise3d-streaming-smoke-v1`을 read-only 전수 검증해 34 files/28,960,929 bytes,
   mismatch 0을 확인했고 focused regression 7개와 전체 59개 unit test가 PASS했다.
+- Dashboard는 sentinel의 `EXPORT_FAILED`, `EXPORT_INTEGRITY_FAILED`, `EXISTING_BUILD_INVALID`와
+  구체적 integrity error를 `DEADLINE_SNAPSHOT_FAILED` attention으로 승격하도록 연결했다.
 
 ### Source-of-truth 재검증
 

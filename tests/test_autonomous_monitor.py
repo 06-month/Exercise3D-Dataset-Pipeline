@@ -177,6 +177,25 @@ class AutonomousMonitorTest(unittest.TestCase):
             self.assertFalse(transient["gpu"]["telemetry_fresh"])
             self.assertEqual(transient["gpu"]["utilization_pct"], 95.0)
 
+            atomic_json(
+                args.deadline_state,
+                {
+                    "deadline_utc": (now + timedelta(days=2)).isoformat(),
+                    "status": "EXPORT_INTEGRITY_FAILED",
+                    "integrity_errors": ["sha256_mismatch:payload"],
+                },
+            )
+            failed_snapshot = build_dashboard(
+                args,
+                now=now + timedelta(seconds=60),
+                processes=processes,
+                gpu={"available": True, "utilization_pct": 95.0, "devices": []},
+            )
+            failed_codes = {
+                row["code"] for row in failed_snapshot["attention_reasons"]
+            }
+            self.assertIn("DEADLINE_SNAPSHOT_FAILED", failed_codes)
+
     @staticmethod
     def _process(pid: int, group: str) -> dict[str, object]:
         return {
