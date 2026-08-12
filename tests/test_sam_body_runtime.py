@@ -429,7 +429,10 @@ completion:
                 frame_names=np.asarray(["0.jpg", "1.jpg"]),
                 source_frame_names=np.asarray(["0.jpg", "1.jpg"]),
                 source_frame_indices=np.asarray([0, 1], dtype=np.int32),
-                target_bboxes_xyxy=np.ones((2, 4), dtype=np.float32),
+                target_bboxes_xyxy=np.asarray(
+                    [[1, 2, 11, 22], [np.nan, np.nan, np.nan, np.nan]],
+                    dtype=np.float32,
+                ),
                 target_valid=np.asarray([True, False]),
                 target_selection_confidence=np.asarray([1.0, 0.0]),
                 target_ambiguous=np.asarray([False, True]),
@@ -475,7 +478,7 @@ completion:
                 frame_names=np.asarray(["0.jpg"]),
                 source_frame_names=np.asarray(["0.jpg"]),
                 source_frame_indices=np.asarray([0]),
-                target_bboxes_xyxy=np.ones((1, 4)),
+                target_bboxes_xyxy=np.asarray([[1, 2, 11, 22]], dtype=np.float32),
                 target_valid=np.asarray([True]),
                 target_selection_confidence=np.asarray([1.0]),
                 target_ambiguous=np.asarray([False]),
@@ -488,6 +491,52 @@ completion:
             result = completion_status(root, 1)
             self.assertEqual(result["status"], "INCOMPLETE")
             self.assertIn("numeric_prior_schema_complete", result["reason"])
+
+    def test_full_resume_rejects_invalid_target_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            private = root / "mode_b_private_output"
+            mesh = private / "mesh_4d_individual" / "1"
+            numeric = private / "mhr_numeric" / "1"
+            mesh.mkdir(parents=True)
+            numeric.mkdir(parents=True)
+            (root / "sam_body_benchmark.csv").write_text(
+                "status,frames_processed,elapsed_wall_seconds,peak_nvidia_vram_mib,gpu_utilization_mean_pct,power_mean_w\n"
+                "PASS,1,1,1,1,1\n",
+                encoding="utf-8",
+            )
+            (root / "mode_b_profile.json").write_text(
+                '{"frames_processed":1,"input_frames":1,"target_seed_count":1,"persons_processed":1}',
+                encoding="utf-8",
+            )
+            np.savez_compressed(
+                private / "target_provenance.npz",
+                frame_names=np.asarray(["00000000.jpg"]),
+                source_frame_names=np.asarray(["0.jpg"]),
+                source_frame_indices=np.asarray([0], dtype=np.int32),
+                target_bboxes_xyxy=np.asarray([[1, 2, 1, 22]], dtype=np.float32),
+                target_valid=np.asarray([True]),
+                target_selection_confidence=np.asarray([np.nan], dtype=np.float32),
+                target_ambiguous=np.asarray([True]),
+                no_target=np.asarray([False]),
+                occlusion_risk=np.asarray([True]),
+                timestamp_pts_seconds=np.asarray([np.nan]),
+            )
+            (mesh / "0.ply").touch()
+            np.savez_compressed(
+                numeric / "0.npz",
+                **{
+                    key: np.asarray(0.0, dtype=np.float32)
+                    for key in REQUIRED_PRIOR_FIELDS
+                },
+            )
+
+            result = completion_status(root, 1)
+            self.assertEqual(result["status"], "INCOMPLETE")
+            self.assertIn("provenance_abstention", result["reason"])
+            self.assertIn("provenance_bboxes", result["reason"])
+            self.assertIn("provenance_timestamps", result["reason"])
+            self.assertIn("provenance_confidence", result["reason"])
 
     def test_runtime_summary_separates_best_expected_worst(self) -> None:
         rows = [

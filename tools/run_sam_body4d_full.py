@@ -235,8 +235,42 @@ def completion_status(output_dir: Path, expected_frames: int) -> dict[str, Any]:
             }
             provenance_schema = required_provenance <= set(payload.files)
             provenance_frames = len(payload["frame_names"])
-            target_valid_frames = int(payload["target_valid"].sum())
-    except (OSError, ValueError, KeyError, RuntimeError) as error:
+            provenance_lengths = all(
+                len(payload[key]) == expected_frames
+                for key in required_provenance - {"target_bboxes_xyxy"}
+            ) and payload["target_bboxes_xyxy"].shape == (expected_frames, 4)
+            source_indices = payload["source_frame_indices"].astype(np.int64)
+            target_valid = payload["target_valid"].astype(np.bool_)
+            target_ambiguous = payload["target_ambiguous"].astype(np.bool_)
+            no_target = payload["no_target"].astype(np.bool_)
+            target_bboxes = payload["target_bboxes_xyxy"].astype(np.float64)
+            timestamps = payload["timestamp_pts_seconds"].astype(np.float64)
+            confidence = payload["target_selection_confidence"].astype(np.float64)
+            target_valid_frames = int(target_valid.sum())
+            provenance_source_indices = np.array_equal(
+                source_indices, np.arange(expected_frames, dtype=np.int64)
+            )
+            provenance_abstention = bool(
+                not np.any(target_valid & (target_ambiguous | no_target))
+            )
+            valid_boxes = target_bboxes[target_valid]
+            invalid_boxes = target_bboxes[~target_valid]
+            provenance_bboxes = bool(
+                len(valid_boxes) > 0
+                and np.isfinite(valid_boxes).all()
+                and np.all(valid_boxes[:, 2:] > valid_boxes[:, :2])
+                and np.isnan(invalid_boxes).all()
+            )
+            provenance_timestamps = bool(
+                np.isfinite(timestamps).all()
+                and (len(timestamps) < 2 or np.all(np.diff(timestamps) > 0))
+            )
+            provenance_confidence = bool(
+                np.isfinite(confidence).all()
+                and np.all((confidence >= 0) & (confidence <= 1))
+            )
+            provenance_seed = bool(len(target_valid) and target_valid[0])
+    except (OSError, TypeError, ValueError, KeyError, RuntimeError) as error:
         return {"status": "INCOMPLETE", "reason": str(error)}
     mesh_count = len(list((private / "mesh_4d_individual" / "1").glob("*.ply")))
     numeric_count = len(list((private / "mhr_numeric" / "1").glob("*.npz")))
@@ -263,6 +297,13 @@ def completion_status(output_dir: Path, expected_frames: int) -> dict[str, Any]:
         "persons_one": int(profile.get("persons_processed", 0)) == 1,
         "provenance_frames": provenance_frames == expected_frames,
         "provenance_schema": provenance_schema,
+        "provenance_lengths": provenance_lengths,
+        "provenance_source_indices": provenance_source_indices,
+        "provenance_abstention": provenance_abstention,
+        "provenance_bboxes": provenance_bboxes,
+        "provenance_timestamps": provenance_timestamps,
+        "provenance_confidence": provenance_confidence,
+        "provenance_seed": provenance_seed,
         "mesh_complete": mesh_count == expected_frames,
         "numeric_prior_complete": numeric_count == expected_frames,
         "numeric_prior_schema_complete": numeric_schema_complete,
