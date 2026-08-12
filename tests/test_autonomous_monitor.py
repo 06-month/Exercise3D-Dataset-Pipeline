@@ -18,12 +18,41 @@ from tools.monitor_autonomous_generation import (
     metadata_statuses,
     observed_post_sam_overhead,
     quality_progress,
+    remaining_schedule_dominance_audit,
     sam_output_storage_forecast,
     selection_workloads,
 )
 
 
 class AutonomousMonitorTest(unittest.TestCase):
+    def test_remaining_schedule_audit_detects_two_stage_dominance(self) -> None:
+        workloads = [
+            {"sequence": "done", "target_crops": 30, "frames": 30},
+            {"sequence": "earlier", "target_crops": 20, "frames": 25},
+            {"sequence": "later", "target_crops": 10, "frames": 15},
+        ]
+        audit = remaining_schedule_dominance_audit(
+            workloads,
+            {"done"},
+            pose_rate=2.0,
+            sam_rate=1.0,
+        )
+        self.assertEqual(audit["remaining_sequence_count"], 2)
+        self.assertEqual(audit["status"], "DOMINANCE_INVERSION")
+        self.assertEqual(audit["dominance_inversion_count"], 1)
+        self.assertEqual(
+            audit["dominance_inversions"][0]["later_dominating_sequence"],
+            "later",
+        )
+        ordered = remaining_schedule_dominance_audit(
+            list(reversed(workloads[1:])),
+            set(),
+            pose_rate=2.0,
+            sam_rate=1.0,
+        )
+        self.assertEqual(ordered["status"], "PARETO_NONDECREASING")
+        self.assertTrue(ordered["weighted_cost_nondecreasing"])
+
     def test_checkpoint_storage_forecast_counts_cumulative_builds(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

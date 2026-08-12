@@ -162,6 +162,109 @@ def selection_workloads(
     return rows, errors
 
 
+def remaining_schedule_dominance_audit(
+    workloads: list[dict[str, Any]],
+    completed_sequences: Iterable[str],
+    *,
+    pose_rate: float | None,
+    sam_rate: float | None,
+) -> dict[str, Any]:
+    """Find later sequences that dominate an earlier frozen-order workload.
+
+    This is intentionally not called a global flow-shop optimum proof.  It
+    checks the stronger and directly actionable condition that no later item
+    requires no more work in both GPU stages and strictly less in at least one.
+    """
+    completed = set(completed_sequences)
+    remaining = [
+        row for row in workloads if str(row.get("sequence")) not in completed
+    ]
+    dominance_inversions: list[dict[str, Any]] = []
+    weighted_inversions: list[dict[str, Any]] = []
+    rates_available = bool(
+        pose_rate is not None
+        and pose_rate > 0
+        and sam_rate is not None
+        and sam_rate > 0
+    )
+    costs: list[float | None] = []
+    for row in remaining:
+        costs.append(
+            (
+                int(row["target_crops"]) / float(pose_rate)
+                + int(row["frames"]) / float(sam_rate)
+                if rates_available
+                else None
+            )
+        )
+    for earlier_index, earlier in enumerate(remaining):
+        earlier_crops = int(earlier["target_crops"])
+        earlier_frames = int(earlier["frames"])
+        for later_index in range(earlier_index + 1, len(remaining)):
+            later = remaining[later_index]
+            later_crops = int(later["target_crops"])
+            later_frames = int(later["frames"])
+            if (
+                later_crops <= earlier_crops
+                and later_frames <= earlier_frames
+                and (later_crops < earlier_crops or later_frames < earlier_frames)
+            ):
+                dominance_inversions.append(
+                    {
+                        "earlier_sequence": str(earlier["sequence"]),
+                        "later_dominating_sequence": str(later["sequence"]),
+                        "earlier_target_crops": earlier_crops,
+                        "later_target_crops": later_crops,
+                        "earlier_sam_frames": earlier_frames,
+                        "later_sam_frames": later_frames,
+                    }
+                )
+            earlier_cost = costs[earlier_index]
+            later_cost = costs[later_index]
+            if (
+                earlier_cost is not None
+                and later_cost is not None
+                and later_cost < earlier_cost
+            ):
+                weighted_inversions.append(
+                    {
+                        "earlier_sequence": str(earlier["sequence"]),
+                        "later_sequence": str(later["sequence"]),
+                        "earlier_combined_seconds": earlier_cost,
+                        "later_combined_seconds": later_cost,
+                    }
+                )
+    return {
+        "available": bool(remaining),
+        "kind": "REMAINING_TWO_STAGE_WORKLOAD_DOMINANCE",
+        "status": (
+            "PARETO_NONDECREASING"
+            if remaining and not dominance_inversions
+            else "DOMINANCE_INVERSION"
+            if remaining
+            else "NO_REMAINING_SEQUENCE"
+        ),
+        "remaining_sequence_count": len(remaining),
+        "remaining_sequences": [str(row["sequence"]) for row in remaining],
+        "dominance_inversion_count": len(dominance_inversions),
+        "dominance_inversions": dominance_inversions,
+        "weighted_cost_available": rates_available,
+        "weighted_cost_nondecreasing": bool(
+            rates_available and not weighted_inversions
+        ),
+        "weighted_inversion_count": len(weighted_inversions),
+        "weighted_inversions": weighted_inversions,
+        "pose_rate_crops_per_second": pose_rate,
+        "sam_rate_frames_per_second": sam_rate,
+        "interpretation": (
+            "no later remaining sequence is cheaper in both measured GPU-stage workloads"
+            if not dominance_inversions
+            else "a later remaining sequence is cheaper in both GPU-stage workloads"
+        ),
+        "not_a_global_optimality_proof": True,
+    }
+
+
 def observed_post_sam_overhead(
     sam_root: Path,
     body_root: Path,
@@ -1143,6 +1246,17 @@ def build_dashboard(
                     kind="EMPIRICAL_P90_POST_SAM_ADJUSTED",
                 )
             )
+    freeze_forecast["remaining_order_audit"] = (
+        remaining_schedule_dominance_audit(
+            workloads,
+            pose.get("completed_sequences", []),
+            pose_rate=(
+                safe_float(pose.get("recent_chunk_crops_per_second"))
+                or safe_float(pose.get("effective_new_crops_per_second"))
+            ),
+            sam_rate=sam_rate,
+        )
+    )
 
     try:
         disk_usage = shutil.disk_usage(args.disk_path)
@@ -1652,6 +1766,17 @@ def build_dashboard(
             f"below the {args.minimum_free_gib:.2f} GiB reserve.",
             severity="WARNING",
         )
+    order_audit = freeze_forecast.get("remaining_order_audit", {})
+    if int(order_audit.get("dominance_inversion_count", 0) or 0) > 0:
+        first_inversion = order_audit.get("dominance_inversions", [{}])[0]
+        attention(
+            "DEADLINE_SEQUENCE_ORDER_DOMINANCE_INVERSION",
+            f"Frozen remaining order places "
+            f"{first_inversion.get('earlier_sequence', 'unknown')} before "
+            f"{first_inversion.get('later_dominating_sequence', 'unknown')}, "
+            "although the later sequence requires less work in both GPU stages.",
+            severity="WARNING",
+        )
     combined_storage = disk.get("combined_output_forecast", {})
     all_sequence_free_gib = safe_float(
         combined_storage.get("all_sequence_observed_max_free_gib")
@@ -2092,6 +2217,7 @@ def render_rich(state: dict[str, Any], console: Any | None = None) -> Any:
     export = state["export"]
     forecast = deadline.get("freeze_forecast", {})
     adjusted_forecast = forecast.get("empirical_p90_adjusted", {})
+    order_audit = forecast.get("remaining_order_audit", {})
     checkpoint = export.get("durable_checkpoint", {})
     checkpoint_follower = state.get("predeadline_checkpoint_follower", {})
     checkpoint_watchdog = state.get(
@@ -2115,7 +2241,8 @@ def render_rich(state: dict[str, Any], console: Any | None = None) -> Any:
         f"{forecast.get('estimated_completed_sequences_by_deadline', '-')}/"
         f"{forecast.get('total_sequences', '-')} | p90-adjusted "
         f"{adjusted_forecast.get('estimated_completed_sequences_by_deadline', '-')}/"
-        f"{adjusted_forecast.get('total_sequences', '-')}",
+        f"{adjusted_forecast.get('total_sequences', '-')} | order "
+        f"{order_audit.get('status', 'UNKNOWN')}",
     )
     gpu = state["gpu"]
     disk = state["disk"]
