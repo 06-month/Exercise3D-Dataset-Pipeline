@@ -63,7 +63,8 @@
   lock을 staging mutation 전에 취득한다.
 - dashboard monitor: `tools/monitor_autonomous_generation.py`; atomic state는
   `.runtime/dashboard_state.json`. Quiet daemon PID 1883591이며 `--once`는 snapshot,
-  기본은 Rich live, `--quiet`는 state-only daemon이다.
+  기본은 Rich live, `--quiet`는 state-only daemon이다. Export section은 final deadline
+  build progress와 contract-v2 best durable checkpoint progress를 별도로 보존한다.
 - Phase 11 CPU follower PID 1819560: complete body-fit/Mode-C dependency만 감지해 quality를
   atomic materialize/validate한다. Final exporter와 동일 sequence validation도 미리 수행해
   `freeze-ready`를 출력한다. State는 `.runtime/quality_follower_state.json`; 2026-08-12 10:46 KST

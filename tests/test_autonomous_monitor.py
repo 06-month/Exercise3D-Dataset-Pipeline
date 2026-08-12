@@ -1,5 +1,7 @@
 import argparse
+import csv
 import json
+import os
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -48,6 +50,55 @@ class AutonomousMonitorTest(unittest.TestCase):
             self.assertEqual(progress["latest_materialized_build_id"], "streaming-smoke")
             self.assertEqual(progress["completed_sequences"], 0)
             self.assertFalse(progress["freeze_eligible"])
+            self.assertEqual(
+                progress["durable_checkpoint"]["status"], "NOT_AVAILABLE"
+            )
+
+    def test_export_progress_selects_largest_contract_v2_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+
+            def write_build(name: str, sequences: list[str], modified: float) -> None:
+                build = root / name
+                build.mkdir()
+                rows = [{"sequence": sequence, "status": "REVIEW"} for sequence in sequences]
+                with (build / "sequence_status.csv").open(
+                    "w", newline="", encoding="utf-8"
+                ) as handle:
+                    writer = csv.DictWriter(handle, fieldnames=["sequence", "status"])
+                    writer.writeheader()
+                    writer.writerows(rows)
+                atomic_json(
+                    build / "dataset_manifest.json",
+                    {
+                        "freeze_contract_version": 2,
+                        "requested_sequences": sequences,
+                        "sequence_count": len(sequences),
+                        "pass_count": 0,
+                        "review_count": len(sequences),
+                        "fail_count": 0,
+                        "incomplete_count": 0,
+                        "private_dataset": True,
+                        "source_rgb_included": False,
+                        "source_payload_modified": False,
+                        "freeze_eligible": True,
+                        "file_count": 10 * len(sequences),
+                        "total_payload_bytes": 100 * len(sequences),
+                    },
+                )
+                os.utime(build / "dataset_manifest.json", (modified, modified))
+
+            write_build("larger-older", ["one", "two", "three"], 1.0)
+            write_build("smaller-newer", ["one"], 2.0)
+            progress = export_progress(root, "deadline-build")
+            self.assertEqual(progress["status"], "NOT_STARTED")
+            self.assertEqual(progress["completed_sequences"], 0)
+            checkpoint = progress["durable_checkpoint"]
+            self.assertEqual(checkpoint["build_id"], "larger-older")
+            self.assertEqual(checkpoint["completed_sequences"], 3)
+            self.assertEqual(checkpoint["status_counts"]["REVIEW"], 3)
+            self.assertTrue(checkpoint["manifest_contract_consistent"])
+            self.assertEqual(progress["latest_materialized_build_id"], "smaller-newer")
 
     def test_triangulation_quality_status_is_classified(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

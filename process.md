@@ -236,6 +236,11 @@
 - 동일 build ID를 재호출해 `IMMUTABLE_BUILD_REUSED`와 366-file/344,922,733-byte
   전수 재검증을 확인했다. 남은 sequence generation과 deadline point-in-time snapshot은
   기존 autonomous process에서 계속한다.
+- 기존 dashboard는 target deadline build이 아직 없으면 `Export 0 sequences`만 표시해,
+  이미 보존된 11-sequence checkpoint를 `latest_materialized_build_id`로만 간접 노출했다.
+- Export state에 `durable_checkpoint`를 별도 추가했다. Contract v2 requested/status count/privacy
+  consistency와 FAIL/INCOMPLETE 0, freeze eligible를 확인한 build 중 completed sequence 수가 가장
+  큰 build를 선택하며, final deadline progress 0과 checkpoint 11을 섞지 않고 모두 표시한다.
 
 ### Source-of-truth 재검증
 

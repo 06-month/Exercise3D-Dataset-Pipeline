@@ -36,6 +36,8 @@ watchdog은 exact persisted command identity와 연속 process absence를 확인
 자동 recovery를 수행합니다.
 Freeze copy는 source symlink를 거부하고 single open descriptor의 inode/size/time identity를
 hash·copy 전후로 검증하며, file과 final directory rename을 fsync한 뒤만 publish합니다.
+Dashboard의 export state는 final deadline build progress와 이미 보존된 best durable checkpoint를
+별도 field로 표시하여, deadline build이 아직 0이라도 유효한 checkpoint sequence를 숨기지 않습니다.
 
 ## 프로젝트 목표
 

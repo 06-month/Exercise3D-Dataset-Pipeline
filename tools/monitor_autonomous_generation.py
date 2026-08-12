@@ -276,6 +276,65 @@ def export_progress(root: Path, target_build_id: str | None = None) -> dict[str,
         except OSError:
             continue
         builds.append((modified, manifest_path.parent, manifest, rows))
+    empty_counts = status_counts([])
+    checkpoint: dict[str, Any] = {
+        "status": "NOT_AVAILABLE",
+        "build_id": None,
+        "completed_sequences": 0,
+        "status_counts": empty_counts,
+        "freeze_eligible": False,
+        "file_count": 0,
+        "total_payload_bytes": 0,
+        "created_at_utc": None,
+        "manifest_contract_consistent": False,
+    }
+    checkpoint_candidates = []
+    for modified, directory, manifest, rows in builds:
+        counts = status_counts(row.get("status") for row in rows)
+        requested = manifest.get("requested_sequences")
+        row_sequences = [row.get("sequence") for row in rows]
+        completed = counts["PASS"] + counts["REVIEW"]
+        consistent = bool(
+            manifest.get("freeze_contract_version") == 2
+            and isinstance(requested, list)
+            and requested == row_sequences
+            and len(requested) == int(manifest.get("sequence_count", -1))
+            and counts["PASS"] == int(manifest.get("pass_count", -1))
+            and counts["REVIEW"] == int(manifest.get("review_count", -1))
+            and counts["FAIL"] == int(manifest.get("fail_count", -1))
+            and counts["INCOMPLETE"] == int(manifest.get("incomplete_count", -1))
+            and bool(manifest.get("private_dataset"))
+            and not bool(manifest.get("source_rgb_included", True))
+            and not bool(manifest.get("source_payload_modified", True))
+        )
+        if (
+            consistent
+            and completed > 0
+            and counts["FAIL"] == 0
+            and counts["INCOMPLETE"] == 0
+            and bool(manifest.get("freeze_eligible"))
+        ):
+            checkpoint_candidates.append(
+                (completed, modified, directory, manifest, counts)
+            )
+    if checkpoint_candidates:
+        completed, _, directory, manifest, counts = max(
+            checkpoint_candidates, key=lambda row: (row[0], row[1])
+        )
+        checkpoint = {
+            "status": "AVAILABLE",
+            "build_id": directory.name,
+            "completed_sequences": completed,
+            "status_counts": counts,
+            "freeze_eligible": True,
+            "file_count": int(manifest.get("file_count", 0) or 0),
+            "total_payload_bytes": int(
+                manifest.get("total_payload_bytes", 0) or 0
+            ),
+            "created_at_utc": manifest.get("created_at_utc"),
+            "manifest_contract_consistent": True,
+        }
+
     if not builds or (
         target_build_id
         and not (root / target_build_id / "dataset_manifest.json").is_file()
@@ -287,8 +346,9 @@ def export_progress(root: Path, target_build_id: str | None = None) -> dict[str,
             "latest_build_id": target_build_id,
             "latest_materialized_build_id": latest_materialized,
             "completed_sequences": 0,
-            "status_counts": status_counts([]),
+            "status_counts": empty_counts,
             "freeze_eligible": False,
+            "durable_checkpoint": checkpoint,
         }
     selected = (
         next(row for row in builds if row[1].name == target_build_id)
@@ -305,6 +365,7 @@ def export_progress(root: Path, target_build_id: str | None = None) -> dict[str,
         "completed_sequences": counts["PASS"] + counts["REVIEW"],
         "status_counts": counts,
         "freeze_eligible": bool(manifest.get("freeze_eligible", False)),
+        "durable_checkpoint": checkpoint,
     }
 
 
@@ -567,6 +628,9 @@ def build_dashboard(
         "body_fit_sequences": int(body_source.get("count", 0)),
         "quality_sequences": int(quality["completed_sequences"]),
         "export_sequences": int(export["completed_sequences"]),
+        "checkpoint_sequences": int(
+            export.get("durable_checkpoint", {}).get("completed_sequences", 0)
+        ),
     }
     signature = hashlib.sha256(
         json.dumps(counters, sort_keys=True).encode("utf-8")
@@ -1075,12 +1139,16 @@ def render_rich(state: dict[str, Any], console: Any | None = None) -> Any:
             ),
         )
     export = state["export"]
+    checkpoint = export.get("durable_checkpoint", {})
     table.add_row(
         "Export / freeze",
-        f"{export['completed_sequences']} sequences",
+        f"deadline {export['completed_sequences']} | "
+        f"checkpoint {checkpoint.get('completed_sequences', 0)} sequences",
         export["latest_build_id"] or "-",
         "-",
-        f"{export['deadline_snapshot_status']} | freeze={export['freeze_eligible']}",
+        f"{export['deadline_snapshot_status']} | "
+        f"checkpoint={checkpoint.get('build_id') or '-'} "
+        f"freeze={checkpoint.get('freeze_eligible', False)}",
     )
     gpu = state["gpu"]
     disk = state["disk"]
