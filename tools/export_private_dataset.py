@@ -37,7 +37,7 @@ except ModuleNotFoundError:
 CAMERAS = ("cam1", "cam2", "cam3")
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEADLINE_BOUNDARY_POLICY = (
-    "terminal body-fit and Mode-C marker mtimes must not exceed cutoff; "
+    "terminal body-fit and Mode-C marker mtimes and source ctimes must not exceed cutoff; "
     "post-cutoff sequences remain INCOMPLETE"
 )
 
@@ -336,10 +336,11 @@ def deadline_eligibility(
     bool,
     list[str],
     dict[str, str],
+    dict[str, str],
     dict[str, tuple[int, int, int, int, int]],
 ]:
     if cutoff is None:
-        return True, [], {}, {}
+        return True, [], {}, {}, {}
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     delta = cutoff - epoch
     cutoff_ns = (
@@ -348,6 +349,7 @@ def deadline_eligibility(
     )
     reasons: list[str] = []
     marker_mtimes: dict[str, str] = {}
+    marker_ctimes: dict[str, str] = {}
     marker_identities: dict[str, tuple[int, int, int, int, int]] = {}
     for label, path in deadline_terminal_markers(args, sequence).items():
         try:
@@ -361,7 +363,11 @@ def deadline_eligibility(
         modified = datetime.fromtimestamp(
             stat.st_mtime_ns / 1_000_000_000, tz=timezone.utc
         )
+        changed = datetime.fromtimestamp(
+            stat.st_ctime_ns / 1_000_000_000, tz=timezone.utc
+        )
         marker_mtimes[label] = modified.isoformat()
+        marker_ctimes[label] = changed.isoformat()
         marker_identities[label] = (
             stat.st_dev,
             stat.st_ino,
@@ -371,7 +377,9 @@ def deadline_eligibility(
         )
         if stat.st_mtime_ns > cutoff_ns:
             reasons.append(f"deadline_after_cutoff:{label}")
-    return not reasons, reasons, marker_mtimes, marker_identities
+        if stat.st_ctime_ns > cutoff_ns:
+            reasons.append(f"deadline_identity_after_cutoff:{label}")
+    return not reasons, reasons, marker_mtimes, marker_ctimes, marker_identities
 
 
 def verify_deadline_marker_mtimes(
@@ -393,6 +401,28 @@ def verify_deadline_marker_mtimes(
             continue
         if modified > cutoff:
             errors.append(f"deadline_terminal_marker_after_cutoff:{label}")
+    return errors
+
+
+def verify_deadline_marker_ctimes(
+    sequence_metadata: dict[str, Any], cutoff: datetime
+) -> list[str]:
+    validation = sequence_metadata.get("validation", {})
+    values = validation.get("deadline_terminal_marker_ctimes", {})
+    expected = set(deadline_terminal_markers_from_labels())
+    if not isinstance(values, dict) or set(values) != expected:
+        return ["deadline_terminal_marker_ctime_set_invalid"]
+    errors: list[str] = []
+    for label in sorted(expected):
+        try:
+            changed = parse_utc_datetime(
+                values[label], f"deadline terminal marker ctime {label}"
+            )
+        except RuntimeError:
+            errors.append(f"deadline_terminal_marker_ctime_invalid:{label}")
+            continue
+        if changed > cutoff:
+            errors.append(f"deadline_terminal_marker_ctime_after_cutoff:{label}")
     return errors
 
 
@@ -747,6 +777,12 @@ def verify_frozen_build(
             errors.extend(
                 f"{error}:{sequence}"
                 for error in verify_deadline_marker_mtimes(
+                    metadata, manifest_cutoff
+                )
+            )
+            errors.extend(
+                f"{error}:{sequence}"
+                for error in verify_deadline_marker_ctimes(
                     metadata, manifest_cutoff
                 )
             )
@@ -1223,6 +1259,7 @@ def main() -> int:
             deadline_eligible,
             deadline_reasons,
             marker_mtimes,
+            marker_ctimes,
             marker_identities,
         ) = deadline_eligibility(args, sequence, deadline_cutoff)
         if not deadline_eligible:
@@ -1230,6 +1267,7 @@ def main() -> int:
                 "status": "INCOMPLETE",
                 "reasons": deadline_reasons,
                 "deadline_terminal_marker_mtimes": marker_mtimes,
+                "deadline_terminal_marker_ctimes": marker_ctimes,
             }
             row = {
                 "sequence": sequence,
@@ -1264,6 +1302,7 @@ def main() -> int:
             )
         validation = validate_sequence(args, sequence)
         validation["deadline_terminal_marker_mtimes"] = marker_mtimes
+        validation["deadline_terminal_marker_ctimes"] = marker_ctimes
         row = {
             "sequence": sequence,
             "status": validation["status"],

@@ -559,6 +559,20 @@
 - Sapiens PID 373049, autonomous supervisor PID 1701200, SAM policy/follower/checkpoint output에는
   signal·restart·duplicate launch가 없었다. 남은 attention은 기존 deadline ETA/coverage warning 두 건뿐이다.
 
+### Deadline marker ctime cutoff attestation
+
+- Terminal marker mtime과 eligibility→copy identity는 결합됐지만, deadline 후 파일을 교체한 뒤 mtime만
+  cutoff 이전으로 backdate하면 다음 retry eligibility가 새 파일을 받아들일 수 있었다. Linux source
+  ctime은 일반 caller가 과거로 설정할 수 없으므로 이를 point-in-time boundary의 추가 evidence로 사용한다.
+- `deadline_eligibility`는 body fit NPZ/metadata와 Mode-C assessment의 source ctime도 cutoff 이하인지
+  검사한다. 초과하면 `deadline_identity_after_cutoff:<marker>`로 sequence를 INCOMPLETE 처리한다.
+  dev/inode/size/mtime/ctime identity는 기존처럼 copy descriptor exact binding에도 사용한다.
+- PASS/REVIEW sequence manifest에는 privacy-safe `deadline_terminal_marker_ctimes` timestamp map을 기록한다.
+  Verifier는 marker set exact, ISO timestamp validity, ctime ≤ cutoff를 재검사한다. dev/inode는 private
+  filesystem detail이므로 manifest에 포함하지 않는다.
+- Backdated post-cutoff source gate, ctime provenance rejection, existing mtime/identity/full contract
+  regression을 포함한 전체 135 tests가 PASS했다. Cutoff 없는 predeadline checkpoint에는 영향이 없다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화

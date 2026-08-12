@@ -37,6 +37,10 @@ Eligibility 시 세 marker의 descriptor identity(dev/inode/size/mtime/ctime)를
 뒤 copy source identity가 달라지면 `freeze source changed since deadline eligibility`로 publish를
 중단하고 sentinel retry로 넘긴다. 따라서 cutoff 판정 뒤 post-deadline replacement가 snapshot에
 섞이는 TOCTOU를 허용하지 않는다.
+각 source ctime도 cutoff 이하이어야 하며 sequence manifest의
+`deadline_terminal_marker_ctimes`에 timestamp로 남겨 verifier가 exact marker set과 cutoff를 재검사한다.
+따라서 post-cutoff replacement를 과거 mtime으로 backdate해도 filesystem ctime으로 INCOMPLETE 처리한다.
+dev/inode는 runtime identity 결합에만 사용하고 manifest에는 노출하지 않는다.
 Long-lived deadline sentinel은 process 시작 시 로드한 sentinel/exporter tool SHA-256을 runtime state에
 고정한다. Dashboard는 현재 on-disk tool SHA와 비교해 mismatch/missing이면
 `DEADLINE_SENTINEL_CODE_DRIFT`를 보고한다. 단순 argv identity만으로 long-lived Python process의

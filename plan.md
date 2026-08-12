@@ -44,7 +44,8 @@
   manifest creation time이 cutoff 이상이며 sentinel exact cutoff와 일치해야 함; existing final build는
   검증 후 reuse만 허용; terminal marker eligibility identity를 copy descriptor와 exact bind해
   cutoff 판정 이후 source replacement를 retryable failure로 거부; sentinel 시작 시 loaded
-  sentinel/exporter SHA를 state에 고정하고 current tool SHA drift를 dashboard attention 처리
+  sentinel/exporter SHA를 state에 고정하고 current tool SHA drift를 dashboard attention 처리;
+  source ctime도 cutoff 이하로 강제하고 timestamp provenance를 verifier가 재검사해 mtime backdating 차단
 - first end-to-end gate: `barbellrow_0000` Mode B 1,770/1,770, body fit 590×26,
   export checksum/schema PASS; camera/displacement uncertainty를 숨기지 않고 sequence REVIEW 유지
 - second end-to-end gate: `squat_0001` Mode B 3,801/3,801, body fit 1,267×26,

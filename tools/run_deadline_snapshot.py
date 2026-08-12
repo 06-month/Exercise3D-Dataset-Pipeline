@@ -16,9 +16,12 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 try:
-    from tools.export_private_dataset import verify_frozen_build
+    from tools.export_private_dataset import (
+        DEADLINE_BOUNDARY_POLICY,
+        verify_frozen_build,
+    )
 except ModuleNotFoundError:
-    from export_private_dataset import verify_frozen_build
+    from export_private_dataset import DEADLINE_BOUNDARY_POLICY, verify_frozen_build
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -172,10 +175,7 @@ def deadline_state_base(
         "deadline_utc": deadline.isoformat(),
         "build_id": args.build_id,
         "implementation": dict(LOADED_IMPLEMENTATION),
-        "point_in_time_policy": (
-            "terminal body-fit and Mode-C marker mtimes must not exceed deadline; "
-            "post-deadline sequences remain INCOMPLETE"
-        ),
+        "point_in_time_policy": DEADLINE_BOUNDARY_POLICY,
     }
 
 

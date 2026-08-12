@@ -30,12 +30,12 @@
   resume command digest가 exact-match하며 restart 0, attention false다. 3회 연속 absence +
   2초 final rescan 후에만 최대 3회/시간 내에서 detached resume하고 live process는
   절대 signal하지 않는다. Exact watchdog PID와 command은 runtime/dashboard state가 source of truth다.
-- 2026-08-12 13:19 KST dashboard snapshot: `benchpress_0001` Mode B/body fit/Mode C/quality/freeze-ready와
+- 2026-08-12 13:38 KST dashboard snapshot: `benchpress_0001` Mode B/body fit/Mode C/quality/freeze-ready와
   12-sequence immutable checkpoint가 완료됐고 supervisor는 다음 3-view pose dependency를
   `WAIT_RUNNING_SAPIENS2`로 대기 중
-- Sapiens durable 37/78 camera, current partial 포함 24,391/65,430 crop; PID 373049 alive,
+- Sapiens durable 37/78 camera, current partial 포함 24,647/65,430 crop; PID 373049 alive,
   current `benchpress_0002/cam2`
-- Sapiens recent-completed-camera throughput 0.216 crop/s; projected ETA는 deadline 약 5시간 04분 후 risk.
+- Sapiens recent-completed-camera throughput 0.217 crop/s; projected ETA는 deadline 약 4시간 45분 후 risk.
   이전 snapshot들보다 악화돼 `DEADLINE_ETA_WORSENED` warning을 기록했지만
   OOM/retry/stall은 없음
 - SAM durable 36/78 camera, 23,460/65,595 frame, 12/26 full sequence; aggregate 0.584 frame/s.
@@ -63,6 +63,8 @@
   sentinel을 재시작하지 않아도 deadline export subprocess가 이 code를 load한다. Cutoff eligibility에서
   terminal marker 3개의 dev/inode/size/mtime/ctime identity를 고정해 validation 이후 copy descriptor와
   exact-match하지 않으면 publish를 중단하고 retry하므로 post-cutoff replacement가 섞이지 않는다.
+  Source ctime 자체도 cutoff 이하이어야 하고 privacy-safe timestamp를 sequence manifest에 남겨 verifier가
+  재검사하므로 post-cutoff replacement의 mtime backdating도 `INCOMPLETE`로 보존한다.
   GPU inference/supervisor는 건드리지 않았다.
 - deadline sentinel watchdog PID 1882820: live/persisted command digest exact-match,
   loaded-code activation recovery 1회, 현재 missing 0/attention false. State는
@@ -260,11 +262,11 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Runtime estimates
 
-- 2026-08-12 13:19 KST snapshot: Sapiens recent-completed-camera rate 0.216 crop/s,
-  streaming ETA는 deadline 약 5시간 04분 후. Downstream overhead를 제외한 sequence schedule
+- 2026-08-12 13:38 KST snapshot: Sapiens recent-completed-camera rate 0.217 crop/s,
+  streaming ETA는 deadline 약 4시간 45분 후. Downstream overhead를 제외한 sequence schedule
   upper bound와 empirical p90-adjusted estimate는 deadline까지 24/26이며 `deadlift_0002`가
   첫 projected late sequence
-- deadline margin: Sapiens 전량 기준 약 -5.07 h; 대신 Mode B complete sequence와
+- deadline margin: Sapiens 전량 기준 약 -4.75 h; 대신 Mode B complete sequence와
   deadline snapshot을 내구적으로 확보
 - concurrent SAM Mode B aggregate 19,455 frame/33,159.28초 = 0.58671 frame/s;
   standalone expected 20.80 h projection은
@@ -291,4 +293,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-12 13:36 KST
+- 2026-08-12 13:38 KST
