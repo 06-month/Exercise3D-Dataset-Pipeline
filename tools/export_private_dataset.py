@@ -14,6 +14,7 @@ import csv
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -112,11 +113,116 @@ def validate_path_component(value: str, label: str) -> None:
         raise RuntimeError(f"{label} must be one non-empty path component")
 
 
+def validate_staging_root(staging_root: Path, expected_build_id: str) -> Path:
+    """Resolve only the dedicated hidden staging directory for one build id."""
+    validate_path_component(expected_build_id, "build id")
+    if staging_root.name != f".{expected_build_id}.inprogress":
+        raise RuntimeError("refusing to prune a path that is not the expected staging root")
+    if staging_root.is_symlink():
+        raise RuntimeError("staging root must not be a symlink")
+    root = staging_root.resolve()
+    if root == root.parent or root.parent == Path(root.anchor):
+        raise RuntimeError("refusing broad staging root")
+    if root.exists() and root.is_mount():
+        raise RuntimeError("staging root must not be a mount point")
+    return root
+
+
+def remove_staging_symlinks(
+    staging_root: Path, expected_build_id: str
+) -> list[str]:
+    """Remove nested symlinks before resumable copies can traverse stale paths."""
+    root = validate_staging_root(staging_root, expected_build_id)
+    if not root.exists():
+        return []
+    if not root.is_dir():
+        raise RuntimeError("staging root exists and is not a directory")
+    removed: list[str] = []
+    for directory, directories, files in os.walk(root, topdown=True, followlinks=False):
+        base = Path(directory)
+        for name in list(directories):
+            path = base / name
+            if path.is_mount():
+                raise RuntimeError(f"nested mount point in staging root: {path}")
+            if path.is_symlink():
+                removed.append(path.relative_to(root).as_posix())
+                path.unlink()
+                directories.remove(name)
+        for name in files:
+            path = base / name
+            if path.is_symlink():
+                removed.append(path.relative_to(root).as_posix())
+                path.unlink()
+    return sorted(removed)
+
+
+def prune_staging_tree(
+    staging_root: Path,
+    expected_build_id: str,
+    expected_files: set[str],
+) -> list[str]:
+    """Delete only unlisted artifacts inside a validated resumable staging root."""
+    root = validate_staging_root(staging_root, expected_build_id)
+    if not root.is_dir():
+        raise RuntimeError("staging root does not exist or is not a directory")
+    normalized: set[str] = set()
+    for value in expected_files:
+        relative = PurePosixPath(value)
+        if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+            raise RuntimeError(f"unsafe expected staging path: {value}")
+        normalized.add(relative.as_posix())
+
+    for directory, directories, _ in os.walk(root, topdown=True, followlinks=False):
+        base = Path(directory)
+        for name in list(directories):
+            path = base / name
+            if path.is_mount():
+                raise RuntimeError(f"nested mount point in staging root: {path}")
+            if path.is_symlink():
+                directories.remove(name)
+
+    removed: list[str] = []
+    for directory, directories, files in os.walk(root, topdown=False, followlinks=False):
+        base = Path(directory)
+        for name in files:
+            path = base / name
+            relative = path.relative_to(root).as_posix()
+            if path.is_symlink() or relative not in normalized:
+                path.unlink()
+                removed.append(relative)
+        for name in directories:
+            path = base / name
+            relative = path.relative_to(root).as_posix()
+            if path.is_mount():
+                raise RuntimeError(f"nested mount point in staging root: {path}")
+            if path.is_symlink():
+                path.unlink()
+                removed.append(relative)
+                continue
+            try:
+                path.rmdir()
+            except OSError:
+                pass
+    return sorted(removed)
+
+
 def verify_frozen_build(
     build_root: Path, expected_build_id: str | None = None
 ) -> dict[str, Any]:
     """Verify a published/staged build without mutating it."""
+    if build_root.is_symlink():
+        return {
+            "valid": False,
+            "errors": ["build_root_symlink"],
+            "manifest": None,
+        }
     root = build_root.resolve()
+    if root.exists() and root.is_mount():
+        return {
+            "valid": False,
+            "errors": ["build_root_mount_point"],
+            "manifest": None,
+        }
     errors: list[str] = []
     manifest = read_json(root / "dataset_manifest.json")
     if manifest is None:
@@ -129,12 +235,26 @@ def verify_frozen_build(
         errors.append("source_rgb_policy_invalid")
     if manifest.get("source_payload_modified") is not False:
         errors.append("source_mutation_policy_invalid")
+    commit = manifest.get("git_commit")
+    if commit is not None and not re.fullmatch(r"[0-9a-f]{40,64}", str(commit)):
+        errors.append("git_commit_invalid")
+    if (
+        "git_worktree_dirty" in manifest
+        and not isinstance(manifest.get("git_worktree_dirty"), bool)
+    ):
+        errors.append("git_worktree_dirty_invalid")
+    for key in ("git_status_sha256", "git_diff_sha256"):
+        if key in manifest and not re.fullmatch(
+            r"[0-9a-f]{64}", str(manifest.get(key))
+        ):
+            errors.append(f"{key}_invalid")
 
     records = manifest.get("files")
     if not isinstance(records, list):
         records = []
         errors.append("files_manifest_invalid")
     listed_paths: set[str] = set()
+    manifest_records: dict[str, dict[str, Any]] = {}
     verified_bytes = 0
     for index, record in enumerate(records):
         if not isinstance(record, dict):
@@ -153,6 +273,7 @@ def verify_frozen_build(
             errors.append(f"duplicate_file_path:{normalized}")
             continue
         listed_paths.add(normalized)
+        manifest_records[normalized] = record
         path = root.joinpath(*relative.parts)
         if path.is_symlink() or not path.is_file():
             errors.append(f"missing_or_symlink:{normalized}")
@@ -171,6 +292,31 @@ def verify_frozen_build(
             errors.append(f"sha256_mismatch:{normalized}")
             continue
         verified_bytes += actual_bytes
+
+    allowed_tree_files = listed_paths | {"dataset_manifest.json", "sequence_status.csv"}
+    actual_tree_files: set[str] = set()
+    for directory, directories, files in os.walk(root, topdown=True, followlinks=False):
+        base = Path(directory)
+        for name in list(directories):
+            path = base / name
+            if path.is_mount():
+                relative = path.relative_to(root).as_posix()
+                errors.append(f"unexpected_mount_point:{relative}")
+                directories.remove(name)
+                continue
+            if path.is_symlink():
+                relative = path.relative_to(root).as_posix()
+                errors.append(f"unexpected_symlink:{relative}")
+                directories.remove(name)
+        for name in files:
+            path = base / name
+            relative = path.relative_to(root).as_posix()
+            if path.is_symlink():
+                errors.append(f"unexpected_symlink:{relative}")
+            else:
+                actual_tree_files.add(relative)
+    for relative in sorted(actual_tree_files - allowed_tree_files):
+        errors.append(f"unlisted_file:{relative}")
 
     try:
         expected_file_count = int(manifest.get("file_count"))
@@ -216,6 +362,25 @@ def verify_frozen_build(
     )
     if manifest.get("freeze_eligible") is not freeze_eligible:
         errors.append("freeze_eligible_mismatch")
+    status_by_sequence = {
+        sequence: status for sequence, status in zip(sequence_ids, statuses)
+    }
+    for path, record in manifest_records.items():
+        sequence = str(record.get("sequence", ""))
+        path_sequence = (
+            path.split("/", 2)[1]
+            if path.startswith("sequences/") and len(path.split("/", 2)) >= 3
+            else ""
+        )
+        if sequence:
+            if sequence not in status_by_sequence:
+                errors.append(f"file_sequence_unknown:{path}")
+            elif status_by_sequence[sequence] not in {"PASS", "REVIEW"}:
+                errors.append(f"file_for_noncomplete_sequence:{path}")
+            if path_sequence != sequence:
+                errors.append(f"file_sequence_path_mismatch:{path}")
+        elif path_sequence:
+            errors.append(f"file_sequence_owner_missing:{path}")
     for row in status_rows:
         if row.get("status") not in {"PASS", "REVIEW"}:
             continue
@@ -225,8 +390,42 @@ def verify_frozen_build(
             errors.append(f"sequence_manifest_unlisted:{sequence}")
             continue
         metadata = read_json(root / sequence_manifest)
-        if metadata is None or metadata.get("status") != row.get("status"):
+        if (
+            metadata is None
+            or metadata.get("sequence") != sequence
+            or metadata.get("status") != row.get("status")
+        ):
             errors.append(f"sequence_manifest_status_mismatch:{sequence}")
+            continue
+        declared_files = metadata.get("files")
+        if not isinstance(declared_files, list):
+            errors.append(f"sequence_manifest_files_invalid:{sequence}")
+            continue
+        declared_paths: set[str] = set()
+        for index, declared in enumerate(declared_files):
+            if not isinstance(declared, dict) or not isinstance(declared.get("path"), str):
+                errors.append(f"sequence_file_record_invalid:{sequence}:{index}")
+                continue
+            path = str(declared["path"])
+            if path in declared_paths:
+                errors.append(f"sequence_file_duplicate:{sequence}:{path}")
+                continue
+            declared_paths.add(path)
+            global_record = manifest_records.get(path)
+            if global_record is None:
+                errors.append(f"sequence_file_unlisted:{sequence}:{path}")
+                continue
+            for key in ("sequence", "bytes", "sha256"):
+                if declared.get(key) != global_record.get(key):
+                    errors.append(f"sequence_file_identity_mismatch:{sequence}:{path}:{key}")
+        expected_sequence_paths = {
+            path
+            for path, record in manifest_records.items()
+            if str(record.get("sequence", "")) == sequence
+            and path != sequence_manifest
+        }
+        if declared_paths != expected_sequence_paths:
+            errors.append(f"sequence_file_set_mismatch:{sequence}")
     return {
         "valid": not errors,
         "errors": errors,
@@ -456,14 +655,38 @@ def validate_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]
     }
 
 
-def git_commit() -> str | None:
-    process = subprocess.run(
+def git_provenance() -> dict[str, Any]:
+    head = subprocess.run(
         ["git", "rev-parse", "HEAD"],
+        cwd=PROJECT_ROOT,
         text=True,
         capture_output=True,
         check=False,
     )
-    return process.stdout.strip() if process.returncode == 0 else None
+    status = subprocess.run(
+        ["git", "status", "--porcelain=v1", "--untracked-files=normal", "-z"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        check=False,
+    )
+    diff = subprocess.run(
+        ["git", "diff", "--binary", "HEAD"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        check=False,
+    )
+    status_bytes = status.stdout if status.returncode == 0 else b""
+    diff_bytes = diff.stdout if diff.returncode == 0 else b""
+    return {
+        "git_commit": head.stdout.strip() if head.returncode == 0 else None,
+        "git_worktree_dirty": bool(status_bytes) if status.returncode == 0 else None,
+        "git_status_sha256": (
+            hashlib.sha256(status_bytes).hexdigest() if status.returncode == 0 else None
+        ),
+        "git_diff_sha256": (
+            hashlib.sha256(diff_bytes).hexdigest() if diff.returncode == 0 else None
+        ),
+    }
 
 
 def main() -> int:
@@ -506,6 +729,18 @@ def main() -> int:
     build_root = output_root / f".{args.build_id}.inprogress"
     if build_root.exists() and not build_root.is_dir():
         raise RuntimeError("staging build output exists and is not a directory")
+    removed_symlinks = remove_staging_symlinks(build_root, args.build_id)
+    if removed_symlinks:
+        print(
+            json.dumps(
+                {
+                    "build_id": args.build_id,
+                    "status": "STAGING_SYMLINKS_REMOVED",
+                    "removed_count": len(removed_symlinks),
+                }
+            ),
+            flush=True,
+        )
     provenance_sources = {
         "provenance/source_inventory.json": args.dataset_root.resolve()
         / "reports"
@@ -610,7 +845,7 @@ def main() -> int:
         "schema_version": 1,
         "build_id": args.build_id,
         "created_at_utc": utc_now(),
-        "git_commit": git_commit(),
+        **git_provenance(),
         "private_dataset": True,
         "not_ground_truth": True,
         "declared_subject_count": 3,
@@ -633,6 +868,27 @@ def main() -> int:
         build_root / "dataset_manifest.json",
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
     )
+    expected_tree_files = {
+        "dataset_manifest.json",
+        "sequence_status.csv",
+        *(str(row["path"]) for row in file_manifest),
+    }
+    removed_stale = prune_staging_tree(
+        build_root,
+        args.build_id,
+        expected_tree_files,
+    )
+    if removed_stale:
+        print(
+            json.dumps(
+                {
+                    "build_id": args.build_id,
+                    "status": "STALE_STAGING_ARTIFACTS_REMOVED",
+                    "removed_count": len(removed_stale),
+                }
+            ),
+            flush=True,
+        )
     publish_staged_build(build_root, final_root, args.build_id)
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
     return 0 if manifest["freeze_eligible"] else 2

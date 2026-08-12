@@ -75,6 +75,20 @@
 - Dashboard는 body-fit→quality lag에서 follower 사망과 follower `ATTENTION` failure reason을 자동 승격한다.
 - Follower wait/build/retry, dashboard death/stale/failure 계약을 포함한 전체 69개 unit test가 PASS했다.
 
+### Deadline freeze exact-tree hardening
+
+- Resumable hidden staging에서 이전 crash temp나 이전에 complete였다가 현재 incomplete로 분류된
+  sequence payload가 남아도 기존 verifier가 manifest-listed file만 검사해 final root에 포함할 수
+  있는 공백을 확인했다.
+- Exporter는 exact `.<build_id>.inprogress` root에서만 unlisted artifact를 prune하며, nested symlink은
+  copy 전에 제거하고 mount point는 거부한다. Source/final build은 삭제하지 않는다.
+- Verifier는 actual tree와 manifest tree, sequence status↔file owner, per-sequence↔global file record의
+  path/byte/SHA를 exact-match한다. INCOMPLETE/FAIL sequence에 payload가 있으면 publish를 거부한다.
+- Git HEAD만 기록하던 provenance를 dirty flag/status hash/tracked diff hash로 보강했다. Hash만
+  저장하며 diff text/private path는 manifest에 포함하지 않는다.
+- 기존 immutable smoke를 강화 verifier로 read-only 재검증해 34 files/28,960,929 bytes,
+  error 0을 확인했다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화

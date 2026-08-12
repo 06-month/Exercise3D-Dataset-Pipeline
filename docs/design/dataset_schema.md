@@ -8,6 +8,12 @@ Build는 `<output>/.<build_id>.inprogress`에서 camera/sequence payload checksu
 flag를 전수 검증한 뒤에만 directory rename으로 `<output>/<build_id>`를 한 번에 publish한다.
 최종 manifest가 존재하는 build ID는 immutable하며, 재실행은 전수 integrity PASS일 때 read-only
 reuse만 허용한다. Corrupt/불일치 final build를 같은 ID로 덮어쓰지 않는다.
+Resume staging에 이전 시도의 temp/unlisted payload가 남아 있으면 final manifest tree에 없는
+파일만 정확한 hidden staging root 안에서 제거한다. Nested symlink/mount traversal은 허용하지
+않으며, publish verifier는 actual regular-file tree가 manifest + 두 root metadata file과 exact-match인지
+검증한다. PASS/REVIEW sequence의 local manifest file set과 global manifest ownership도 서로 일치해야 한다.
+Build provenance는 Git commit 뿐 아니라 worktree dirty flag, status hash, tracked diff hash를 저장하며
+diff 내용이나 private path는 manifest에 노출하지 않는다.
 
 ```text
 <build_id>/

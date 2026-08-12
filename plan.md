@@ -340,6 +340,8 @@
 - Acceptance: schema validation, no private payload in Git, documented access/license/citation, reproducible build ID
 - 구현: versioned private build, byte-exact copy/SHA-256, PASS/REVIEW/FAIL/INCOMPLETE 보존과
   source inventory/frame/PTS/camera/temporal/identity/2D/3D/body provenance 검증
+- publication integrity: hidden resumable staging의 symlink/mount traversal 차단, unlisted stale payload prune,
+  actual tree↔global/sequence manifest exact-match, Git dirty/diff provenance 보존 후 atomic rename
 - first smoke: complete `barbellrow_0000`만 사용해 REVIEW 1/FAIL 0/INCOMPLETE 0,
   34 files, payload 28,960,929 bytes, SHA/size mismatch 0, freeze-eligible 확인
 - 다음 gate: downstream 연구 사용 승인
