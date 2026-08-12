@@ -30,14 +30,14 @@
   resume command digest가 exact-match하며 restart 0, attention false다. 3회 연속 absence +
   2초 final rescan 후에만 최대 3회/시간 내에서 detached resume하고 live process는
   절대 signal하지 않는다. Exact watchdog PID와 command은 runtime/dashboard state가 source of truth다.
-- 2026-08-12 11:58 KST dashboard snapshot: `latpulldown_0003` end-to-end 완료 후
-  supervisor는 `WAIT_RUNNING_SAPIENS2`; 다음 pose-ready sequence를 기다림
-- Sapiens durable 35/78 camera, current partial 포함 23,291/65,430 crop; PID 373049 alive,
-  current `benchpress_0001/cam3`
-- Sapiens recent-chunk throughput 0.228 crop/s; projected ETA는 deadline 약 2시간 15분 후 risk
+- 2026-08-12 12:08 KST dashboard snapshot: `benchpress_0001` pose 3-view 완료 후
+  supervisor는 `STREAM_SEQUENCE_PIPELINE`; 해당 sequence Mode B를 자동 실행 중
+- Sapiens durable 36/78 camera, current partial 포함 23,452/65,430 crop; PID 373049 alive,
+  current `benchpress_0002/cam1`
+- Sapiens recent-chunk throughput 0.234 crop/s; projected ETA는 deadline 약 57분 후 risk
 - SAM durable 33/78 camera, 21,441/65,595 frame, 11/26 full sequence; aggregate 0.585 frame/s;
-  current SAM child는 없으며 Sapiens GPU utilization 100%
-- GPU: A100 80GB, combined snapshot 62,693 MiB/100%; observed OOM/retry 없음
+  PID 1930239가 `benchpress_0001/cam1` Mode B 실행 중
+- GPU: A100 80GB, current combined snapshot 45,224 MiB/100%; observed OOM/retry 없음
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
 - handoff monitor PID 1917827: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
   `updated_at_utc` 증가와 exact active/resume command/stage count 보존 확인 완료
@@ -61,12 +61,14 @@
   Sentinel lifetime lock은 별도 process probe에서 held로 확인했고 exporter는 build ID별
   lock을 staging mutation 전에 취득한다.
 - dashboard monitor: `tools/monitor_autonomous_generation.py`; atomic state는
-  `.runtime/dashboard_state.json`. Quiet daemon PID 1917825이며 `--once`는 snapshot,
+  `.runtime/dashboard_state.json`. Quiet daemon PID 1932669이며 `--once`는 snapshot,
   기본은 Rich live, `--quiet`는 state-only daemon이다. Export section은 final deadline
-  build progress와 contract-v2 best durable checkpoint progress를 별도로 보존한다.
+  build progress와 contract-v2 best durable checkpoint progress를 별도로 보존한다. Selector
+  exact workload와 measured rate를 사용한 overhead-free deadline upper bound는 현재 25/26이며,
+  첫 late sequence는 `squat_0003`이다.
 - Phase 11 CPU follower PID 1819560: complete body-fit/Mode-C dependency만 감지해 quality를
   atomic materialize/validate한다. Final exporter와 동일 sequence validation도 미리 수행해
-  `freeze-ready`를 출력한다. State는 `.runtime/quality_follower_state.json`; 2026-08-12 11:58 KST
+  `freeze-ready`를 출력한다. State는 `.runtime/quality_follower_state.json`; 2026-08-12 12:08 KST
   quality 11/26 REVIEW, freeze-ready 11/26 REVIEW, failure/reason 0, remaining 15는 dependency wait.
   Exact resume command/cwd도 같은 state에 보존하며 GPU work는 하지 않는다.
 - CPU-only predeadline checkpoint follower PID 1916854: `.runtime/quality_follower_state.json`의
@@ -92,7 +94,7 @@ Public-safe Sapiens command 형태:
 ## Completed work
 
 - full selector: 65,595 frame, target 65,430, ambiguity 139, `NO_TARGET` 26, identity/integrity failure 0
-- Sapiens2 pose: complete 35 camera와 current partial 합계 23,291 accepted target crops;
+- Sapiens2 pose: complete 36 camera와 current partial 합계 23,452 accepted target crops;
   `latpulldown_0003`까지 11 sequence 3-view schema/finite PASS
 - Phase 7 final: 11 sequence schema PASS/body-fit eligible, NO_GO 0
 - concurrent Mode B 8-frame smoke: mesh/numeric/PTS schema PASS, combined peak 48,525 MiB
@@ -132,7 +134,7 @@ Public-safe Sapiens command 형태:
 
 ## Remaining work
 
-- Sapiens2: 43/78 camera, current partial 포함 42,651 target crops
+- Sapiens2: 42/78 camera, current partial 포함 41,978 target crops
 - Phase 7 이후: `latpulldown_0003` 및 이후 pose-complete sequence
 - SAM full: 33/78 camera PASS, full-complete sequence 11/26; 다음 `benchpress_0001` pose dependency 대기
 - critical path: pose-complete sequence → Phase 7 gate → Mode B → compact prior → body fit → Mode C candidate QA → export
@@ -205,9 +207,10 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Runtime estimates
 
-- 2026-08-12 11:58 KST snapshot: Sapiens recent-chunk rate 0.228 crop/s,
-  streaming ETA는 deadline 약 2시간 15분 후
-- deadline margin: Sapiens 전량 기준 약 -2.25 h; 대신 Mode B complete sequence와
+- 2026-08-12 12:08 KST snapshot: Sapiens recent-chunk rate 0.234 crop/s,
+  streaming ETA는 deadline 약 57분 후. Downstream overhead를 제외한 sequence schedule
+  upper bound는 deadline까지 25/26이며 `squat_0003`이 첫 projected late sequence
+- deadline margin: Sapiens 전량 기준 약 -0.96 h; 대신 Mode B complete sequence와
   deadline snapshot을 내구적으로 확보
 - concurrent SAM Mode B aggregate 19,455 frame/33,159.28초 = 0.58671 frame/s;
   standalone expected 20.80 h projection은
@@ -217,7 +220,8 @@ tmux new-window -n exercise3d-dashboard \
 ## Git state
 
 - branch: `agent/phase-5-1-pushup-0003-recovery`
-- latest implementation commit: autonomous predeadline checkpoint follower `711d4fd`; durable
+- latest implementation commit: deadline freeze coverage forecast `8b55df7`; autonomous
+  predeadline checkpoint follower `711d4fd`; durable
   checkpoint dashboard `80f48ab`; predeadline checkpoint manifest source commit `54a8d2c`; exact `HEAD`는
   `git rev-parse HEAD`와 local state의 `git_commit`으로 확인
 - Draft PR: #1 (`https://github.com/06-month/Exercise3D-Dataset-Pipeline/pull/1`)
@@ -226,4 +230,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-12 11:58 KST
+- 2026-08-12 12:08 KST

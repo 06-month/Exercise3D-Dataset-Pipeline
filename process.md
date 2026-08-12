@@ -290,6 +290,10 @@
   `squat_0003`, all-sequence optimistic terminal 2026-08-14 15:44 KST였다. 이 ceiling도 전량을
   충족하지 못하므로 `DEADLINE_FREEZE_COVERAGE_AT_RISK` warning을 별도로 기록한다.
 - Forecast helper/inventory/partial-SAM scheduling regression을 포함한 전체 107 tests가 PASS했다.
+- Code commit `8b55df7`를 push한 뒤 exact argv/cwd/child 0을 확인한 CPU-only quiet dashboard만
+  PID 1932669로 교체했다. 이 확인 시점에 기존 supervisor가 `benchpress_0001` pose completion을
+  감지해 SAM Mode B PID 1930239를 정상 시작했으며, Sapiens는 36/78 camera 완료 후
+  `benchpress_0002/cam1`로 진행했다. GPU inference/supervisor는 signal/restart하지 않았다.
 
 ### Source-of-truth 재검증
 
