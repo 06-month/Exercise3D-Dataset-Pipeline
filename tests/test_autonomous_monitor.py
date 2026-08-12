@@ -106,7 +106,7 @@ class AutonomousMonitorTest(unittest.TestCase):
                     "total_frames": 200,
                 },
                 "triangulation": {"count": 1, "status": {"one": "FAIL_SCHEMA"}},
-                "body_fit": {"count": 0, "status": {}},
+                "body_fit": {"count": 1, "status": {"one": "REVIEW_BODY_FIT_QUALITY"}},
             }
             atomic_json(root / "handoff.json", handoff)
             atomic_json(
@@ -128,6 +128,7 @@ class AutonomousMonitorTest(unittest.TestCase):
             self.assertTrue(state["attention_required"])
             self.assertIn("SAPIENS_PROCESS_DEAD", codes)
             self.assertIn("SUPERVISOR_DEAD", codes)
+            self.assertIn("QUALITY_FOLLOWER_DEAD", codes)
             self.assertIn("DISK_RESERVE_LOW", codes)
             self.assertIn("VALIDATION_FAIL", codes)
             self.assertIn("SEQUENCE_PIPELINE_FAILED", codes)
@@ -168,11 +169,16 @@ class AutonomousMonitorTest(unittest.TestCase):
                 root / "deadline.json",
                 {"deadline_utc": (now + timedelta(days=2)).isoformat(), "status": "WAITING_DEADLINE"},
             )
+            atomic_json(
+                root / "quality_follower.json",
+                {"updated_at_utc": now.isoformat(), "status": "RUNNING", "failures": []},
+            )
             processes = [
                 self._process(1, "sapiens"),
                 self._process(2, "supervisor"),
                 self._process(3, "handoff_monitor"),
                 self._process(4, "deadline_sentinel"),
+                self._process(5, "quality_follower"),
             ]
             args = self._args(root)
             state = build_dashboard(
@@ -238,6 +244,7 @@ class AutonomousMonitorTest(unittest.TestCase):
             handoff_state=root / "handoff.json",
             supervisor_state=root / "supervisor.json",
             deadline_state=root / "deadline.json",
+            quality_follower_state=root / "quality_follower.json",
             sequence_status=root / "sequences.csv",
             autonomous_runtime_dir=runtime,
             runtime_dir=runtime,

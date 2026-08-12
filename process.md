@@ -60,7 +60,20 @@
   않았고, updated deadline/final exporter가 quality 누락 sequence를 CPU-only materialize한 뒤
   `quality/quality_vector.npz`와 metadata를 immutable private build에 포함한다.
 - 현재 10 sequence 모두 final exporter validation REVIEW, dependency reason 0이다.
-- Phase 11 unit/integration regression을 포함한 전체 65개 unit test가 PASS했다.
+- Phase 11 builder unit/integration regression을 포함한 당시 전체 65개 unit test가 PASS했다.
+
+### Phase 11 CPU-only follower 시작
+
+- Live supervisor는 재시작하지 않았기 때문에 현재 process memory에는 Phase 11 stage가 없다.
+  Deadline exporter fallback만으로도 correctness는 보존되지만 새 body-fit의 quality 오류가 deadline에서야
+  드러날 수 있어 `tools/run_quality_control_follower.py`를 CPU-only background process로 추가했다.
+- Dependency가 모두 있는 sequence만 처리하고, existing valid output은 resume-skip하며 sequence-local
+  advisory lock으로 exporter/future supervisor와 concurrent duplicate write를 방지한다. Failure reason은 atomic
+  runtime state에 남기고 300초 후 자동 재시도한다.
+- 실제 one-shot에서 기존 10/26을 재계산 없이 REVIEW로 검증했고 failure 0,
+  나머지 16은 body-fit/Mode-C/SAM prior dependency wait로 정확히 분류했다. 이후 30초 follower를 시작했다.
+- Dashboard는 body-fit→quality lag에서 follower 사망과 follower `ATTENTION` failure reason을 자동 승격한다.
+- Follower wait/build/retry, dashboard death/stale/failure 계약을 포함한 전체 69개 unit test가 PASS했다.
 
 ### Source-of-truth 재검증
 

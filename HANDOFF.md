@@ -25,12 +25,13 @@
 - autonomous supervisor는 2026-08-12 08:45 KST 이후 사라진 것을 live process와
   stale state로 확인한 뒤, 중복/child 부재를 재확인하고 exact resumable command로 09:44 KST 복구했다.
   현재 exact PID/stage는 dashboard/handoff state가 source of truth다.
-- 2026-08-12 10:20 KST dashboard snapshot: current streaming sequence `latpulldown_0003`,
-  SAM Mode B child PID 1705755 (`cam2`) active
-- Sapiens durable 33/78 camera, current partial 포함 21,945/65,430 crop; PID 373049 alive
-- Sapiens recent-chunk throughput 0.22555 crop/s; 병렬 effective 0.21568 crop/s;
-  projected ETA 2026-08-14 15:53 KST로 deadline 약 2시간 53분 risk
-- SAM durable 31/78 camera, 20,117/65,595 frame, 10/26 full sequence; aggregate 0.586 frame/s
+- 2026-08-12 10:30 KST dashboard snapshot: current streaming sequence `latpulldown_0003`,
+  SAM Mode B child PID 1705755 (`cam3`) active
+- Sapiens durable 34/78 camera, current partial 포함 22,106/65,430 crop; PID 373049 alive,
+  current `benchpress_0001/cam2`
+- Sapiens recent-chunk throughput 0.222 crop/s; 병렬 effective 0.216 crop/s;
+  projected ETA 2026-08-14 16:42 KST로 deadline 약 3시간 42분 risk
+- SAM durable 32/78 camera, 20,779/65,595 frame, 10/26 full sequence; aggregate 0.586 frame/s
 - GPU: A100 80GB, combined snapshot 62,693 MiB/100%; observed OOM/retry 없음
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
 - handoff monitor PID 608232: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
@@ -42,6 +43,10 @@
   directory로 atomic rename한다. Existing final manifest는 검증 후 reuse하며 같은 ID를 덮어쓰지 않는다.
 - dashboard monitor: `tools/monitor_autonomous_generation.py`; atomic state는
   `.runtime/dashboard_state.json`. `--once`는 snapshot, 기본은 Rich live, `--quiet`는 state-only daemon이다.
+- Phase 11 CPU follower PID 1786236: complete body-fit/Mode-C dependency만 감지해 quality를
+  atomic materialize/validate한다. State는 `.runtime/quality_follower_state.json`; 2026-08-12 10:27 KST
+  10/26 REVIEW, failure 0, remaining 16은 dependency wait. Exact resume command/cwd도 같은 state에
+  보존하며 GPU work는 하지 않는다.
 
 Public-safe Sapiens command 형태:
 
@@ -73,16 +78,16 @@ Public-safe Sapiens command 형태:
   `squat_0001`은 후보 0 `PASS_MODE_B_FROZEN`; Mode C 실행/채택 0, Mode B payload 유지
 - private export smoke: REVIEW 1/FAIL 0/INCOMPLETE 0, 34 files, SHA/size mismatch 0,
   `freeze_eligible=true`
-- completed Sapiens 33 camera와 SAM 30 camera의 `run_provenance.json` materialize PASS;
+- completed Sapiens 34 camera와 SAM 32 camera의 `run_provenance.json` materialize PASS;
   model/checkpoint/config/source/selection/tool/exact-resume identity 포함
 - Phase 11: body-fit complete 10 sequence/6,485 reference frame, REVIEW 10/FAIL 0;
   target abstention/SAM rejection view 8/8, missing/prior-only joint frame 0
 
 ## Remaining work
 
-- Sapiens2: 45/78 camera, current partial 포함 43,485 target crops
+- Sapiens2: 44/78 camera, current partial 포함 43,324 target crops
 - Phase 7 이후: `latpulldown_0003` 및 이후 pose-complete sequence
-- SAM full: 31/78 camera PASS, `latpulldown_0003/cam2` RUNNING, full-complete sequence 10/26
+- SAM full: 32/78 camera PASS, `latpulldown_0003/cam3` RUNNING, full-complete sequence 10/26
 - critical path: pose-complete sequence → Phase 7 gate → Mode B → compact prior → body fit → Mode C candidate QA → export
 - Phase 11은 body fit/Mode C 뒤 CPU-only로 생성하며 deadline exporter가 누락 output을 자동 materialize한다.
 
@@ -103,6 +108,9 @@ Public-safe Sapiens command 형태:
    동일 root/sequence 설정으로 재실행하고 `updated_at_utc`가 전진하는지 확인한다.
 9. `.runtime/deadline_snapshot_state.json`의 sentinel이 없으면 `HANDOFF.md`와 local resume
    command로 복구한다. 기존 deadline build manifest가 있으면 duplicate export하지 않는다.
+10. body-fit count가 quality count보다 큰데 quality follower가 없으면
+    `.runtime/quality_follower_state.json`과 dashboard의 exact command/process evidence를 확인한 뒤
+    `tools/run_quality_control_follower.py`를 resume한다. Valid sequence는 재계산하지 않는다.
 
 Dashboard 사용:
 

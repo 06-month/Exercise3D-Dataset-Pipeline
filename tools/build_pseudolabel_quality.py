@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 from datetime import datetime, timezone
@@ -479,7 +480,9 @@ def compute_quality_vectors(
     return arrays, metadata
 
 
-def build_sequence_quality(args: argparse.Namespace, sequence: str) -> dict[str, Any]:
+def _build_sequence_quality_unlocked(
+    args: argparse.Namespace, sequence: str
+) -> dict[str, Any]:
     output = args.output_root.resolve() / sequence
     body_path = args.body_fit_root.resolve() / sequence / "body_fit.npz"
     complete, _, existing = validate_quality_output(output, body_path)
@@ -525,6 +528,18 @@ def build_sequence_quality(args: argparse.Namespace, sequence: str) -> dict[str,
     if not complete:
         raise RuntimeError("quality output validation failed: " + ";".join(reasons))
     return {**metadata, "resume_skipped": False}
+
+
+def build_sequence_quality(args: argparse.Namespace, sequence: str) -> dict[str, Any]:
+    output = args.output_root.resolve() / sequence
+    output.mkdir(parents=True, exist_ok=True)
+    lock_path = output / ".quality.lock"
+    with lock_path.open("a+b") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            return _build_sequence_quality_unlocked(args, sequence)
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
 def build_parser() -> argparse.ArgumentParser:

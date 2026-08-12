@@ -39,6 +39,13 @@ Frame status는 새 empirical threshold가 아니라 explicit evidence bit로 �
 호출한다. 현재 살아 있는 기존 supervisor는 재시작하지 않았으며, deadline/final exporter가 complete
 body-fit sequence의 누락 quality output을 CPU-only로 생성한 뒤 private build dependency로 포함한다.
 
+기존 live supervisor가 새 Phase 11 code를 memory에 load하지 않은 간격은
+[`tools/run_quality_control_follower.py`](../../tools/run_quality_control_follower.py)가 보완한다. 이 process는
+GPU를 사용하지 않고, complete dependency가 atomic publish된 sequence만 처리한다. 기존 valid
+quality는 검증 후 skip하고, concurrent exporter/future supervisor와의 중복 write는 sequence-local
+advisory lock으로 방지한다. 실패는 `.runtime/quality_follower_state.json`에 reason을 보존하고
+5분 cooldown 후 자동 재시도한다.
+
 ## 현재 결과
 
 2026-08-12 10:13 KST 기준 완료된 10 sequence, 6,485 reference frame을 materialize했다.

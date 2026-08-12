@@ -29,6 +29,7 @@ PROCESS_MARKERS = {
         "sam_body_primary_target_runner.py",
     },
     "supervisor": {"run_autonomous_generation.py"},
+    "quality_follower": {"run_quality_control_follower.py"},
     "handoff_monitor": {"checkpoint_handoff_state.py"},
     "deadline_sentinel": {"run_deadline_snapshot.py"},
 }
@@ -448,6 +449,7 @@ def build_dashboard(
     handoff = read_json(args.handoff_state)
     supervisor = read_json(args.supervisor_state)
     deadline_state = read_json(args.deadline_state)
+    quality_follower_state = read_json(args.quality_follower_state)
     previous = read_json(args.output)
     sequences = sequence_order(handoff)
     total_sequences = len(sequences) or 26
@@ -589,6 +591,7 @@ def build_dashboard(
 
     incomplete_pose = sapiens_done < sapiens_total
     incomplete_body = int(body_source.get("count", 0)) < total_sequences
+    incomplete_quality = quality["completed_sequences"] < total_sequences
     if incomplete_pose and not roots["sapiens"]:
         attention("SAPIENS_PROCESS_DEAD", "Sapiens output is incomplete but no matching live process exists.")
     if (incomplete_pose or incomplete_body) and not roots["supervisor"]:
@@ -597,7 +600,45 @@ def build_dashboard(
         attention("HANDOFF_MONITOR_DEAD", "Persistent handoff checkpoint monitor is not alive.")
     if remaining_seconds > 0 and not roots["deadline_sentinel"]:
         attention("DEADLINE_SENTINEL_DEAD", "Deadline snapshot sentinel is not alive.")
-    for group in ("sapiens", "supervisor", "handoff_monitor", "deadline_sentinel"):
+    if incomplete_quality and not roots["quality_follower"]:
+        attention(
+            "QUALITY_FOLLOWER_DEAD",
+            "Phase 11 quality output is incomplete but the CPU follower is not alive.",
+        )
+    quality_follower_updated = parse_datetime(quality_follower_state.get("updated_at_utc"))
+    if (
+        incomplete_quality
+        and roots["quality_follower"]
+        and (
+            quality_follower_updated is None
+            or (now - quality_follower_updated).total_seconds() > args.state_stale_seconds
+        )
+    ):
+        age = (
+            "unknown"
+            if quality_follower_updated is None
+            else human_duration((now - quality_follower_updated).total_seconds())
+        )
+        attention(
+            "QUALITY_FOLLOWER_STATE_STALE",
+            f"quality_follower_state.json age is {age}.",
+        )
+    if quality_follower_state.get("status") == "ATTENTION":
+        failure_text = "; ".join(
+            f"{row.get('sequence')}: {row.get('reason')}"
+            for row in quality_follower_state.get("failures", [])
+        )
+        attention(
+            "QUALITY_FOLLOWER_FAILURE",
+            failure_text or "Phase 11 quality follower reported ATTENTION.",
+        )
+    for group in (
+        "sapiens",
+        "supervisor",
+        "quality_follower",
+        "handoff_monitor",
+        "deadline_sentinel",
+    ):
         if len(roots[group]) > 1:
             attention(
                 "DUPLICATE_PROCESS",
@@ -679,7 +720,9 @@ def build_dashboard(
 
     if int(body_source.get("count", 0)) >= total_sequences and export.get("freeze_eligible"):
         overall_status = "COMPLETE"
-    elif any(roots[group] for group in ("sapiens", "sam", "supervisor")):
+    elif any(
+        roots[group] for group in ("sapiens", "sam", "supervisor", "quality_follower")
+    ):
         overall_status = "RUNNING"
     else:
         overall_status = "STOPPED"
@@ -759,6 +802,14 @@ def build_dashboard(
         "quality_control": {
             **quality,
             "total_sequences": total_sequences,
+        },
+        "quality_follower": {
+            "alive": bool(roots["quality_follower"]),
+            "pid": roots["quality_follower"][0]["pid"] if roots["quality_follower"] else None,
+            "status": quality_follower_state.get("status", "UNKNOWN"),
+            "updated_at": quality_follower_state.get("updated_at_utc"),
+            "last_event": quality_follower_state.get("last_event"),
+            "failures": quality_follower_state.get("failures", []),
         },
         "export": export,
         "supervisor": {
@@ -850,10 +901,17 @@ def render_rich(state: dict[str, Any], console: Any | None = None) -> Any:
     ):
         row = state[key]
         counts = row["status_counts"]
+        current = f"PASS {counts['PASS']} REVIEW {counts['REVIEW']} FAIL {counts['FAIL']}"
+        if key == "quality_control":
+            follower = state.get("quality_follower", {})
+            current += (
+                f" | follower {follower.get('status', 'UNKNOWN')}"
+                f" PID {follower.get('pid') or '-'}"
+            )
         table.add_row(
             label,
             f"{row['completed_sequences']}/{row['total_sequences']} sequences",
-            f"PASS {counts['PASS']} REVIEW {counts['REVIEW']} FAIL {counts['FAIL']}",
+            current,
             "-",
             "-",
         )
@@ -901,6 +959,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--deadline-state",
         type=Path,
         default=PROJECT_ROOT / ".runtime/deadline_snapshot_state.json",
+    )
+    parser.add_argument(
+        "--quality-follower-state",
+        type=Path,
+        default=PROJECT_ROOT / ".runtime" / "quality_follower_state.json",
     )
     parser.add_argument(
         "--sequence-status",
