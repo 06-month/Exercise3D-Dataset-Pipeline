@@ -349,6 +349,8 @@
 - deadline boundary: body-fit NPZ/metadata + Mode-C assessment terminal marker mtime을 UTC cutoff으로
   고정해 post-deadline completion은 INCOMPLETE 유지; cutoff-eligible derived lag/transient export는
   staging checksum-resume 3회 재시도 후 최종 truthful snapshot publish
+- freeze contract v2: requested sequence universe/order SHA-256 + status CSV exact match, global 3-file
+  provenance와 complete sequence 33-file required set; sentinel expected 26-sequence binding
 - first smoke: complete `barbellrow_0000`만 사용해 REVIEW 1/FAIL 0/INCOMPLETE 0,
   34 files, payload 28,960,929 bytes, SHA/size mismatch 0, freeze-eligible 확인
 - quality/exact-tree smoke: clean commit `250ee73`에서 REVIEW 1/FAIL 0/INCOMPLETE 0,

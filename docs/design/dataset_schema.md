@@ -25,6 +25,14 @@ Cutoff-eligible sequence가 quality/provenance sidecar lag로 INCOMPLETE이면 s
 3회 retry 동안 publish를 defer한다. 최종 시도에는 defer flag를 제거해 sidecar가 여전히
 누락됐더라도 해당 sequence를 INCOMPLETE로 보존한 immutable manifest를 반드시 생성한다.
 
+`freeze_contract_version=2`는 caller가 요청한 sequence universe/order 전체를
+`requested_sequences`와 canonical JSON SHA-256에 bind한다. `sequence_status.csv`는 이 list와
+순서/identity가 exact-match해야 하며, 따라서 INCOMPLETE row를 삭제하고 count를 다시 맞춰도
+verifier를 통과할 수 없다. Global provenance는 고정 3-file set, PASS/REVIEW sequence는
+camera 3개의 target/pose/provenance/SAM prior와 geometry/body/quality/sequence manifest 33-file set을
+정확히 만족해야 한다. Legacy smoke contract v1은 historical read-only verification만 유지하고,
+deadline sentinel은 expected 26-sequence list를 verifier에 별도 전달한다.
+
 ```text
 <build_id>/
 ├── dataset_manifest.json

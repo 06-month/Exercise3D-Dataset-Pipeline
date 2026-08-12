@@ -37,6 +37,8 @@ def parse_list(value: str) -> list[str]:
     result = [item.strip() for item in value.split(",") if item.strip()]
     if not result:
         raise argparse.ArgumentTypeError("expected a non-empty sequence list")
+    if len(set(result)) != len(result):
+        raise argparse.ArgumentTypeError("sequence list contains duplicates")
     return result
 
 
@@ -73,12 +75,16 @@ def read_manifest(path: Path) -> dict[str, Any] | None:
 
 
 def verified_manifest(
-    path: Path, expected_build_id: str
+    path: Path,
+    expected_build_id: str,
+    expected_sequences: list[str] | None = None,
 ) -> tuple[dict[str, Any] | None, list[str]]:
     manifest = read_manifest(path)
     if manifest is None:
         return None, []
-    result = verify_frozen_build(path.parent, expected_build_id)
+    result = verify_frozen_build(
+        path.parent, expected_build_id, expected_sequences
+    )
     if not result["valid"]:
         return None, list(result["errors"])
     return result["manifest"], []
@@ -151,7 +157,9 @@ def run_export_with_retries(
         )
         process = subprocess.run(command, cwd=PROJECT_ROOT)
         last_exit_code = process.returncode
-        manifest, integrity_errors = verified_manifest(manifest_path, args.build_id)
+        manifest, integrity_errors = verified_manifest(
+            manifest_path, args.build_id, args.sequences
+        )
         if manifest is not None or integrity_errors:
             return manifest, integrity_errors, last_exit_code, attempt
         if attempt <= args.export_retries:
@@ -188,7 +196,9 @@ def main() -> int:
     manifest_path = args.output_root.resolve() / args.build_id / "dataset_manifest.json"
     while True:
         now = datetime.now(timezone.utc)
-        manifest, integrity_errors = verified_manifest(manifest_path, args.build_id)
+        manifest, integrity_errors = verified_manifest(
+            manifest_path, args.build_id, args.sequences
+        )
         if integrity_errors:
             atomic_json(
                 args.runtime_state.resolve(),

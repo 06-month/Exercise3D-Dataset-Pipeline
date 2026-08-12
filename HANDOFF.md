@@ -47,6 +47,8 @@
   sequence로 고정하며 post-deadline completion은 INCOMPLETE로 유지한다. Cutoff-eligible
   INCOMPLETE은 derived sidecar lag을 위해 최대 3회/30초 간격으로 staging checksum-resume하고,
   네 번째 최종 시도에는 truthful INCOMPLETE snapshot을 반드시 publish한다.
+  Freeze contract v2는 requested 26-sequence list/order hash와 status CSV를 exact-match하고,
+  global provenance 3 files + complete sequence당 required 33-file set을 강제한다.
 - dashboard monitor: `tools/monitor_autonomous_generation.py`; atomic state는
   `.runtime/dashboard_state.json`. `--once`는 snapshot, 기본은 Rich live, `--quiet`는 state-only daemon이다.
 - Phase 11 CPU follower PID 1819560: complete body-fit/Mode-C dependency만 감지해 quality를

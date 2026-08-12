@@ -147,6 +147,20 @@
   point-in-time policy와 `--export-retries 3 --retry-seconds 30`을 보존한다. GPU inference/supervisor는
   중단/재시작하지 않았다.
 
+### Freeze contract v2 sequence-universe binding
+
+- 기존 verifier는 manifest 내부 count/CSV가 서로 맞는지는 검사했지만, requested 26개 중
+  INCOMPLETE row 하나를 삭제한 뒤 count를 함께 바꾸는 외부-universe 누락을 독립적으로
+  탐지할 수 없었다.
+- Contract v2 manifest에 `requested_sequences`와 canonical ordered-list SHA-256을 추가했다.
+  Status CSV identity/order가 exact-match해야 하며 sentinel은 자신의 frozen 26-sequence list를
+  verifier에 별도 전달한다.
+- Global provenance는 source inventory/temporal audit/frame mapping 3 files, complete PASS/REVIEW sequence는
+  3-view target/pose/run provenance/SAM prior + geometry/body/quality/sequence manifest 33 files와 exact-match해야
+  한다. Internal manifest와 tree에서 둘 다 누락한 payload도 이제 verifier가 거부한다.
+- Missing INCOMPLETE row, order mutation, required quality payload omission regression을 포함한 전체
+  83개 unit test와 publication-safety가 PASS했다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화

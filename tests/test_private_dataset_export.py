@@ -19,7 +19,10 @@ from tools.export_private_dataset import (
     git_provenance,
     prune_staging_tree,
     publish_staged_build,
+    required_global_manifest_paths,
+    required_sequence_manifest_paths,
     remove_staging_symlinks,
+    sequence_order_sha256,
     sequence_dependencies,
     sha256,
     validate_path_component,
@@ -29,6 +32,129 @@ from tools.export_private_dataset import (
 
 
 class PrivateDatasetExportTest(unittest.TestCase):
+    def build_contract_v2(
+        self, root: Path, *, omit_sequence_path: str | None = None
+    ) -> Path:
+        complete = "complete"
+        pending = "pending"
+        records = []
+
+        def add_record(path: str, sequence: str, content: bytes) -> dict:
+            target = root / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+            record = {
+                "sequence": sequence,
+                "path": path,
+                "bytes": len(content),
+                "sha256": sha256(target),
+            }
+            records.append(record)
+            return record
+
+        for path in sorted(required_global_manifest_paths()):
+            add_record(path, "", b"{}\n")
+        sequence_manifest_path = f"sequences/{complete}/sequence_manifest.json"
+        sequence_records = []
+        for path in sorted(required_sequence_manifest_paths(complete)):
+            if path in {sequence_manifest_path, omit_sequence_path}:
+                continue
+            sequence_records.append(add_record(path, complete, b"payload"))
+        sequence_manifest = {
+            "schema_version": 1,
+            "sequence": complete,
+            "status": "REVIEW",
+            "files": sequence_records,
+        }
+        add_record(
+            sequence_manifest_path,
+            complete,
+            (json.dumps(sequence_manifest) + "\n").encode(),
+        )
+        with (root / "sequence_status.csv").open(
+            "w", newline="", encoding="utf-8"
+        ) as handle:
+            writer = csv.DictWriter(handle, fieldnames=["sequence", "status"])
+            writer.writeheader()
+            writer.writerows(
+                [
+                    {"sequence": complete, "status": "REVIEW"},
+                    {"sequence": pending, "status": "INCOMPLETE"},
+                ]
+            )
+        requested = [complete, pending]
+        manifest = {
+            "schema_version": 1,
+            "freeze_contract_version": 2,
+            "build_id": "contract-v2",
+            "requested_sequences": requested,
+            "sequence_order_sha256": sequence_order_sha256(requested),
+            "private_dataset": True,
+            "source_rgb_included": False,
+            "source_payload_modified": False,
+            "sequence_count": 2,
+            "pass_count": 0,
+            "review_count": 1,
+            "fail_count": 0,
+            "incomplete_count": 1,
+            "freeze_eligible": False,
+            "file_count": len(records),
+            "total_payload_bytes": sum(record["bytes"] for record in records),
+            "files": records,
+        }
+        (root / "dataset_manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        return root
+
+    def test_contract_v2_binds_requested_incomplete_sequence_universe(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.build_contract_v2(Path(temporary))
+            result = verify_frozen_build(
+                root, "contract-v2", ["complete", "pending"]
+            )
+            self.assertTrue(result["valid"], result["errors"])
+
+            with (root / "sequence_status.csv").open(
+                "w", newline="", encoding="utf-8"
+            ) as handle:
+                writer = csv.DictWriter(handle, fieldnames=["sequence", "status"])
+                writer.writeheader()
+                writer.writerow({"sequence": "complete", "status": "REVIEW"})
+            manifest_path = root / "dataset_manifest.json"
+            manifest = json.loads(manifest_path.read_text())
+            manifest.update(
+                {
+                    "sequence_count": 1,
+                    "review_count": 1,
+                    "incomplete_count": 0,
+                    "freeze_eligible": True,
+                }
+            )
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            tampered = verify_frozen_build(
+                root, "contract-v2", ["complete", "pending"]
+            )
+            self.assertFalse(tampered["valid"])
+            self.assertIn(
+                "sequence_status_order_or_universe_mismatch", tampered["errors"]
+            )
+
+    def test_contract_v2_rejects_omitted_required_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            omitted = "sequences/complete/quality/metadata.json"
+            root = self.build_contract_v2(
+                Path(temporary), omit_sequence_path=omitted
+            )
+            result = verify_frozen_build(
+                root, "contract-v2", ["complete", "pending"]
+            )
+            self.assertFalse(result["valid"])
+            self.assertIn(
+                "required_sequence_payload_set_mismatch:complete",
+                result["errors"],
+            )
+
     def test_deadline_cutoff_excludes_post_deadline_terminal_marker(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

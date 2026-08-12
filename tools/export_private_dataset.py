@@ -44,6 +44,8 @@ def parse_list(value: str) -> list[str]:
     result = [item.strip() for item in value.split(",") if item.strip()]
     if not result:
         raise argparse.ArgumentTypeError("expected a non-empty comma-separated list")
+    if len(set(result)) != len(result):
+        raise argparse.ArgumentTypeError("sequence list contains duplicates")
     return result
 
 
@@ -89,6 +91,53 @@ def sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def sequence_order_sha256(sequences: list[str]) -> str:
+    return hashlib.sha256(
+        json.dumps(sequences, ensure_ascii=False, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+
+
+def required_global_manifest_paths() -> set[str]:
+    return {
+        "provenance/source_inventory.json",
+        "provenance/temporal_audit.json",
+        "provenance/temporal_camera_frame_mapping.csv",
+    }
+
+
+def required_sequence_manifest_paths(sequence: str) -> set[str]:
+    paths: set[str] = set()
+    for camera in CAMERAS:
+        paths.update(
+            {
+                f"sequences/{sequence}/view/{camera}_target_selection.npz",
+                f"sequences/{sequence}/view/{camera}_target_metadata.json",
+                f"sequences/{sequence}/view/{camera}_pose_2d.npz",
+                f"sequences/{sequence}/view/{camera}_pose_metadata.json",
+                f"sequences/{sequence}/view/{camera}_pose_run_provenance.json",
+                f"sequences/{sequence}/body/{camera}_sam_body_prior.npz",
+                f"sequences/{sequence}/body/{camera}_sam_body_metadata.json",
+                f"sequences/{sequence}/body/{camera}_sam_inference_run_provenance.json",
+            }
+        )
+    paths.update(
+        {
+            f"sequences/{sequence}/geometry/triangulated_3d.npz",
+            f"sequences/{sequence}/geometry/canonical_3d.npz",
+            f"sequences/{sequence}/geometry/metadata.json",
+            f"sequences/{sequence}/body/body_fit.npz",
+            f"sequences/{sequence}/body/metadata.json",
+            f"sequences/{sequence}/body/mode_c_escalation.json",
+            f"sequences/{sequence}/quality/quality_vector.npz",
+            f"sequences/{sequence}/quality/metadata.json",
+            f"sequences/{sequence}/sequence_manifest.json",
+        }
+    )
+    return paths
 
 
 def atomic_text(path: Path, value: str) -> None:
@@ -327,7 +376,9 @@ def prune_staging_tree(
 
 
 def verify_frozen_build(
-    build_root: Path, expected_build_id: str | None = None
+    build_root: Path,
+    expected_build_id: str | None = None,
+    expected_sequences: list[str] | None = None,
 ) -> dict[str, Any]:
     """Verify a published/staged build without mutating it."""
     if build_root.is_symlink():
@@ -349,6 +400,13 @@ def verify_frozen_build(
         return {"valid": False, "errors": ["missing_or_invalid:dataset_manifest.json"], "manifest": None}
     if expected_build_id is not None and manifest.get("build_id") != expected_build_id:
         errors.append("build_id_mismatch")
+    try:
+        freeze_contract_version = int(manifest.get("freeze_contract_version", 1))
+    except (TypeError, ValueError):
+        freeze_contract_version = -1
+        errors.append("freeze_contract_version_invalid")
+    if freeze_contract_version not in {1, 2}:
+        errors.append("freeze_contract_version_unsupported")
     if manifest.get("private_dataset") is not True:
         errors.append("private_dataset_flag_invalid")
     if manifest.get("source_rgb_included") is not False:
@@ -496,6 +554,42 @@ def verify_frozen_build(
     )
     if manifest.get("freeze_eligible") is not freeze_eligible:
         errors.append("freeze_eligible_mismatch")
+    requested_value = manifest.get("requested_sequences")
+    enforce_requested = freeze_contract_version >= 2 or expected_sequences is not None
+    requested_sequences: list[str] = []
+    if enforce_requested:
+        if (
+            not isinstance(requested_value, list)
+            or not requested_value
+            or not all(
+                isinstance(value, str)
+                and value
+                and value not in {".", ".."}
+                and Path(value).name == value
+                for value in requested_value
+            )
+            or len(set(requested_value)) != len(requested_value)
+        ):
+            errors.append("requested_sequences_invalid")
+        else:
+            requested_sequences = list(requested_value)
+            if sequence_ids != requested_sequences:
+                errors.append("sequence_status_order_or_universe_mismatch")
+            if manifest.get("sequence_order_sha256") != sequence_order_sha256(
+                requested_sequences
+            ):
+                errors.append("sequence_order_sha256_mismatch")
+        if expected_sequences is not None and requested_sequences != expected_sequences:
+            errors.append("expected_sequence_universe_mismatch")
+
+    if freeze_contract_version >= 2:
+        global_record_paths = {
+            path
+            for path, record in manifest_records.items()
+            if str(record.get("sequence", "")) == ""
+        }
+        if global_record_paths != required_global_manifest_paths():
+            errors.append("global_provenance_file_set_mismatch")
     status_by_sequence = {
         sequence: status for sequence, status in zip(sequence_ids, statuses)
     }
@@ -567,6 +661,10 @@ def verify_frozen_build(
         }
         if declared_paths != expected_sequence_paths:
             errors.append(f"sequence_file_set_mismatch:{sequence}")
+        if freeze_contract_version >= 2:
+            all_sequence_paths = expected_sequence_paths | {sequence_manifest}
+            if all_sequence_paths != required_sequence_manifest_paths(sequence):
+                errors.append(f"required_sequence_payload_set_mismatch:{sequence}")
     return {
         "valid": not errors,
         "errors": errors,
@@ -578,9 +676,14 @@ def verify_frozen_build(
 
 
 def publish_staged_build(
-    staging_root: Path, final_root: Path, expected_build_id: str
+    staging_root: Path,
+    final_root: Path,
+    expected_build_id: str,
+    expected_sequences: list[str] | None = None,
 ) -> dict[str, Any]:
-    integrity = verify_frozen_build(staging_root, expected_build_id)
+    integrity = verify_frozen_build(
+        staging_root, expected_build_id, expected_sequences
+    )
     if not integrity["valid"]:
         raise RuntimeError(
             "staged build failed integrity verification: "
@@ -843,7 +946,7 @@ def main() -> int:
     if final_root.exists() and not final_root.is_dir():
         raise RuntimeError("build output exists and is not a directory")
     if final_manifest.is_file():
-        existing = verify_frozen_build(final_root, args.build_id)
+        existing = verify_frozen_build(final_root, args.build_id, args.sequences)
         if not existing["valid"]:
             raise RuntimeError(
                 "immutable build exists but failed integrity verification: "
@@ -1041,7 +1144,10 @@ def main() -> int:
     atomic_csv(build_root / "sequence_status.csv", sequence_rows)
     manifest = {
         "schema_version": 1,
+        "freeze_contract_version": 2,
         "build_id": args.build_id,
+        "requested_sequences": args.sequences,
+        "sequence_order_sha256": sequence_order_sha256(args.sequences),
         "created_at_utc": utc_now(),
         "deadline_cutoff_utc": (
             deadline_cutoff.isoformat() if deadline_cutoff is not None else None
@@ -1096,7 +1202,12 @@ def main() -> int:
             ),
             flush=True,
         )
-    publish_staged_build(build_root, final_root, args.build_id)
+    publish_staged_build(
+        build_root,
+        final_root,
+        args.build_id,
+        args.sequences,
+    )
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
     return 0 if manifest["freeze_eligible"] else 2
 
