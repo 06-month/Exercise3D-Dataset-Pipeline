@@ -200,6 +200,16 @@
   3회 연속 absence + 2초 final rescan + 1시간 3회 cap을 통과한 때만 detached recovery한다.
 - One-shot identity gate에서 live sentinel PID 1846229와 persisted command digest exact-match,
   launch/restart 0, attention false, snapshot state `WAITING_DEADLINE`를 확인했다.
+- 전체 96개 regression과 publication-safety PASS 후 code checkpoint `195d52a`를 push했다.
+  Lock file symlink는 `O_NOFOLLOW`로 거부하고 target을 수정하지 않는 regression을 포함한다.
+- Exact PID/command/child 0을 확인한 뒤 CPU sleeper sentinel만 PID 1882473으로 교체했다.
+  `WAITING_DEADLINE`, single process, child 0이며 cross-process probe가 lifetime lock held를 확인했다.
+- Sentinel watchdog PID 1882820을 persistent mode로 시작했다. Live PID 1882473과 persisted
+  digest exact-match, launch/restart 0, attention false다. CPU-only handoff/dashboard monitor도 새 schema로
+  PID 1883380/1883591에서 각각 단일 인스턴스로 실행 중이다.
+- Frozen sequence order/universe는 26/26 exact·unique이고 handoff에 두 watchdog resume command가
+  보존됐다. Dashboard attention은 `DEADLINE_ETA_AT_RISK` warning 하나뿐이며
+  GPU inference/SAM/autonomous supervisor는 중단·재시작하지 않았다.
 
 ### Source-of-truth 재검증
 

@@ -30,19 +30,19 @@
   resume command digest가 exact-match하며 restart 0, attention false다. 3회 연속 absence +
   2초 final rescan 후에만 최대 3회/시간 내에서 detached resume하고 live process는
   절대 signal하지 않는다. Exact watchdog PID와 command은 runtime/dashboard state가 source of truth다.
-- 2026-08-12 11:19 KST dashboard snapshot: `latpulldown_0003` end-to-end 완료 후
+- 2026-08-12 11:32 KST dashboard snapshot: `latpulldown_0003` end-to-end 완료 후
   supervisor는 `WAIT_RUNNING_SAPIENS2`; 다음 pose-ready sequence를 기다림
 - Sapiens durable 35/78 camera, current partial 포함 22,779/65,430 crop; PID 373049 alive,
   current `benchpress_0001/cam3`
-- Sapiens recent-chunk throughput 0.219 crop/s, average 0.217 crop/s; projected ETA는
-  deadline 약 4시간 20분 후 risk
+- Sapiens recent-chunk throughput 0.219 crop/s, average 0.214 crop/s; projected ETA는
+  deadline 약 4시간 32분 후 risk
 - SAM durable 33/78 camera, 21,441/65,595 frame, 11/26 full sequence; aggregate 0.585 frame/s;
   current SAM child는 없으며 Sapiens GPU utilization 100%
 - GPU: A100 80GB, combined snapshot 62,693 MiB/100%; observed OOM/retry 없음
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
-- handoff monitor PID 1866064: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
+- handoff monitor PID 1883380: 30초마다 `.runtime/handoff_state.json`을 atomic rename으로 갱신;
   `updated_at_utc` 증가와 exact active/resume command/stage count 보존 확인 완료
-- deadline snapshot sentinel PID 1846229: 2026-08-14 13:00 KST에 completed sequence와
+- deadline snapshot sentinel PID 1882473: 2026-08-14 13:00 KST에 completed sequence와
   `INCOMPLETE` 목록을 별도 versioned private build로 export; local state는
   `.runtime/deadline_snapshot_state.json`, 현재 `WAITING_DEADLINE`
   Exporter는 hidden `.<build_id>.inprogress`에서 checksum-resume한 뒤 전수 integrity PASS 시 final
@@ -57,8 +57,12 @@
   global provenance 3 files + complete sequence당 required 33-file set을 강제한다. Sentinel은
   고정된 26-sequence list를 verifier에 별도로 전달하는 새 code로 교체했고,
   GPU inference/supervisor는 건드리지 않았다.
+- deadline sentinel watchdog PID 1882820: live/persisted command digest exact-match,
+  restart/launch 0, attention false. State는 `.runtime/deadline_sentinel_watchdog_state.json`.
+  Sentinel lifetime lock은 별도 process probe에서 held로 확인했고 exporter는 build ID별
+  lock을 staging mutation 전에 취득한다.
 - dashboard monitor: `tools/monitor_autonomous_generation.py`; atomic state는
-  `.runtime/dashboard_state.json`. Quiet daemon PID 1866198이며 `--once`는 snapshot,
+  `.runtime/dashboard_state.json`. Quiet daemon PID 1883591이며 `--once`는 snapshot,
   기본은 Rich live, `--quiet`는 state-only daemon이다.
 - Phase 11 CPU follower PID 1819560: complete body-fit/Mode-C dependency만 감지해 quality를
   atomic materialize/validate한다. Final exporter와 동일 sequence validation도 미리 수행해
@@ -137,7 +141,9 @@ Public-safe Sapiens command 형태:
 8. handoff monitor가 없으면 `python tools/checkpoint_handoff_state.py ... --poll-seconds 30`을
    동일 root/sequence 설정으로 재실행하고 `updated_at_utc`가 전진하는지 확인한다.
 9. `.runtime/deadline_snapshot_state.json`의 sentinel이 없으면 `HANDOFF.md`와 local resume
-   command로 복구한다. 기존 deadline build manifest가 있으면 duplicate export하지 않는다.
+   command로 복구한다. 단 deadline sentinel watchdog이 RUNNING이면 수동 launch하지
+   말고 exact-identity recovery에 맡긴다. 기존 deadline build manifest가 있으면 duplicate
+   export하지 않는다. Watchdog attention/restart exhaustion일 때만 수동 개입한다.
 10. body-fit count가 quality count보다 큰데 quality follower가 없으면
     `.runtime/quality_follower_state.json`과 dashboard의 exact command/process evidence를 확인한 뒤
     `tools/run_quality_control_follower.py`를 resume한다. Valid sequence는 재계산하지 않는다.
@@ -180,9 +186,9 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Runtime estimates
 
-- 2026-08-12 11:19 KST snapshot: Sapiens recent-chunk rate 0.219 crop/s,
-  streaming ETA는 deadline 약 4시간 20분 후
-- deadline margin: Sapiens 전량 기준 약 -4.33 h; 대신 Mode B complete sequence와
+- 2026-08-12 11:32 KST snapshot: Sapiens recent-chunk rate 0.219 crop/s,
+  streaming ETA는 deadline 약 4시간 32분 후
+- deadline margin: Sapiens 전량 기준 약 -4.53 h; 대신 Mode B complete sequence와
   deadline snapshot을 내구적으로 확보
 - concurrent SAM Mode B aggregate 19,455 frame/33,159.28초 = 0.58671 frame/s;
   standalone expected 20.80 h projection은
@@ -192,7 +198,7 @@ tmux new-window -n exercise3d-dashboard \
 ## Git state
 
 - branch: `agent/phase-5-1-pushup-0003-recovery`
-- latest implementation commit: freeze contract v2 `7b54214`; 현재 exact `HEAD`는
+- latest implementation commit: deadline recovery race guard `195d52a`; 현재 exact `HEAD`는
   `git rev-parse HEAD`와 local state의 `git_commit`으로 확인
 - Draft PR: #1 (`https://github.com/06-month/Exercise3D-Dataset-Pipeline/pull/1`)
 - pushed: handoff/streaming supervisor와 문서 milestone remote 동기화 완료
@@ -200,4 +206,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-12 11:21 KST
+- 2026-08-12 11:34 KST
