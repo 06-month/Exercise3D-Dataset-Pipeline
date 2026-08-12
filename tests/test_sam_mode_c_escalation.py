@@ -1,8 +1,13 @@
 import unittest
+import warnings
 
 import numpy as np
 
-from tools.assess_sam_mode_c_escalation import bounded_clips, robust_threshold
+from tools.assess_sam_mode_c_escalation import (
+    bounded_clips,
+    finite_row_median,
+    robust_threshold,
+)
 
 
 class SamModeCEscalationTest(unittest.TestCase):
@@ -22,6 +27,26 @@ class SamModeCEscalationTest(unittest.TestCase):
         self.assertLessEqual(int(selected.sum()), 10)
         self.assertTrue(selected[50])
         self.assertTrue(clips)
+
+    def test_finite_row_median_preserves_abstention_without_warning(self) -> None:
+        values = np.asarray(
+            [
+                [np.nan, np.nan, np.nan],
+                [1.0, np.nan, 3.0],
+                [np.inf, -np.inf, np.nan],
+            ]
+        )
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = finite_row_median(values)
+        self.assertEqual(caught, [])
+        self.assertTrue(np.isnan(result[0]))
+        self.assertEqual(result[1], 2.0)
+        self.assertTrue(np.isnan(result[2]))
+
+    def test_finite_row_median_requires_matrix(self) -> None:
+        with self.assertRaisesRegex(ValueError, "2D array"):
+            finite_row_median(np.asarray([1.0, 2.0]))
 
 
 if __name__ == "__main__":

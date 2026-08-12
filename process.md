@@ -6,6 +6,29 @@
 
 ## 2026-08-11 — 2026-08-14 13:00 KST autonomous deadline 시작
 
+### 2026-08-12 인계, supervisor 복구와 autonomous dashboard
+
+- startup protocol에 따라 handoff/runtime/plan/process/phase/Git을 먼저 읽고 live process를 대조했다.
+- Sapiens2 PID 373049, handoff monitor PID 608232, deadline sentinel PID 607755은 정상이고 GPU는
+  100%였다. 반면 supervisor state는 23:45 UTC에서 멈췄고 supervisor/SAM process는 없었다.
+- duplicate/child 부재를 재확인한 뒤 `.runtime/handoff_state.json`의 frozen exact command로
+  supervisor만 복구했다. 기존 10개 PASS/REVIEW row는 재사용했으며 `latpulldown_0003` Phase 7→
+  Mode B streaming을 이어갔다. Sapiens/sentinel/handoff monitor는 중단·재실행하지 않았다.
+- `tools/monitor_autonomous_generation.py`를 추가했다. 기존 handoff/supervisor/deadline/output state와
+  `/proc`, `nvidia-smi`, disk를 읽어 Rich live dashboard 및 atomic
+  `.runtime/dashboard_state.json`을 생성하며 별도 progress DB는 만들지 않는다.
+- attention은 expected process/supervisor/sentinel 사망, stale/stall, duplicate root process,
+  traceback/CUDA OOM/retry exhaustion, validation/NaN-Inf gate FAIL, disk reserve, sustained GPU idle,
+  deadline ETA risk/worsening을 탐지한다. 단발 `nvidia-smi` timeout은 마지막 정상 표본을 유지하고
+  stale window를 넘겨야 경고한다.
+- 첫 실제 dashboard snapshot: Sapiens 33/78 camera, 21,433/65,430 crop; SAM 30/78 camera,
+  19,455/65,595 frame; triangulation 11, body fit 10; GPU 100%, combined 62,693 MiB.
+  Runtime failure/OOM/retry는 없고 Sapiens ETA가 deadline보다 약 1.1시간 늦어질 위험만 경고했다.
+- Mode C assessor의 intentional abstention all-NaN alignment row는 finite row에만 median을 계산하고
+  finite value가 없으면 기존대로 NaN을 유지하도록 수정했다. Threshold/candidate/acceptance 변화는
+  없으며 warning-free regression을 추가했다. Monitor/state/attention regression을 포함한 전체
+  56개 unit test가 PASS했고 30초 state-only dashboard monitor를 시작했다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화

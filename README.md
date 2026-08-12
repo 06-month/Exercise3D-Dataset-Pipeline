@@ -12,6 +12,8 @@ payload는 공개하지 않습니다. 저장소에는 재현 가능한 코드, �
 [`HANDOFF.md`](HANDOFF.md)를 읽습니다. 실시간 private command/PID/progress는 Git에서 제외된
 `.runtime/handoff_state.json`에 30초 간격으로 atomic 저장되며, 살아 있는 inference를 중복
 실행하지 않는 startup 순서는 [`AGENTS.md`](AGENTS.md)에 고정했습니다.
+사람용 live dashboard와 machine-readable attention state는
+`tools/monitor_autonomous_generation.py`가 `.runtime/dashboard_state.json`에 atomic 저장합니다.
 완료된 expensive camera output에는 checkpoint/config/source/selection/tool/command identity를
 담은 `run_provenance.json`을 별도 atomic sidecar로 남깁니다.
 고정 deadline에는 별도 private snapshot build가 현재 PASS/REVIEW/FAIL/INCOMPLETE 상태를 보존하며,
@@ -277,6 +279,7 @@ Sapiens2 Pose 5B single-image smoke:
 | `tools/sam_body_primary_target_runner.py` | primary bbox 1개 adapter와 compact MHR parameter provenance 저장 | ignored private output만 생성 |
 | `tools/run_sam_body4d_full.py` | Mode B camera 단위 resume/completeness orchestration | ignored private output만 생성 |
 | `tools/run_autonomous_generation.py` | Sapiens resume부터 Phase 7–13까지 장시간 critical path supervision | ignored private output 생성 |
+| `tools/monitor_autonomous_generation.py` | 기존 runtime/process/GPU를 읽는 live dashboard와 atomic attention state | ignored `.runtime/dashboard_state.json` 생성 |
 | `tools/consolidate_sam_body_prior.py` | frame/PTS/identity-aware MHR numeric prior 통합 | ignored private output 생성 |
 | `tools/assess_sam_mode_c_escalation.py` | Mode B failure/outlier 기반 bounded Mode C review clip 선정 | ignored private output 생성 |
 | `tools/verify_mhr_parameter_replay.py` | compact 204-d MHR parameter의 official model exact replay 검사 | ignored aggregate 생성 |

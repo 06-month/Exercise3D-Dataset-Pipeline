@@ -62,6 +62,18 @@ def robust_threshold(values: np.ndarray, multiplier: float = 5.0) -> tuple[float
     return threshold, median, mad
 
 
+def finite_row_median(values: np.ndarray) -> np.ndarray:
+    """Return row medians while preserving all-nonfinite rows as NaN."""
+    array = np.asarray(values, dtype=np.float64)
+    if array.ndim != 2:
+        raise ValueError("finite_row_median expects a 2D array")
+    result = np.full(array.shape[0], np.nan, dtype=np.float64)
+    finite_rows = np.isfinite(array).any(axis=1)
+    if finite_rows.any():
+        result[finite_rows] = np.nanmedian(array[finite_rows], axis=1)
+    return result
+
+
 def bounded_clips(
     candidate: np.ndarray,
     severity: np.ndarray,
@@ -163,8 +175,8 @@ def assess_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]:
         )
         temporal_outlier = temporal > temporal_threshold
 
-        residual = np.nanmedian(
-            body["aligned_prior_residual_sequence_gauge"][:, camera_index], axis=1
+        residual = finite_row_median(
+            body["aligned_prior_residual_sequence_gauge"][:, camera_index]
         )
         reference_length = float(
             json.loads(

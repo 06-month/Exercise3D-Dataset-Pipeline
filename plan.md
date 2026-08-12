@@ -24,6 +24,8 @@
 - Fit3D exhaustive tolerance/ablation은 final private dataset critical path를 방해하면 freeze 이후로 이동
 - persistent handoff: `HANDOFF.md` + ignored `.runtime/handoff_state.json` 30초 atomic checkpoint;
   completion metadata/schema PASS item만 skip하고 incomplete/corrupt item만 resume
+- autonomous monitoring: `.runtime/dashboard_state.json`에 process/GPU/progress/deadline/attention을
+  atomic 기록하고 Rich live/`--once`/state-only mode를 제공; 정상 generation은 AI polling 금지
 - expensive camera output별 atomic `run_provenance.json`: checkpoint/config/source/selection/tool/command
   identity를 보존하며 기존 PASS output에는 재추론 없이 sidecar만 materialize
 - deadline sentinel: 2026-08-14 13:00 KST에 별도 immutable build ID로 private snapshot/export를
