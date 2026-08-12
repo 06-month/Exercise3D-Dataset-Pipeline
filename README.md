@@ -14,6 +14,9 @@ payload는 공개하지 않습니다. 저장소에는 재현 가능한 코드, �
 실행하지 않는 startup 순서는 [`AGENTS.md`](AGENTS.md)에 고정했습니다.
 사람용 live dashboard와 machine-readable attention state는
 `tools/monitor_autonomous_generation.py`가 `.runtime/dashboard_state.json`에 atomic 저장합니다.
+Dashboard는 frozen selector summary의 exact crop/frame workload와 live measured stage rate를 결합해
+deadline까지 terminal 가능 sequence 수의 `OPTIMISTIC_UPPER_BOUND`도 표시합니다. 이 값은
+triangulation/body-fit/quality/export overhead를 제외한 ceiling이며 완료 약속으로 해석하지 않습니다.
 Phase 11 CPU follower는 quality가 완료된 sequence에 대해 final exporter과 동일 validation을
 미리 수행하고 dashboard에 `freeze-ready` count와 지속 dependency failure를 보고합니다.
 별도 CPU-only predeadline checkpoint follower는 이 ready 집합이 기존 byte-verified

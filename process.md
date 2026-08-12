@@ -274,6 +274,23 @@
   final deadline build 0을 분리해 표시한다. Follower attention은 없고 전체 attention은 기존
   `DEADLINE_ETA_AT_RISK` 하나다.
 
+### Deadline freeze coverage upper-bound forecast
+
+- 기존 dashboard의 Sapiens/SAM 개별 ETA는 전체 26-sequence 종료 시각만 보여 주어, deadline 시점에
+  몇 sequence까지 terminal body-fit/freeze 가능할지 직접 드러내지 못했다.
+- 78개 selector `summary.json`의 exact `target_only_sapiens_crops`/`frame_count`를 frozen order로
+  읽고, 현재 durable crop/SAM camera/partial frame과 measured recent rate를 적용하는 CPU-only
+  schedule upper bound를 추가했다. Selector REVIEW의 abstention crop 감소는 그대로 사용하며
+  background person이나 ambiguous target을 보충하지 않는다.
+- Forecast는 pose-ready dependency와 단일 sequential Mode B stream을 계산하지만
+  triangulation/body-fit/quality/export overhead를 의도적으로 0으로 둔다. 따라서
+  `OPTIMISTIC_UPPER_BOUND`라는 이름과 assumptions를 machine-readable state에 함께 기록한다.
+- 실제 26-sequence inventory는 65,430 target crop/65,595 SAM frame으로 기존 global total과 exact-match했다.
+  2026-08-12 12:04 KST rate snapshot에서는 deadline upper bound 25/26, 첫 late sequence
+  `squat_0003`, all-sequence optimistic terminal 2026-08-14 15:44 KST였다. 이 ceiling도 전량을
+  충족하지 못하므로 `DEADLINE_FREEZE_COVERAGE_AT_RISK` warning을 별도로 기록한다.
+- Forecast helper/inventory/partial-SAM scheduling regression을 포함한 전체 107 tests가 PASS했다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화

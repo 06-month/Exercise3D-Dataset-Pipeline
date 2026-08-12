@@ -89,6 +89,152 @@ def safe_float(value: Any) -> float | None:
         return None
 
 
+def selection_workloads(
+    selection_root: Path, sequences: list[str]
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Read the small selector summaries used for a schedule upper bound."""
+    rows: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for sequence in sequences:
+        cameras: dict[str, dict[str, int]] = {}
+        for camera in CAMERAS:
+            path = selection_root / sequence / camera / "summary.json"
+            summary = read_json(path)
+            try:
+                frame_count = int(summary["frame_count"])
+                target_crops = int(summary["target_only_sapiens_crops"])
+                valid = bool(
+                    summary.get("sequence") == sequence
+                    and summary.get("camera") == camera
+                    and summary.get("status") in {"PASS", "REVIEW"}
+                    and frame_count > 0
+                    and 0 <= target_crops <= frame_count
+                )
+            except (KeyError, TypeError, ValueError):
+                valid = False
+                frame_count = 0
+                target_crops = 0
+            if not valid:
+                errors.append(f"invalid:{sequence}/{camera}:{path}")
+                continue
+            cameras[camera] = {
+                "target_crops": target_crops,
+                "frames": frame_count,
+            }
+        if len(cameras) == len(CAMERAS):
+            rows.append(
+                {
+                    "sequence": sequence,
+                    "target_crops": sum(row["target_crops"] for row in cameras.values()),
+                    "frames": sum(row["frames"] for row in cameras.values()),
+                    "cameras": cameras,
+                }
+            )
+    return rows, errors
+
+
+def deadline_freeze_upper_bound(
+    workloads: list[dict[str, Any]],
+    *,
+    terminal_sequences: set[str],
+    accepted_sequences: set[str],
+    completed_sam_cameras: set[str],
+    current_sam: tuple[str | None, str | None],
+    current_sam_frames: int,
+    pose_completed_crops: int,
+    pose_rate: float | None,
+    sam_rate: float | None,
+    now: datetime,
+    deadline: datetime,
+) -> dict[str, Any]:
+    """Optimistic sequence bound from dependency order and measured stage rates.
+
+    This deliberately excludes triangulation/body-fit/quality overhead and is
+    therefore a ceiling, not a delivery promise.
+    """
+    if not workloads or not pose_rate or pose_rate <= 0 or not sam_rate or sam_rate <= 0:
+        return {
+            "available": False,
+            "kind": "OPTIMISTIC_UPPER_BOUND",
+            "reason": "workload inventory or measured stage rate unavailable",
+        }
+    remaining_to_deadline = (deadline - now).total_seconds()
+    cumulative_pose_crops = 0
+    sam_cursor_seconds = 0.0
+    predicted = set(accepted_sequences)
+    projections: list[dict[str, Any]] = []
+    current_sequence, current_camera = current_sam
+    for workload in workloads:
+        sequence = str(workload["sequence"])
+        cumulative_pose_crops += int(workload["target_crops"])
+        if sequence in terminal_sequences:
+            continue
+        pose_ready_seconds = max(
+            0.0, (cumulative_pose_crops - pose_completed_crops) / pose_rate
+        )
+        completed_frames = sum(
+            int(camera_row["frames"])
+            for camera, camera_row in workload["cameras"].items()
+            if f"{sequence}/{camera}" in completed_sam_cameras
+        )
+        if (
+            sequence == current_sequence
+            and current_camera in workload["cameras"]
+            and f"{sequence}/{current_camera}" not in completed_sam_cameras
+        ):
+            completed_frames += min(
+                current_sam_frames,
+                int(workload["cameras"][current_camera]["frames"]),
+            )
+        remaining_sam_frames = max(0, int(workload["frames"]) - completed_frames)
+        finish_seconds = max(pose_ready_seconds, sam_cursor_seconds) + (
+            remaining_sam_frames / sam_rate
+        )
+        sam_cursor_seconds = finish_seconds
+        before_deadline = finish_seconds <= remaining_to_deadline
+        if before_deadline:
+            predicted.add(sequence)
+        projections.append(
+            {
+                "sequence": sequence,
+                "pose_ready_utc": (now + timedelta(seconds=pose_ready_seconds)).isoformat(),
+                "optimistic_terminal_utc": (
+                    now + timedelta(seconds=finish_seconds)
+                ).isoformat(),
+                "before_deadline": before_deadline,
+            }
+        )
+    first_after = next(
+        (row["sequence"] for row in projections if not row["before_deadline"]), None
+    )
+    return {
+        "available": True,
+        "kind": "OPTIMISTIC_UPPER_BOUND",
+        "completed_now": len(accepted_sequences),
+        "terminal_nonaccepted_now": len(terminal_sequences - accepted_sequences),
+        "estimated_completed_sequences_by_deadline": len(predicted),
+        "estimated_additional_sequences_by_deadline": max(
+            0, len(predicted) - len(accepted_sequences)
+        ),
+        "total_sequences": len(workloads),
+        "first_sequence_after_deadline": first_after,
+        "all_sequences_optimistic_terminal_utc": (
+            (now + timedelta(seconds=sam_cursor_seconds)).isoformat()
+            if projections
+            else now.isoformat()
+        ),
+        "pose_rate_crops_per_second": pose_rate,
+        "sam_rate_frames_per_second": sam_rate,
+        "assumptions": [
+            "frozen sequence order",
+            "measured pose and SAM rates remain constant",
+            "one sequential SAM stream starts immediately when pose is ready",
+            "triangulation/body-fit/quality/export overhead excluded",
+        ],
+        "next_sequences": projections[:5],
+    }
+
+
 def process_table() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     try:
@@ -603,6 +749,44 @@ def build_dashboard(
     export = export_progress(args.export_root, deadline_state.get("build_id"))
     deadline_snapshot_status = str(deadline_state.get("status", "UNKNOWN"))
     export["deadline_snapshot_status"] = deadline_snapshot_status
+    workloads, workload_errors = selection_workloads(args.selection_root, sequences)
+    workload_target_crops = sum(int(row["target_crops"]) for row in workloads)
+    workload_frames = sum(int(row["frames"]) for row in workloads)
+    if (
+        workload_errors
+        or len(workloads) != len(sequences)
+        or workload_target_crops != sapiens_total
+        or workload_frames != sam_total
+    ):
+        freeze_forecast: dict[str, Any] = {
+            "available": False,
+            "kind": "OPTIMISTIC_UPPER_BOUND",
+            "reason": "selector workload inventory is incomplete or inconsistent",
+            "inventory_target_crops": workload_target_crops,
+            "inventory_frames": workload_frames,
+            "inventory_errors": workload_errors,
+        }
+    else:
+        freeze_forecast = deadline_freeze_upper_bound(
+            workloads,
+            terminal_sequences=set(body_status),
+            accepted_sequences={
+                sequence
+                for sequence, status in body_status.items()
+                if str(status).upper().startswith(("PASS", "REVIEW"))
+            },
+            completed_sam_cameras=set(sam_completed),
+            current_sam=sam_current,
+            current_sam_frames=current_sam_frames,
+            pose_completed_crops=sapiens_done,
+            pose_rate=(
+                safe_float(pose.get("recent_chunk_crops_per_second"))
+                or safe_float(pose.get("effective_new_crops_per_second"))
+            ),
+            sam_rate=sam_rate,
+            now=now,
+            deadline=deadline,
+        )
 
     try:
         disk_usage = shutil.disk_usage(args.disk_path)
@@ -903,6 +1087,23 @@ def build_dashboard(
             f"Sapiens ETA is {human_duration((eta - deadline).total_seconds())} after the deadline.",
             severity="WARNING",
         )
+    forecast_count = freeze_forecast.get(
+        "estimated_completed_sequences_by_deadline"
+    )
+    if (
+        freeze_forecast.get("available")
+        and remaining_seconds > 0
+        and isinstance(forecast_count, int)
+        and forecast_count < total_sequences
+    ):
+        attention(
+            "DEADLINE_FREEZE_COVERAGE_AT_RISK",
+            f"Even the overhead-free schedule upper bound reaches only "
+            f"{forecast_count}/{total_sequences} sequences by the deadline; "
+            f"first projected late sequence is "
+            f"{freeze_forecast.get('first_sequence_after_deadline') or 'unknown'}.",
+            severity="WARNING",
+        )
     if deadline_snapshot_status in {
         "EXPORT_FAILED",
         "EXPORT_INTEGRITY_FAILED",
@@ -970,6 +1171,7 @@ def build_dashboard(
             "remaining_seconds": remaining_seconds,
             "remaining_human": human_duration(remaining_seconds),
             "passed": remaining_seconds < 0,
+            "freeze_forecast": freeze_forecast,
         },
         "sapiens": {
             "model": "Sapiens2-5B target-only",
@@ -1205,6 +1407,7 @@ def render_rich(state: dict[str, Any], console: Any | None = None) -> Any:
             ),
         )
     export = state["export"]
+    forecast = deadline.get("freeze_forecast", {})
     checkpoint = export.get("durable_checkpoint", {})
     checkpoint_follower = state.get("predeadline_checkpoint_follower", {})
     table.add_row(
@@ -1217,7 +1420,10 @@ def render_rich(state: dict[str, Any], console: Any | None = None) -> Any:
         "-",
         f"{export['deadline_snapshot_status']} | "
         f"checkpoint={checkpoint.get('build_id') or '-'} "
-        f"freeze={checkpoint.get('freeze_eligible', False)}",
+        f"freeze={checkpoint.get('freeze_eligible', False)} | "
+        f"deadline upper-bound "
+        f"{forecast.get('estimated_completed_sequences_by_deadline', '-')}/"
+        f"{forecast.get('total_sequences', '-')}",
     )
     gpu = state["gpu"]
     disk = state["disk"]
@@ -1297,6 +1503,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=PROJECT_ROOT / "outputs/runtime/autonomous_generation",
     )
     parser.add_argument("--runtime-dir", type=Path, default=PROJECT_ROOT / ".runtime")
+    parser.add_argument(
+        "--selection-root",
+        type=Path,
+        default=PROJECT_ROOT / "outputs" / "target_selection_full",
+    )
     parser.add_argument("--pose-root", type=Path, default=PROJECT_ROOT / "outputs/sapiens2_target_only_full")
     parser.add_argument("--sam-output-root", type=Path, default=PROJECT_ROOT / "outputs/sam_body4d_full")
     parser.add_argument("--triangulation-root", type=Path, default=PROJECT_ROOT / "outputs/triangulation_final")

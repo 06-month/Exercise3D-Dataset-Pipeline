@@ -10,14 +10,73 @@ from pathlib import Path
 from tools.monitor_autonomous_generation import (
     atomic_json,
     build_dashboard,
+    deadline_freeze_upper_bound,
     export_progress,
     first_incomplete_camera,
     metadata_statuses,
     quality_progress,
+    selection_workloads,
 )
 
 
 class AutonomousMonitorTest(unittest.TestCase):
+    def test_selection_workloads_validate_small_summary_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for sequence in ("one", "two"):
+                for index, camera in enumerate(("cam1", "cam2", "cam3"), start=1):
+                    directory = root / sequence / camera
+                    directory.mkdir(parents=True)
+                    atomic_json(
+                        directory / "summary.json",
+                        {
+                            "sequence": sequence,
+                            "camera": camera,
+                            "status": "REVIEW" if camera == "cam1" else "PASS",
+                            "frame_count": 10 + index,
+                            "target_only_sapiens_crops": 9 + index,
+                        },
+                    )
+            rows, errors = selection_workloads(root, ["one", "two"])
+            self.assertEqual(errors, [])
+            self.assertEqual([row["sequence"] for row in rows], ["one", "two"])
+            self.assertEqual(rows[0]["frames"], 36)
+            self.assertEqual(rows[0]["target_crops"], 33)
+
+    def test_deadline_forecast_is_explicit_optimistic_sequence_bound(self) -> None:
+        now = datetime(2026, 8, 12, tzinfo=timezone.utc)
+        workloads = [
+            {
+                "sequence": sequence,
+                "target_crops": 10,
+                "frames": 10,
+                "cameras": {
+                    "cam1": {"target_crops": 4, "frames": 4},
+                    "cam2": {"target_crops": 3, "frames": 3},
+                    "cam3": {"target_crops": 3, "frames": 3},
+                },
+            }
+            for sequence in ("one", "two", "three")
+        ]
+        forecast = deadline_freeze_upper_bound(
+            workloads,
+            terminal_sequences={"one"},
+            accepted_sequences={"one"},
+            completed_sam_cameras={"two/cam1"},
+            current_sam=("two", "cam2"),
+            current_sam_frames=1,
+            pose_completed_crops=10,
+            pose_rate=1.0,
+            sam_rate=1.0,
+            now=now,
+            deadline=now + timedelta(seconds=25),
+        )
+        self.assertTrue(forecast["available"])
+        self.assertEqual(forecast["kind"], "OPTIMISTIC_UPPER_BOUND")
+        self.assertEqual(forecast["estimated_completed_sequences_by_deadline"], 2)
+        self.assertEqual(forecast["first_sequence_after_deadline"], "three")
+        self.assertIn("overhead excluded", forecast["assumptions"][-1])
+
     def test_first_incomplete_camera_respects_frozen_order(self) -> None:
         self.assertEqual(
             first_incomplete_camera(
@@ -425,6 +484,7 @@ class AutonomousMonitorTest(unittest.TestCase):
             sequence_status=root / "sequences.csv",
             autonomous_runtime_dir=runtime,
             runtime_dir=runtime,
+            selection_root=outputs / "selection",
             pose_root=outputs / "pose",
             sam_output_root=outputs / "sam",
             triangulation_root=outputs / "triangulation",
