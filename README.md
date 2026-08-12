@@ -16,6 +16,9 @@ payload는 공개하지 않습니다. 저장소에는 재현 가능한 코드, �
 `tools/monitor_autonomous_generation.py`가 `.runtime/dashboard_state.json`에 atomic 저장합니다.
 Phase 11 CPU follower는 quality가 완료된 sequence에 대해 final exporter과 동일 validation을
 미리 수행하고 dashboard에 `freeze-ready` count와 지속 dependency failure를 보고합니다.
+별도 CPU-only predeadline checkpoint follower는 이 ready 집합이 기존 byte-verified
+checkpoint의 strict superset이 되었을 때만 deterministic immutable build를 추가합니다.
+동일 집합은 재export하지 않으며, final deadline snapshot과 별도 build ID/state를 사용합니다.
 별도 CPU-only supervisor watchdog은 살아 있는 supervisor의 exact argv를 persisted resume
 command와 digest pin하고, 3회 연속 absence와 final rescan을 통과한 때만 자동
 resume합니다. 신규 supervisor는 lifetime advisory lock으로 launch race에서도 중복
@@ -311,6 +314,7 @@ Sapiens2 Pose 5B single-image smoke:
 | `tools/fit_sequence_body.py` | geometry-dominant staged sequence body fit과 S0 | ignored private output 생성 |
 | `tools/build_pseudolabel_quality.py` | target/pose/SAM/geometry/body evidence의 frame/sequence quality vector | ignored private output 생성 |
 | `tools/run_quality_control_follower.py` | 완료 body-fit을 감지하는 CPU-only Phase 11 follower | ignored runtime/quality output 갱신 |
+| `tools/run_predeadline_checkpoint_follower.py` | 증가한 freeze-ready 집합만 immutable checkpoint로 보존하는 CPU-only follower | ignored runtime/private freeze 갱신 |
 | `tools/export_private_dataset.py` | versioned private dataset export와 byte/SHA/schema 검증 | ignored private output 생성 |
 | `tools/evaluate_fit3d_metrics.py` | prepared Fit3D pair의 MPJPE/N-MPJPE/PA-MPJPE 분리 평가 | ignored aggregate 생성 |
 | `tools/summarize_sam_body_runtime.py` | A/B/C ratio, occlusion 증가와 best/expected/worst runtime 집계 | redacted aggregate 생성 |

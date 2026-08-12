@@ -180,6 +180,7 @@ class AutonomousMonitorTest(unittest.TestCase):
             self.assertIn("SAPIENS_PROCESS_DEAD", codes)
             self.assertIn("SUPERVISOR_DEAD", codes)
             self.assertIn("QUALITY_FOLLOWER_DEAD", codes)
+            self.assertIn("PREDEADLINE_CHECKPOINT_FOLLOWER_DEAD", codes)
             self.assertIn("DISK_RESERVE_LOW", codes)
             self.assertIn("VALIDATION_FAIL", codes)
             self.assertIn("SEQUENCE_PIPELINE_FAILED", codes)
@@ -242,6 +243,7 @@ class AutonomousMonitorTest(unittest.TestCase):
                 self._process(5, "quality_follower"),
                 self._process(6, "supervisor_watchdog"),
                 self._process(7, "deadline_sentinel_watchdog"),
+                self._process(8, "checkpoint_follower"),
             ]
             args = self._args(root)
             atomic_json(
@@ -262,6 +264,17 @@ class AutonomousMonitorTest(unittest.TestCase):
                     "attention_required": False,
                     "attention_reasons": [],
                     "last_event": "DEADLINE_SENTINEL_OBSERVED",
+                },
+            )
+            atomic_json(
+                args.checkpoint_follower_state,
+                {
+                    "updated_at_utc": now.isoformat(),
+                    "status": "RUNNING",
+                    "attention_required": False,
+                    "attention_reasons": [],
+                    "last_event": "WAITING_FOR_NEW_FREEZE_READY_SEQUENCE",
+                    "ready_sequence_count": 0,
                 },
             )
             state = build_dashboard(
@@ -344,6 +357,46 @@ class AutonomousMonitorTest(unittest.TestCase):
             }
             self.assertIn("FREEZE_READINESS_FAILED", readiness_codes)
 
+    def test_checkpoint_follower_is_not_required_after_deadline(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            now = datetime(2026, 8, 14, 5, tzinfo=timezone.utc)
+            handoff = {
+                "updated_at_utc": now.isoformat(),
+                "deadline_utc": (now - timedelta(hours=1)).isoformat(),
+                "completed": [],
+                "remaining": ["one"],
+                "pose": {
+                    "completed_cameras": [],
+                    "processed_target_crops": 0,
+                    "total_target_crops": 100,
+                },
+                "sam": {
+                    "completed_cameras": [],
+                    "processed_frames": 0,
+                    "total_frames": 200,
+                },
+                "triangulation": {"count": 0, "status": {}},
+                "body_fit": {"count": 0, "status": {}},
+            }
+            atomic_json(root / "handoff.json", handoff)
+            atomic_json(
+                root / "deadline.json",
+                {
+                    "deadline_utc": (now - timedelta(hours=1)).isoformat(),
+                    "status": "COMPLETE",
+                },
+            )
+            state = build_dashboard(
+                self._args(root),
+                now=now,
+                processes=[],
+                gpu={"available": True, "utilization_pct": 0.0, "devices": []},
+            )
+            codes = {row["code"] for row in state["attention_reasons"]}
+            self.assertNotIn("PREDEADLINE_CHECKPOINT_FOLLOWER_DEAD", codes)
+            self.assertNotIn("PREDEADLINE_CHECKPOINT_FOLLOWER_STATE_STALE", codes)
+
     @staticmethod
     def _process(pid: int, group: str) -> dict[str, object]:
         return {
@@ -366,6 +419,7 @@ class AutonomousMonitorTest(unittest.TestCase):
             supervisor_state=root / "supervisor.json",
             supervisor_watchdog_state=root / "supervisor_watchdog.json",
             deadline_watchdog_state=root / "deadline_watchdog.json",
+            checkpoint_follower_state=root / "checkpoint_follower.json",
             deadline_state=root / "deadline.json",
             quality_follower_state=root / "quality_follower.json",
             sequence_status=root / "sequences.csv",

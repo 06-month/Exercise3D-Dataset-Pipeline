@@ -246,6 +246,26 @@
   Persistent state에서 deadline 0, checkpoint 11, REVIEW 11, 366 files/344,922,733 bytes,
   contract consistent/freeze true, 다른 attention 없음을 확인했다.
 
+### Freeze-ready 증가분 autonomous checkpoint follower
+
+- AI polling 없이 이후 완료 sequence도 내구적으로 보존하도록
+  `tools/run_predeadline_checkpoint_follower.py`를 추가했다. 이 process는 GPU/inference를 호출하지
+  않고 기존 quality follower의 atomic `freeze_readiness`만 소비한다.
+- 시작 시 contract-v2 candidate를 큰 순서로 전수 byte/SHA 검증하여 largest valid checkpoint를
+  source of truth로 선택한다. Ready 집합이 그 checkpoint의 strict superset이고 deadline 전일 때만
+  frozen sequence order와 집합 SHA에 묶인 deterministic build ID로 새 immutable export를 실행한다.
+- 기존 집합과 동일하면 아무것도 생성하지 않는다. 변경된 same-size/non-superset 집합, readiness
+  validation failure, integrity failure와 disk reserve 부족은 structured attention으로 남긴다.
+  Export build lock의 exit 75는 recoverable coordination event로 분류해 자동 재시도한다.
+- Follower state는 `.runtime/predeadline_checkpoint_follower_state.json`에 atomic rename+directory fsync로
+  저장한다. Lifetime singleton lock으로 duplicate follower를 거부하며 final deadline sentinel/build과
+  별도 state/build prefix를 쓴다.
+- Dashboard/handoff process discovery에 follower alive/stale/duplicate/structured-attention을 연결했고,
+  deadline이 지난 뒤 정상 종료한 follower를 사망으로 오인하지 않도록 predeadline에서만 생존을 요구한다.
+- 실제 one-shot은 현재 freeze-ready 11과 기존 checkpoint 11을 전수 검증한 뒤
+  `WAITING_FOR_NEW_FREEZE_READY_SEQUENCE`, attempted build/exit code 없음, attention false였다.
+  신규 export나 GPU process는 생성하지 않았다. 전체 105개 regression이 PASS했다.
+
 ### Source-of-truth 재검증
 
 - HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화

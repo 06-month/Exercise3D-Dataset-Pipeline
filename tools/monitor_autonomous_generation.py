@@ -34,6 +34,7 @@ PROCESS_MARKERS = {
     "handoff_monitor": {"checkpoint_handoff_state.py"},
     "deadline_sentinel": {"run_deadline_snapshot.py"},
     "deadline_sentinel_watchdog": {"run_deadline_sentinel_watchdog.py"},
+    "checkpoint_follower": {"run_predeadline_checkpoint_follower.py"},
 }
 
 
@@ -514,6 +515,7 @@ def build_dashboard(
     supervisor_watchdog_state = read_json(args.supervisor_watchdog_state)
     deadline_state = read_json(args.deadline_state)
     deadline_watchdog_state = read_json(args.deadline_watchdog_state)
+    checkpoint_follower_state = read_json(args.checkpoint_follower_state)
     quality_follower_state = read_json(args.quality_follower_state)
     freeze_readiness = dict(quality_follower_state.get("freeze_readiness", {}))
     previous = read_json(args.output)
@@ -685,6 +687,15 @@ def build_dashboard(
             "QUALITY_FOLLOWER_DEAD",
             "Phase 11 quality output is incomplete but the CPU follower is not alive.",
         )
+    if (
+        remaining_seconds > 0
+        and incomplete_quality
+        and not roots["checkpoint_follower"]
+    ):
+        attention(
+            "PREDEADLINE_CHECKPOINT_FOLLOWER_DEAD",
+            "Quality/freeze output is incomplete but the durable checkpoint follower is not alive.",
+        )
     watchdog_updated = parse_datetime(supervisor_watchdog_state.get("updated_at_utc"))
     if (
         (incomplete_pose or incomplete_body)
@@ -750,6 +761,41 @@ def build_dashboard(
                 "DEADLINE_SENTINEL_WATCHDOG_ATTENTION",
                 "Deadline sentinel watchdog requested attention without a structured reason.",
             )
+    checkpoint_follower_updated = parse_datetime(
+        checkpoint_follower_state.get("updated_at_utc")
+    )
+    if (
+        remaining_seconds > 0
+        and incomplete_quality
+        and roots["checkpoint_follower"]
+        and (
+            checkpoint_follower_updated is None
+            or (now - checkpoint_follower_updated).total_seconds()
+            > args.state_stale_seconds
+        )
+    ):
+        age = (
+            "unknown"
+            if checkpoint_follower_updated is None
+            else human_duration((now - checkpoint_follower_updated).total_seconds())
+        )
+        attention(
+            "PREDEADLINE_CHECKPOINT_FOLLOWER_STATE_STALE",
+            f"predeadline_checkpoint_follower_state.json age is {age}.",
+        )
+    if checkpoint_follower_state.get("attention_required"):
+        follower_reasons = checkpoint_follower_state.get("attention_reasons", [])
+        if follower_reasons:
+            for reason in follower_reasons:
+                attention(
+                    str(reason.get("code", "PREDEADLINE_CHECKPOINT_FOLLOWER_ATTENTION")),
+                    str(reason.get("message", reason)),
+                )
+        else:
+            attention(
+                "PREDEADLINE_CHECKPOINT_FOLLOWER_ATTENTION",
+                "Checkpoint follower requested attention without a structured reason.",
+            )
     quality_follower_updated = parse_datetime(quality_follower_state.get("updated_at_utc"))
     if (
         incomplete_quality
@@ -805,6 +851,7 @@ def build_dashboard(
         "deadline_sentinel",
         "supervisor_watchdog",
         "deadline_sentinel_watchdog",
+        "checkpoint_follower",
     ):
         if len(roots[group]) > 1:
             attention(
@@ -895,6 +942,7 @@ def build_dashboard(
             "supervisor",
             "supervisor_watchdog",
             "quality_follower",
+            "checkpoint_follower",
         )
     ):
         overall_status = "RUNNING"
@@ -1047,6 +1095,24 @@ def build_dashboard(
                 "attention_reasons", []
             ),
         },
+        "predeadline_checkpoint_follower": {
+            "alive": bool(roots["checkpoint_follower"]),
+            "pid": (
+                roots["checkpoint_follower"][0]["pid"]
+                if roots["checkpoint_follower"]
+                else None
+            ),
+            "status": checkpoint_follower_state.get("status", "UNKNOWN"),
+            "updated_at": checkpoint_follower_state.get("updated_at_utc"),
+            "last_event": checkpoint_follower_state.get("last_event"),
+            "ready_sequence_count": int(
+                checkpoint_follower_state.get("ready_sequence_count", 0) or 0
+            ),
+            "best_checkpoint": checkpoint_follower_state.get("best_checkpoint"),
+            "attention_reasons": checkpoint_follower_state.get(
+                "attention_reasons", []
+            ),
+        },
         "gpu": gpu,
         "disk": disk,
         "last_progress_timestamp": last_progress.isoformat(),
@@ -1140,11 +1206,14 @@ def render_rich(state: dict[str, Any], console: Any | None = None) -> Any:
         )
     export = state["export"]
     checkpoint = export.get("durable_checkpoint", {})
+    checkpoint_follower = state.get("predeadline_checkpoint_follower", {})
     table.add_row(
         "Export / freeze",
         f"deadline {export['completed_sequences']} | "
         f"checkpoint {checkpoint.get('completed_sequences', 0)} sequences",
-        export["latest_build_id"] or "-",
+        f"{export['latest_build_id'] or '-'} | follower PID "
+        f"{checkpoint_follower.get('pid') or '-'} "
+        f"{checkpoint_follower.get('status', 'UNKNOWN')}",
         "-",
         f"{export['deadline_snapshot_status']} | "
         f"checkpoint={checkpoint.get('build_id') or '-'} "
@@ -1209,6 +1278,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--quality-follower-state",
         type=Path,
         default=PROJECT_ROOT / ".runtime" / "quality_follower_state.json",
+    )
+    parser.add_argument(
+        "--checkpoint-follower-state",
+        type=Path,
+        default=PROJECT_ROOT
+        / ".runtime"
+        / "predeadline_checkpoint_follower_state.json",
     )
     parser.add_argument(
         "--sequence-status",
