@@ -1590,3 +1590,60 @@ verdict는 보류한다.
 - 2026-08-15 00:00 UTC freeze는 `NO_GO`; end-of-day도 QC/재시도 여유가 작아
   `DEADLINE_AT_RISK`
 - 전체 Sapiens2/SAM inference는 실행하지 않았으며 별도 사용자 승인 전 `HOLD`
+
+## 2026-08-13 — Target-complete SAM recovery와 monitoring control-plane 정리
+
+### `barbellrow_0003` root cause와 무재추론 복구
+
+- Supervisor의 두 실패는 CUDA/OOM/schema/identity 문제가 아니라 SAM completion gate가 selector
+  abstention tail에도 source-frame 수만큼 mesh/numeric payload를 요구한 것이 원인이었다.
+- 세 camera의 target-valid/output-valid는 731/735, 700/702, 684/688이다. 모든 accepted target에는
+  numeric/mesh가 있고, tracker가 abstention 구간으로 2–4 frame을 전파한 뒤 종료했다.
+- Completion contract를 accepted-target coverage, provenance timeline-bound output, exact mesh/numeric
+  frame identity, primary object root/schema로 정렬했다. Abstention output은 optional이며 downstream
+  `accepted_prior = output_valid & target_valid` 때문에 존재해도 채택하지 않는다.
+- Runner 재호출은 0.5초에 세 camera 모두 `resume_skipped=true` PASS했고 GPU child/recomputation은 0이었다.
+  Prior consolidation은 output-valid 2,125/accepted 2,115, intentional abstention 156을 보존했다.
+- Body fit은 757×26, final valid fraction 0.92262, alignment 0.91590, prior-only joint 7,
+  displacement p95 0.04835, FAIL 0의 `REVIEW_BODY_FIT_QUALITY`다. Mode C는 자동 실행하지 않고
+  selective candidate 150 frame만 기록했고 quality는 REVIEW다.
+- Inference provenance/handoff progress와 prior consolidation도 같은 target-complete contract를 사용한다.
+  관련 commits는 `6e08988`, `0667c70`, `fdee353`이다.
+
+### NaN warning과 검증
+
+- Abstention으로 모든 view가 NaN인 body consensus에서 발생하던 `All-NaN slice` warning을, 유효 view가
+  있는 frame/joint에서만 median을 계산하고 unsupported joint는 기존 의미대로 NaN으로 보존하도록
+  수정했다. Threshold, acceptance, Mode C candidate 결정은 바꾸지 않았다 (`80d9d80`).
+- 전체 170 unit tests, Python compile, publication-safety 129-file audit가 PASS했다.
+
+### Supervisor watchdog identity adoption
+
+- Session 복구 때 supervisor의 `--wait-sapiens-pid`가 바뀌어 live/resume argv는 exact-match하지만 old
+  watchdog의 pinned SHA만 stale했다. Generic auto-repin은 허용하지 않고, exactly one live supervisor가
+  validated persisted resume command와 일치할 때만 동작하는 `--adopt-live-command --once`를 추가했다
+  (`15701f9`).
+- Live supervisor PID 2980339, PPID 1, child 0, lifetime lock held, restart 0/3과 watchdog PID 2981054의
+  exact argv/cwd/child 0/lock을 확인했다. Supervisor/GPU job은 signal하지 않고 old CPU watchdog만 종료,
+  explicit adoption 후 flag 없는 normal argv로 PID 197832를 detached 기동했다. New watchdog은 PPID 1,
+  RUNNING, attention false, exact live/resume SHA, restart 0/3이다.
+
+### Durable monitoring/freeze state
+
+- Old handoff monitor가 target-complete code 전 버전을 load하고 있어 exact identity/child/lock/restart
+  budget을 확인한 뒤 monitor만 종료했다. 수동 launch 없이 monitoring watchdog의 bounded recovery가
+  current code를 load했고 SAM durable progress는 63/78 camera, 47,940/65,595 source frame, 21/26
+  sequence로 교정됐다.
+- `barbellrow_0003` SAM provenance sidecar 3개를 atomic materialize하고 prior에 전파했다. Export validator의
+  read-only current-source 검사에서 REVIEW, reasons 0, reference 757로 freeze-ready임을 확인했다.
+  Quality follower의 이전 missing-sidecar result는 정해진 retry cache가 만료된 뒤 자동 갱신됐으며 process를
+  재시작하거나 state CSV를 수동 수정하지 않았다.
+- 2026-08-13 22:03 KST snapshot은 Sapiens 64/78 camera와 49,633/65,430 crop, quality 21/26,
+  GPU 100%, 36,375/81,920 MiB, OOM/retry/stall 0이다. Last verified immutable checkpoint는
+  follower는 `exercise3d-predeadline-auto-021-32a51bf7c071` 21-sequence checkpoint를 게시했다.
+  696 files/766,963,670 bytes, REVIEW 21/FAIL·INCOMPLETE 0, manifest contract/integrity/freeze eligibility가
+  모두 PASS다. Deadline forecast는 24/26, first late `deadlift_0002`다.
+- Monitor는 supervisor의 historical failure row보다 terminal quality PASS/REVIEW를 더 강한 evidence로
+  취급한다 (`b8d7a01`). 171 tests와 publication safety가 PASS했다. Old quiet dashboard PID 2065337만
+  exact-identity controlled replace해 current-code PID 208462(PPID 1)를 기동했고 monitoring watchdog이
+  singleton/exact argv/restart 0/3으로 관찰한다. Current attention은 deadline ETA/coverage WARNING뿐이다.
