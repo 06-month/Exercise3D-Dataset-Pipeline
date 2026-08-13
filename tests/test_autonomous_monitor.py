@@ -23,10 +23,24 @@ from tools.monitor_autonomous_generation import (
     remaining_schedule_dominance_audit,
     sam_output_storage_forecast,
     selection_workloads,
+    unrecovered_sequence_failures,
 )
 
 
 class AutonomousMonitorTest(unittest.TestCase):
+    def test_terminal_quality_suppresses_historical_supervisor_failure(self) -> None:
+        rows = [
+            {"sequence": "recovered", "status": "INCOMPLETE", "failed_stage": "SAM_MODE_B"},
+            {"sequence": "failed", "status": "INCOMPLETE", "failed_stage": "BODY_FIT"},
+            {"sequence": "complete", "status": "REVIEW", "failed_stage": ""},
+        ]
+        failures = unrecovered_sequence_failures(
+            rows, {"recovered": "REVIEW", "failed": "FAIL"}
+        )
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]["sequence"], "failed")
+        self.assertEqual(failures[0]["message"], "BODY_FIT")
+
     def test_deadline_sentinel_implementation_detects_missing_and_exact_sha(self) -> None:
         missing = deadline_sentinel_implementation_status({})
         self.assertFalse(missing["exact"])

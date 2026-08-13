@@ -1026,6 +1026,28 @@ def quality_progress(root: Path, sequences: list[str]) -> dict[str, Any]:
     }
 
 
+def unrecovered_sequence_failures(
+    rows: list[dict[str, Any]], quality_statuses: dict[str, str]
+) -> list[dict[str, Any]]:
+    """Report failed supervisor rows unless stronger terminal quality exists."""
+    failures: list[dict[str, Any]] = []
+    for row in rows:
+        if row.get("status") in {"PASS", "REVIEW"}:
+            continue
+        sequence = str(row.get("sequence") or "")
+        if quality_statuses.get(sequence) in {"PASS", "REVIEW"}:
+            continue
+        failures.append(
+            {
+                "code": "SEQUENCE_PIPELINE_FAILED",
+                "source": "autonomous_sequences.csv",
+                "sequence": sequence or None,
+                "message": row.get("failed_stage") or row.get("status"),
+            }
+        )
+    return failures
+
+
 def sam_retry_summary(runtime_dir: Path) -> tuple[int, list[dict[str, Any]]]:
     retry_count = 0
     failures: list[dict[str, Any]] = []
@@ -1362,17 +1384,6 @@ def build_dashboard(
     sequence_rows = load_sequence_rows(args.sequence_status)
     retry_count, sam_failures = sam_retry_summary(args.autonomous_runtime_dir)
     runtime_errors = scan_runtime_errors(args.runtime_dir)
-    row_failures = [
-        {
-            "code": "SEQUENCE_PIPELINE_FAILED",
-            "source": "autonomous_sequences.csv",
-            "sequence": row.get("sequence"),
-            "message": row.get("failed_stage") or row.get("status"),
-        }
-        for row in sequence_rows
-        if row.get("status") not in {"PASS", "REVIEW"}
-    ]
-    errors = runtime_errors + sam_failures + row_failures
 
     triangulation_source = dict(handoff.get("triangulation", {}))
     body_source = dict(handoff.get("body_fit", {}))
@@ -1387,6 +1398,10 @@ def build_dashboard(
     triangulation_counts = status_counts(triangulation_status.values())
     body_counts = status_counts(body_status.values())
     quality = quality_progress(args.quality_root, sequences)
+    row_failures = unrecovered_sequence_failures(
+        sequence_rows, quality["statuses"]
+    )
+    errors = runtime_errors + sam_failures + row_failures
     export = export_progress(args.export_root, deadline_state.get("build_id"))
     deadline_snapshot_status = str(deadline_state.get("status", "UNKNOWN"))
     deadline_implementation = deadline_sentinel_implementation_status(
