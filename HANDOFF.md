@@ -33,11 +33,11 @@
   watchdog PID 2981054만 종료했다. `--adopt-live-command --once`가 exactly-one live/resume match를 검증해
   SHA를 명시적으로 repin했고, normal argv로 detached 재기동한 PID 197832가 PPID=1, RUNNING,
   attention false, restart 0/3이다. Supervisor PID 2980339와 GPU inference는 signal/restart하지 않았다.
-- 2026-08-13 21:59 KST authoritative dashboard snapshot: Sapiens 64/78 camera,
+- 2026-08-13 22:09 KST authoritative dashboard snapshot: Sapiens 64/78 camera,
   49,633/65,430 crop, current `squat_0000/cam2`; triangulation/body/quality 21/21/21 sequence,
   quality REVIEW 21/FAIL 0. Last verified checkpoint는
   `exercise3d-predeadline-auto-021-32a51bf7c071`, 21 sequence, `freeze_eligible=true`다.
-- Sapiens recent throughput 0.220 crop/s; projected ETA는 deadline 약 4시간 55분 후 risk.
+- Sapiens recent throughput 0.220 crop/s; projected ETA는 deadline 약 5시간 5분 후 risk.
   OOM/retry/stall은 없음
 - Phase 7 initial/final triangulation reuse는 pose NPZ/metadata, selected camera refinement/validation,
   first-frame shape source, temporal report, VGGT canvas metadata, canonical config와 triangulation tool의
@@ -86,8 +86,8 @@
   새 signed completion은 follower fast path에서도 source drift를 확인하며 corrupt NPZ는 follower 종료 대신
   bounded retry state로 전환한다. Live quality follower는 재시작하지 않았고 다음 supervisor quality
   subprocess부터 current builder가 자동 적용된다.
-- GPU: A100 80GB, 21:59 KST Sapiens-only snapshot 36,375/81,920 MiB, utilization 100%,
-  366.59 W, 56°C. observed OOM/retry 없음
+- GPU: A100 80GB, 22:09 KST Sapiens-only snapshot 36,375/81,920 MiB, utilization 100%,
+  305.31 W, 54°C. observed OOM/retry 없음
 - exact live command/PID/progress/ETA: `.runtime/handoff_state.json`
 - long-running handoff monitor PID 2006909는 target-complete SAM semantics 변경 전 code를 load하고 있어,
   exact argv/cwd, child 0, lifetime lock, monitoring-watchdog identity, restart 0/3을 확인한 뒤 그 PID만
@@ -135,10 +135,9 @@
   `.runtime/dashboard_state.json`. Quiet daemon PID 208462이며 `--once`는 snapshot,
   기본은 Rich live, `--quiet`는 state-only daemon이다. Export section은 final deadline
   build progress와 contract-v2 best durable checkpoint progress를 별도로 보존한다. Selector exact workload와
-  measured rate를 사용한 21:59 KST overhead-free deadline upper bound와 empirical p90-adjusted forecast는
-  모두 24/26이며 첫 late sequence는 `deadlift_0002`다. Disk free 115.744 GiB, SAM-final 예상 free
-  97.183 GiB이고 reserve attention은 없다. Latest combined checkpoint/final storage forecast가 `-`이면
-  이전 숫자를 추정해 채우지 말고 다음 current-code dashboard snapshot을 source of truth로 사용한다.
+  measured rate를 사용한 22:09 KST overhead-free deadline upper bound와 empirical p90-adjusted forecast는
+  모두 24/26이며 첫 late sequence는 `deadlift_0002`다. Disk free 115.026 GiB, SAM-final 예상 free
+  97.950 GiB, combined deadline/all 예상 free 94.639/92.624 GiB로 reserve attention은 없다.
   남은 14 sequence의 exact selector workload audit은 target crops와 SAM frames 양쪽 모두
   `PARETO_NONDECREASING`, dominance/combined-cost inversion 0이다. 이는 global optimum 증명이 아니라
   뒤 sequence가 두 GPU workload 모두 더 작은 명백한 order 오류가 없다는 지속 gate다.
@@ -152,15 +151,15 @@
   restart 0/3이며 inference/supervisor는 건드리지 않았다.
 - Monitoring-plane watchdog PID 2009359: dashboard/handoff monitor의 live/resume exact argv SHA를
   각각 pin한다. Latest-completion code activation 중 exec-scoped manual daemon이 첫 state 뒤 종료되자
-  3-cycle/final-rescan 경로로 dashboard PID 2044638을 1회 자동 복구했으며 현재 exact identity,
-  missing 0, attention false다. Loaded-code SHA monitor activation으로 dashboard recovery count는 현재
-  2이며 PID 2065337 exact identity다. 두 monitor와 watchdog의 lifetime lock은 모두 held다.
+  3-cycle/final-rescan 경로로 dashboard를 복구한 이력이 있다. 현재 dashboard PID 208462와 recovered
+  handoff monitor는 각각 exact live/resume identity, missing 0, attention false다. 두 monitor와
+  watchdog의 lifetime lock은 모두 held다.
   3회 연속 absence + 2초 final rescan 후 target별 최대 3회/시간 detached recovery하고 live process는
   signal하지 않는다. Exact target/watchdog commands는 `.runtime/handoff_state.json`, state는
   `.runtime/monitoring_watchdog_state.json`에 atomic 보존된다.
 - Phase 11 CPU follower PID 2981075: `setsid` 독립 session, PPID=1. quality 21/26이며
-  `barbellrow_0003` SAM camera provenance 3개와 prior copy 3개를 atomic materialize했다. 다음 cycle에서
-  freeze-readiness와 checkpoint strict-superset을 자동 갱신한다. State는
+  `barbellrow_0003` SAM camera provenance 3개와 prior copy 3개를 atomic materialize했다. Retry cycle이
+  freeze-readiness 21/26을 검증했고 failures 0이다. State는
   `.runtime/quality_follower_state.json`.
 - Quality follower watchdog PID 2981113: RUNNING, attention false.
 - CPU-only predeadline checkpoint follower PID 2981156: `setsid` 독립 session, PPID=1.
@@ -371,4 +370,4 @@ tmux new-window -n exercise3d-dashboard \
 
 ## Last updated
 
-- 2026-08-13 22:08 KST
+- 2026-08-13 22:10 KST
