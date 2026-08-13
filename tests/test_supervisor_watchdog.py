@@ -8,6 +8,7 @@ from pathlib import Path
 from tools.run_autonomous_supervisor_watchdog import (
     PROJECT_ROOT,
     acquire_singleton_lock,
+    adoptable_live_command_sha,
     command_sha256,
     recent_restart_history,
     recovery_decision,
@@ -18,6 +19,24 @@ from tools.run_autonomous_supervisor_watchdog import (
 
 
 class SupervisorWatchdogTest(unittest.TestCase):
+    def test_explicit_identity_adoption_requires_one_exact_live_resume_match(self) -> None:
+        live = [{"command_sha256": "new"}]
+        self.assertEqual(
+            adoptable_live_command_sha(live, "new", None), ("new", None)
+        )
+        adopted, error = adoptable_live_command_sha([], "new", None)
+        self.assertIsNone(adopted)
+        self.assertIn("exactly one", str(error))
+        adopted, error = adoptable_live_command_sha(live * 2, "new", None)
+        self.assertIsNone(adopted)
+        self.assertIn("found 2", str(error))
+        adopted, error = adoptable_live_command_sha(live, "other", None)
+        self.assertIsNone(adopted)
+        self.assertIn("differ", str(error))
+        adopted, error = adoptable_live_command_sha(live, None, "bad resume")
+        self.assertIsNone(adopted)
+        self.assertEqual(error, "bad resume")
+
     def test_recovery_requires_confirmed_absence_and_valid_identity(self) -> None:
         base = dict(
             supervisor_count=0,

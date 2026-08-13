@@ -238,6 +238,21 @@ def recovery_decision(
     return "RESTART"
 
 
+def adoptable_live_command_sha(
+    processes: list[dict[str, Any]],
+    resume_sha: str | None,
+    command_error: str | None,
+) -> tuple[str | None, str | None]:
+    """Validate an explicit one-shot adoption of the live/resume identity."""
+    if command_error is not None or resume_sha is None:
+        return None, command_error or "persisted resume command identity is unavailable"
+    if len(processes) != 1:
+        return None, f"explicit adoption requires exactly one live supervisor, found {len(processes)}"
+    if processes[0].get("command_sha256") != resume_sha:
+        return None, "live supervisor and persisted resume command identities differ"
+    return resume_sha, None
+
+
 def launch_supervisor(argv: list[str], log_path: Path) -> int:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("ab", buffering=0) as log:
@@ -290,6 +305,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--restart-window-seconds", type=float, default=3600.0)
     parser.add_argument("--max-restarts", type=int, default=3)
     parser.add_argument("--once", action="store_true")
+    parser.add_argument(
+        "--adopt-live-command",
+        action="store_true",
+        help=(
+            "with --once only, explicitly replace the pinned identity when exactly one "
+            "live supervisor matches the validated persisted resume command"
+        ),
+    )
     return parser
 
 
@@ -303,6 +326,8 @@ def main() -> int:
         or args.max_restarts <= 0
     ):
         raise RuntimeError("watchdog intervals/restart limits are invalid")
+    if args.adopt_live_command and not args.once:
+        raise RuntimeError("--adopt-live-command is a one-shot operation and requires --once")
 
     singleton = acquire_singleton_lock(args.lock_path.resolve())
     if singleton is None:
@@ -328,6 +353,16 @@ def main() -> int:
         attention_reasons: list[dict[str, str]] = []
         last_event = "SUPERVISOR_OBSERVED"
         launched_pid: int | None = None
+
+        if args.adopt_live_command:
+            adopted_sha, adoption_error = adoptable_live_command_sha(
+                processes, resume_sha, command_error
+            )
+            if adopted_sha is not None:
+                expected_sha = adopted_sha
+                last_event = "COMMAND_IDENTITY_EXPLICITLY_ADOPTED"
+            else:
+                command_error = adoption_error
 
         if expected_sha is None and len(processes) == 1 and resume_sha:
             if processes[0]["command_sha256"] == resume_sha:
@@ -464,7 +499,8 @@ def main() -> int:
             "attention_reasons": attention_reasons,
             "policy": (
                 "never signal live jobs; pin exact live/resume identity; require consecutive absence; "
-                "final rescan; singleton watchdog; supervisor lifetime lock; capped detached recovery"
+                "explicit one-shot live/resume identity adoption only; final rescan; singleton watchdog; "
+                "supervisor lifetime lock; capped detached recovery"
             ),
         }
         atomic_json(args.runtime_state.resolve(), state)
