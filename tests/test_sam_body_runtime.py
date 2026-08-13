@@ -452,16 +452,23 @@ completion:
                 )
 
             self.assertEqual(completion_status(root, 2)["status"], "PASS")
+            # Missing trailing abstention outputs is valid: no target is forced,
+            # and consolidation explicitly rejects any propagated abstention.
             (numeric / "1.npz").unlink()
+            (mesh / "1.ply").unlink()
+            self.assertEqual(completion_status(root, 2)["status"], "PASS")
+
+            # Accepted target coverage remains mandatory.
+            (numeric / "0.npz").unlink()
             result = completion_status(root, 2)
             self.assertEqual(result["status"], "INCOMPLETE")
             self.assertIn("numeric_prior_complete", result["reason"])
 
             np.savez_compressed(
-                numeric / "1.npz",
+                numeric / "0.npz",
                 object_id=np.asarray(1, dtype=np.int32),
                 **{
-                    key: np.asarray(1, dtype=np.float32)
+                    key: np.asarray(0, dtype=np.float32)
                     for key in REQUIRED_PRIOR_FIELDS
                 },
             )
@@ -479,6 +486,51 @@ completion:
             self.assertEqual(result["status"], "INCOMPLETE")
             self.assertIn("numeric_prior_no_extra_objects", result["reason"])
             self.assertIn("primary_object_roots_exact", result["reason"])
+
+    def test_full_resume_rejects_outputs_outside_source_timeline(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            private = root / "mode_b_private_output"
+            mesh = private / "mesh_4d_individual" / "1"
+            numeric = private / "mhr_numeric" / "1"
+            mesh.mkdir(parents=True)
+            numeric.mkdir(parents=True)
+            (root / "sam_body_benchmark.csv").write_text(
+                "status,frames_processed,elapsed_wall_seconds,peak_nvidia_vram_mib,gpu_utilization_mean_pct,power_mean_w\n"
+                "PASS,1,1,1,1,1\n",
+                encoding="utf-8",
+            )
+            (root / "mode_b_profile.json").write_text(
+                '{"frames_processed":1,"input_frames":1,"target_seed_count":1,"persons_processed":1}',
+                encoding="utf-8",
+            )
+            np.savez_compressed(
+                private / "target_provenance.npz",
+                frame_names=np.asarray(["0.jpg"]),
+                source_frame_names=np.asarray(["source.jpg"]),
+                source_frame_indices=np.asarray([0], dtype=np.int32),
+                target_bboxes_xyxy=np.asarray([[1, 2, 11, 22]], dtype=np.float32),
+                target_valid=np.asarray([True]),
+                target_selection_confidence=np.asarray([1.0]),
+                target_ambiguous=np.asarray([False]),
+                no_target=np.asarray([False]),
+                occlusion_risk=np.asarray([False]),
+                timestamp_pts_seconds=np.asarray([0.0]),
+            )
+            for stem in ("0", "outside"):
+                (mesh / f"{stem}.ply").touch()
+                np.savez_compressed(
+                    numeric / f"{stem}.npz",
+                    object_id=np.asarray(1, dtype=np.int32),
+                    **{
+                        key: np.asarray(0, dtype=np.float32)
+                        for key in REQUIRED_PRIOR_FIELDS
+                    },
+                )
+            result = completion_status(root, 1)
+            self.assertEqual(result["status"], "INCOMPLETE")
+            self.assertIn("mesh_complete", result["reason"])
+            self.assertIn("numeric_prior_complete", result["reason"])
 
     def test_full_resume_rejects_numeric_schema_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

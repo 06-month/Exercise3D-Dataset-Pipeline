@@ -262,7 +262,17 @@ def completion_status(output_dir: Path, expected_frames: int) -> dict[str, Any]:
             target_bboxes = payload["target_bboxes_xyxy"].astype(np.float64)
             timestamps = payload["timestamp_pts_seconds"].astype(np.float64)
             confidence = payload["target_selection_confidence"].astype(np.float64)
+            frame_stems = [Path(str(name)).stem for name in payload["frame_names"]]
+            expected_frame_stems = set(frame_stems)
             target_valid_frames = int(target_valid.sum())
+            target_valid_stems = {
+                frame_stems[index]
+                for index in np.flatnonzero(target_valid).tolist()
+            }
+            provenance_frame_names = (
+                len(frame_stems) == expected_frames
+                and len(expected_frame_stems) == expected_frames
+            )
             provenance_source_indices = np.array_equal(
                 source_indices, np.arange(expected_frames, dtype=np.int64)
             )
@@ -290,8 +300,21 @@ def completion_status(output_dir: Path, expected_frames: int) -> dict[str, Any]:
         return {"status": "INCOMPLETE", "reason": str(error)}
     mesh_root = private / "mesh_4d_individual"
     numeric_root = private / "mhr_numeric"
-    mesh_count = len(list((mesh_root / "1").glob("*.ply")))
-    numeric_count = len(list((numeric_root / "1").glob("*.npz")))
+    mesh_paths = sorted((mesh_root / "1").glob("*.ply"))
+    numeric_paths = sorted((numeric_root / "1").glob("*.npz"))
+    mesh_count = len(mesh_paths)
+    numeric_count = len(numeric_paths)
+    mesh_stems = {path.stem for path in mesh_paths}
+    numeric_stems = {path.stem for path in numeric_paths}
+    mesh_target_coverage = bool(
+        len(mesh_stems) == mesh_count
+        and target_valid_stems <= mesh_stems <= expected_frame_stems
+    )
+    numeric_target_coverage = bool(
+        len(numeric_stems) == numeric_count
+        and target_valid_stems <= numeric_stems <= expected_frame_stems
+    )
+    mesh_numeric_frame_identity = mesh_stems == numeric_stems
     mesh_recursive_count = len(list(mesh_root.rglob("*.ply")))
     numeric_recursive_count = len(list(numeric_root.rglob("*.npz")))
     primary_object_roots = all(
@@ -303,10 +326,9 @@ def completion_status(output_dir: Path, expected_frames: int) -> dict[str, Any]:
             ("rendered_frames_individual", False),
         )
     )
-    numeric_paths = sorted((private / "mhr_numeric" / "1").glob("*.npz"))
-    numeric_schema_complete = len(numeric_paths) == expected_frames
-    numeric_object_id_one = numeric_schema_complete
-    if numeric_schema_complete:
+    numeric_schema_complete = bool(numeric_paths)
+    numeric_object_id_one = bool(numeric_paths)
+    if numeric_paths:
         for path in numeric_paths:
             try:
                 with np.load(path, allow_pickle=False) as payload:
@@ -333,6 +355,7 @@ def completion_status(output_dir: Path, expected_frames: int) -> dict[str, Any]:
         "target_seed_one": int(profile.get("target_seed_count", 0)) == 1,
         "persons_one": int(profile.get("persons_processed", 0)) == 1,
         "provenance_frames": provenance_frames == expected_frames,
+        "provenance_frame_names": provenance_frame_names,
         "provenance_schema": provenance_schema,
         "provenance_lengths": provenance_lengths,
         "provenance_source_indices": provenance_source_indices,
@@ -341,10 +364,15 @@ def completion_status(output_dir: Path, expected_frames: int) -> dict[str, Any]:
         "provenance_timestamps": provenance_timestamps,
         "provenance_confidence": provenance_confidence,
         "provenance_seed": provenance_seed,
-        "mesh_complete": mesh_count == expected_frames,
-        "mesh_no_extra_objects": mesh_recursive_count == expected_frames,
-        "numeric_prior_complete": numeric_count == expected_frames,
-        "numeric_prior_no_extra_objects": numeric_recursive_count == expected_frames,
+        # Official Body4D may end propagation within a trailing abstention run.
+        # Every accepted target frame must have an output, while any propagated
+        # abstention output remains bounded to the source timeline and is later
+        # rejected by accepted_prior = output_valid & target_valid.
+        "mesh_complete": mesh_target_coverage,
+        "mesh_no_extra_objects": mesh_recursive_count == mesh_count,
+        "numeric_prior_complete": numeric_target_coverage,
+        "numeric_prior_no_extra_objects": numeric_recursive_count == numeric_count,
+        "mesh_numeric_frame_identity": mesh_numeric_frame_identity,
         "numeric_prior_schema_complete": numeric_schema_complete,
         "numeric_prior_object_id_one": numeric_object_id_one,
         "primary_object_roots_exact": primary_object_roots,
