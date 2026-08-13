@@ -136,6 +136,51 @@ class ConsolidateSamBodyPriorTest(unittest.TestCase):
             with np.load(output / "sam_body_prior.npz", allow_pickle=False) as payload:
                 self.assertTrue(np.all(payload["mhr_keypoints_local_3d"][0] == 9))
 
+            # Missing output on an intentional abstention is complete and
+            # remains rejected by the acceptance mask.
+            (numeric / "00000001.npz").unlink()
+            abstention_missing = consolidate_camera(
+                root / "sam" / "sequence" / "cam1",
+                output,
+                "sequence",
+                "cam1",
+                mapping,
+            )
+            self.assertEqual(abstention_missing["status"], "PASS")
+            self.assertEqual(abstention_missing["output_valid_count"], 1)
+            self.assertEqual(abstention_missing["accepted_prior_count"], 1)
+            with np.load(output / "sam_body_prior.npz", allow_pickle=False) as payload:
+                np.testing.assert_array_equal(payload["output_valid"], [True, False])
+                np.testing.assert_array_equal(payload["accepted_prior"], [True, False])
+            resumed_missing = consolidate_camera(
+                root / "sam" / "sequence" / "cam1",
+                output,
+                "sequence",
+                "cam1",
+                mapping,
+            )
+            self.assertTrue(resumed_missing["resume_skipped"])
+
+            # Conversely, an abstention payload cannot compensate for a
+            # missing accepted target prior.
+            np.savez_compressed(
+                numeric / "00000001.npz",
+                **{
+                    key: np.full(shape, 2, dtype=np.float32)
+                    for key, shape in shapes.items()
+                },
+            )
+            (numeric / "00000000.npz").unlink()
+            accepted_missing = consolidate_camera(
+                root / "sam" / "sequence" / "cam1",
+                output,
+                "sequence",
+                "cam1",
+                mapping,
+            )
+            self.assertEqual(accepted_missing["status"], "REVIEW_INCOMPLETE")
+            self.assertEqual(accepted_missing["accepted_prior_count"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

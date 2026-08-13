@@ -245,7 +245,6 @@ def validate_existing_prior(
             )
             if (
                 len(output_valid) != frame_count
-                or not output_valid.all()
                 or not np.array_equal(accepted, target_valid)
                 or not all(comparisons)
                 or not np.isfinite(payload["canonical_local_3d"][output_valid]).all()
@@ -256,9 +255,10 @@ def validate_existing_prior(
         if (
             len(frame_rows) != frame_count
             or int(qa.get("frame_count", -1)) != frame_count
-            or int(qa.get("output_valid_count", -1)) != frame_count
+            or int(qa.get("output_valid_count", -1)) != int(output_valid.sum())
             or int(qa.get("accepted_prior_count", -1)) != int(target_valid.sum())
             or not bool(qa.get("finite_valid_payload"))
+            or qa.get("status") != "PASS"
         ):
             return False, None
         return True, qa
@@ -306,7 +306,10 @@ def consolidate_camera(
         return {**existing_qa, "resume_skipped": True}
     frame_names = provenance["frame_names"].astype(str)
     frame_count = len(frame_names)
-    first_path = numeric_dir / f"{Path(frame_names[0]).stem}.npz"
+    numeric_paths = [numeric_dir / f"{Path(name).stem}.npz" for name in frame_names]
+    first_path = next((path for path in numeric_paths if path.is_file()), None)
+    if first_path is None:
+        raise RuntimeError(f"no compact MHR prior payloads: {numeric_dir}")
     with np.load(first_path, allow_pickle=False) as first:
         missing = set(REQUIRED_PRIOR_FIELDS) - set(first.files)
         if missing:
@@ -318,8 +321,7 @@ def consolidate_camera(
     }
     output_valid = np.zeros(frame_count, dtype=np.bool_)
     failure_reason = np.full(frame_count, "MISSING_MHR_PRIOR", dtype="<U48")
-    for frame, name in enumerate(frame_names):
-        path = numeric_dir / f"{Path(name).stem}.npz"
+    for frame, path in enumerate(numeric_paths):
         if not path.is_file():
             continue
         try:
@@ -390,7 +392,10 @@ def consolidate_camera(
         for frame in range(frame_count)
     ]
     atomic_csv(output_dir / "frames.csv", rows)
-    status = "PASS" if output_valid.all() else "REVIEW_INCOMPLETE"
+    # SAM may stop propagation after the selector intentionally abstains.  A
+    # camera is complete when every accepted target has a valid prior; output
+    # on abstention frames is optional and remains rejected by accepted_prior.
+    status = "PASS" if np.array_equal(accepted, target_valid) else "REVIEW_INCOMPLETE"
     qa = {
         "sequence": sequence,
         "camera": camera,
