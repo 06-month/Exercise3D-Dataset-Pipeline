@@ -2,6 +2,7 @@ import csv
 import json
 import tempfile
 import unittest
+import warnings
 from argparse import Namespace
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import numpy as np
 from tools.fit_sequence_body import (
     body_fit_dependency_signature,
     evaluate_fit_gate,
+    finite_view_consensus,
     smooth_track,
     validate_existing_body_fit,
     weighted_similarity,
@@ -47,6 +49,25 @@ class SequenceBodyFitTest(unittest.TestCase):
         scale, rotation, translation, _ = weighted_similarity(source, target, weights)
         predicted = scale * (source[:-1] @ rotation.T) + translation
         self.assertLess(float(np.max(np.abs(predicted - target[:-1]))), 0.03)
+
+    def test_finite_view_consensus_preserves_unsupported_joints_without_warning(self) -> None:
+        values = np.full((2, 3, 2, 3), np.nan, dtype=np.float64)
+        values[1, 0, 0] = [1.0, 2.0, 3.0]
+        values[1, 1, 0] = [3.0, 4.0, 5.0]
+        values[1, 2, 1] = [8.0, 9.0, 10.0]
+        valid = np.isfinite(values).all(axis=-1)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            result = finite_view_consensus(values, valid)
+        self.assertTrue(np.isnan(result[0]).all())
+        np.testing.assert_allclose(result[1, 0], [2.0, 3.0, 4.0])
+        np.testing.assert_allclose(result[1, 1], [8.0, 9.0, 10.0])
+
+    def test_finite_view_consensus_requires_matching_shapes(self) -> None:
+        with self.assertRaises(ValueError):
+            finite_view_consensus(
+                np.zeros((1, 2, 3, 3)), np.zeros((1, 2, 3, 1), dtype=np.bool_)
+            )
 
     def test_temporal_fit_preserves_anchors_and_reduces_second_difference(self) -> None:
         frames = np.arange(50, dtype=np.float64)

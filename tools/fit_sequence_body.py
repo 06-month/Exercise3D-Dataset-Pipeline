@@ -364,6 +364,28 @@ def weighted_similarity(
     return scale, rotation, translation, residual
 
 
+def finite_view_consensus(values: np.ndarray, valid: np.ndarray) -> np.ndarray:
+    """Median across valid views while preserving unsupported joints as NaN."""
+    array = np.asarray(values, dtype=np.float64)
+    mask = np.asarray(valid, dtype=np.bool_)
+    if array.ndim != 4 or mask.shape != array.shape[:-1]:
+        raise ValueError(
+            "finite_view_consensus expects [frame, view, joint, coordinate] values "
+            "and a matching [frame, view, joint] mask"
+        )
+    by_joint = np.transpose(array, (0, 2, 1, 3))
+    valid_by_joint = np.transpose(mask, (0, 2, 1))
+    result = np.full(
+        (array.shape[0], array.shape[2], array.shape[3]), np.nan, dtype=np.float64
+    )
+    supported = valid_by_joint.any(axis=2)
+    if supported.any():
+        selected = by_joint[supported].copy()
+        selected[~valid_by_joint[supported]] = np.nan
+        result[supported] = np.nanmedian(selected, axis=1)
+    return result
+
+
 def second_difference_product(values: np.ndarray) -> np.ndarray:
     output = np.zeros_like(values)
     if len(values) < 3:
@@ -566,7 +588,7 @@ def fit_sequence(args: argparse.Namespace, sequence: str) -> dict[str, Any]:
 
     prior_joint_valid = np.isfinite(aligned).all(axis=-1) & aligned_valid[:, :, None]
     prior_view_count = prior_joint_valid.sum(axis=1).astype(np.uint8)
-    prior_consensus = np.nanmedian(aligned, axis=1)
+    prior_consensus = finite_view_consensus(aligned, prior_joint_valid)
     measurement = np.full_like(triangulated, np.nan)
     measurement_weight = np.zeros((frame_count, joint_count), dtype=np.float64)
     evidence_type = np.zeros((frame_count, joint_count), dtype=np.uint8)
