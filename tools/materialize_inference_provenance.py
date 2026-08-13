@@ -13,6 +13,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+try:
+    from tools.run_sam_body4d_full import completion_status
+except ModuleNotFoundError:
+    from run_sam_body4d_full import completion_status
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CAMERAS = ("cam1", "cam2", "cam3")
@@ -102,20 +107,13 @@ def pose_camera_complete(output: Path) -> bool:
 
 
 def sam_camera_complete(output: Path) -> bool:
-    benchmark = read_single_csv(output / "sam_body_benchmark.csv")
     profile = read_json(output / "mode_b_profile.json")
-    if benchmark is None or profile is None or benchmark.get("status") != "PASS":
+    if profile is None:
         return False
     try:
         expected = int(profile["input_frames"])
-        return bool(
-            expected > 0
-            and int(profile["frames_processed"]) == expected
-            and int(float(benchmark["frames_processed"])) == expected
-            and len(list((output / "mode_b_private_output" / "mesh_4d_individual" / "1").glob("*.ply"))) == expected
-            and len(list((output / "mode_b_private_output" / "mhr_numeric" / "1").glob("*.npz"))) == expected
-        )
-    except (KeyError, ValueError):
+        return expected > 0 and completion_status(output, expected)["status"] == "PASS"
+    except (KeyError, TypeError, ValueError):
         return False
 
 
@@ -206,7 +204,10 @@ def materialize_sam(
         "configuration_sha256": canonical_hash(config),
         "tool": git_tool_identity(PROJECT_ROOT / "tools" / "benchmark_sam_body4d.py"),
         "exact_resume_command": command_for("run_sam_body4d_full.py", handoff_state),
-        "completion_gate": "benchmark/profile PASS + exact mesh/numeric counts; full runner required-field validator authoritative",
+        "completion_gate": (
+            "benchmark/profile/provenance PASS + exact primary object tree/schema + "
+            "all accepted target frames covered; abstention outputs are optional and never accepted"
+        ),
     }
     atomic_json(provenance_path, payload)
     return True

@@ -3,6 +3,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import numpy as np
+
+from tools.consolidate_sam_body_prior import REQUIRED_PRIOR_FIELDS
+
 from tools.materialize_inference_provenance import (
     materialize_pose,
     materialize_sam,
@@ -76,7 +80,7 @@ class InferenceProvenanceTest(unittest.TestCase):
             )
         )
 
-    def test_sam_sidecar_requires_complete_counts(self) -> None:
+    def test_sam_sidecar_requires_accepted_target_coverage(self) -> None:
         sam = self.root / "sam"
         output = sam / "sequence" / "cam1"
         numeric = output / "mode_b_private_output" / "mhr_numeric" / "1"
@@ -84,12 +88,29 @@ class InferenceProvenanceTest(unittest.TestCase):
         numeric.mkdir(parents=True)
         mesh.mkdir(parents=True)
         (output / "sam_body_benchmark.csv").write_text(
-            "status,frames_processed,created_at_utc,repository_revision\n"
-            "PASS,1,2026-01-01T00:00:00+00:00,revision\n",
+            "status,frames_processed,created_at_utc,repository_revision,elapsed_wall_seconds,peak_nvidia_vram_mib,gpu_utilization_mean_pct,power_mean_w\n"
+            "PASS,2,2026-01-01T00:00:00+00:00,revision,1,1,1,1\n",
             encoding="utf-8",
         )
         (output / "mode_b_profile.json").write_text(
-            '{"input_frames":1,"frames_processed":1}', encoding="utf-8"
+            '{"input_frames":2,"frames_processed":2,"target_seed_count":1,"persons_processed":1}',
+            encoding="utf-8",
+        )
+        np.savez_compressed(
+            output / "mode_b_private_output" / "target_provenance.npz",
+            frame_names=np.asarray(["0.jpg", "1.jpg"]),
+            source_frame_names=np.asarray(["0.jpg", "1.jpg"]),
+            source_frame_indices=np.asarray([0, 1], dtype=np.int32),
+            target_bboxes_xyxy=np.asarray(
+                [[1, 2, 11, 22], [np.nan, np.nan, np.nan, np.nan]],
+                dtype=np.float32,
+            ),
+            target_valid=np.asarray([True, False]),
+            target_selection_confidence=np.asarray([1.0, 0.0]),
+            target_ambiguous=np.asarray([False, True]),
+            no_target=np.asarray([False, False]),
+            occlusion_risk=np.asarray([False, True]),
+            timestamp_pts_seconds=np.asarray([0.0, 0.033333]),
         )
         self.assertFalse(
             materialize_sam(
@@ -101,7 +122,14 @@ class InferenceProvenanceTest(unittest.TestCase):
                 self.handoff,
             )
         )
-        (numeric / "0.npz").touch()
+        np.savez_compressed(
+            numeric / "0.npz",
+            object_id=np.asarray(1, dtype=np.int32),
+            **{
+                key: np.asarray(0, dtype=np.float32)
+                for key in REQUIRED_PRIOR_FIELDS
+            },
+        )
         (mesh / "0.ply").touch()
         self.assertTrue(
             materialize_sam(

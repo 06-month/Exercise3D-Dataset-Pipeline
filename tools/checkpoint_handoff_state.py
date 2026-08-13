@@ -19,9 +19,9 @@ from typing import Any, BinaryIO
 import numpy as np
 
 try:
-    from tools.materialize_inference_provenance import materialize_all
+    from tools.materialize_inference_provenance import materialize_all, sam_camera_complete
 except ModuleNotFoundError:
-    from materialize_inference_provenance import materialize_all
+    from materialize_inference_provenance import materialize_all, sam_camera_complete
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -265,19 +265,9 @@ def sam_progress(root: Path, sequences: list[str]) -> dict[str, Any]:
                     benchmark_rows = list(csv.DictReader(handle))
                 benchmark = benchmark_rows[0] if len(benchmark_rows) == 1 else {}
                 expected = int(profile["input_frames"]) if profile is not None else 0
-                mesh_count = len(
-                    list((output / "mode_b_private_output" / "mesh_4d_individual" / "1").glob("*.ply"))
-                )
-                numeric_count = len(
-                    list((output / "mode_b_private_output" / "mhr_numeric" / "1").glob("*.npz"))
-                )
                 passed = bool(
                     expected > 0
-                    and benchmark.get("status") == "PASS"
-                    and int(float(benchmark.get("frames_processed") or 0)) == expected
-                    and int(profile["frames_processed"]) == expected
-                    and mesh_count == expected
-                    and numeric_count == expected
+                    and sam_camera_complete(output)
                 )
             except (OSError, KeyError, ValueError, csv.Error):
                 passed = False
