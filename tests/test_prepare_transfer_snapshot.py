@@ -131,6 +131,7 @@ class PrepareTransferSnapshotTest(unittest.TestCase):
         command = rsync_command(["outputs/one", "HANDOFF.md"], bwlimit_kib=1234)
         self.assertIn("--bwlimit=1234", command)
         self.assertIn("--partial-dir=.rsync-partial", command)
+        self.assertNotIn("\n+  ", command)
         self.assertIn("--exclude='*.lock'", command)
         self.assertNotIn("--delete", command)
         self.assertIn("/./outputs/one", command)

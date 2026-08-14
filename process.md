@@ -1647,3 +1647,49 @@ verdict는 보류한다.
   취급한다 (`b8d7a01`). 171 tests와 publication safety가 PASS했다. Old quiet dashboard PID 2065337만
   exact-identity controlled replace해 current-code PID 208462(PPID 1)를 기동했고 monitoring watchdog이
   singleton/exact argv/restart 0/3으로 관찰한다. Current attention은 deadline ETA/coverage WARNING뿐이다.
+
+## 2026-08-14 — 24/26 durable transfer checkpoint
+
+### Gate와 immutable checkpoint
+
+- 10:00:39 KST에 predeadline follower가
+  `exercise3d-predeadline-auto-024-322b3273896e`를 final directory로 atomic publish했다.
+- Dataset manifest contract v2, declared/verified 795 files와 928,955,092 payload bytes,
+  exact 24-sequence membership, FAIL/INCOMPLETE 0, `integrity_verified=true`,
+  `freeze_eligible=true`를 모두 확인했다. Payload를 다시 hash하지 않고 follower의 기존 전수
+  verification을 재사용했다.
+- Freeze-ready sequence는 기존 23개와 `deadlift_0003`; 남은 `deadlift_0002`, `squat_0003`은
+  completed로 위장하지 않았다. Transfer snapshot 시 `deadlift_0002`는 Sapiens cam1 1,237 crop만
+  finalized됐고 cam2/3, SAM 3-view, triangulation, body fit, quality가 미완료였다.
+  `squat_0003`은 모든 downstream stage가 미시작이었다.
+
+### Transfer snapshot과 안전성
+
+- `tools/prepare_transfer_snapshot.py`가 24-sequence gate 전에는 atomic checkpoint state만 30초마다
+  읽고, gate 후 한 번만 finalized regular-file metadata를 `scandir/lstat`했다. GPU work,
+  compression, payload hashing, inference signal/restart/suspend는 수행하지 않았다.
+- Atomic output은 `.runtime/transfer_manifest.json`, `.runtime/TRANSFER_MANIFEST.md`,
+  `.runtime/transfer_snapshot_state.json`. Git에 private/runtime payload를 추가하지 않는다.
+- Critical inventory는 14,928,815,784 bytes (13.904 GiB), 40,572 files; resume intermediate는
+  59,604,393,093 bytes (55.511 GiB), 409,602 files; 합계 74,533,208,877 bytes
+  (69.414 GiB), 450,174 files. Optional source/checkpoint/repository는 74,263,789,313 bytes
+  (69.164 GiB), 69,553 files다. 모든 scan error는 0이다.
+- `.tmp`, `.partial`, `.part`, lock, hidden in-progress, `.rsync-partial`, symlink를 transfer/inventory에서
+  제외한다. Finalized atomic path와 durable partial state는 보존하며 이후 생성 파일은 마지막
+  incremental sync가 회수한다.
+- Windows WSL 명령은 multiple remote source + `--relative`, `--partial`, `--delay-updates`,
+  `.rsync-partial`, `--bwlimit=30000`, remote `ionice -c2 -n7 nice -n 19`를 사용한다.
+  `--delete`는 사용하지 않는다. Container에서 외부 SSH endpoint를 판별하지 못해 username/host/port는
+  명시적 placeholder로 남겼다.
+- 최초 manifest 검증에서 generated command의 후속 source line 앞에 불필요한 `+`가 붙는 formatting
+  결함을 발견했다. Join separator를 수정하고 해당 regression assertion을 추가한 뒤 manifest를 다시
+  atomic 생성했다. Dataset/checkpoint/runtime에는 영향이 없다.
+
+### Generation continuation
+
+- Snapshot 시 Sapiens PID 2979192는 73/78 camera, 59,134/65,430 crop에서
+  `deadlift_0002/cam2`를 계속 처리했다. Autonomous supervisor PID 2980339는 살아 있고,
+  SAM Mode B durable 72/78 camera, 58,062/65,595 frame 뒤 다음 pose-ready camera를 기다렸다.
+- Quality follower PID 2981075, predeadline checkpoint follower PID 2981156, 각 watchdog,
+  deadline sentinel PID 2171153와 monitoring plane도 계속 실행했다. Transfer 준비로 signal/restart된
+  process는 0이며, 13:00 KST deadline snapshot도 기존 sentinel에 맡긴다.

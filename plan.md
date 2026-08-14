@@ -5,6 +5,14 @@
 
 ## Deadline critical path — 2026-08-14 13:00 KST
 
+- 2026-08-14 10:01 KST transfer gate 완료: integrity-verified/freeze-eligible immutable build
+  `exercise3d-predeadline-auto-024-322b3273896e`, freeze-ready 24/26. Windows WSL rsync용
+  `.runtime/transfer_manifest.json`과 `.runtime/TRANSFER_MANIFEST.md`를 atomic 생성했다.
+  Critical 13.904 GiB, full resumable 69.414 GiB이며 generation/deadline sentinel은 중단하지 않는다.
+- 남은 sequence는 `deadlift_0002`, `squat_0003`; incomplete/partial provenance를 그대로 보존하고
+  13:00 이후 서버 사용 가능 시 기존 autonomous path로 계속한다. Transfer는 Stage A critical 우선,
+  Stage B intermediate, 마지막 incremental sync 순서이며 compression/hash/recompute/`--delete`는 금지한다.
+
 - primary objective: correctness·provenance·identity consistency를 유지하면서 deadline까지
   end-to-end로 완결되고 freeze 가능한 sequence 수를 최대화
 - 2026-08-11 22:50 KST 기준 remaining wall-clock 62.17 h

@@ -475,7 +475,7 @@ def shell_quote(value: str) -> str:
 
 
 def rsync_command(relative_paths: Iterable[str], *, bwlimit_kib: int) -> str:
-    sources = " \\\n+  ".join(
+    sources = " \\\n  ".join(
         f'"${{EX3D_SERVER}}:${{EX3D_REMOTE}}/./{path}"' for path in relative_paths
     )
     return f"""rsync -rltvh --info=progress2 --human-readable \\

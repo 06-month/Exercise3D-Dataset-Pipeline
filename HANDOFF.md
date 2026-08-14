@@ -10,14 +10,47 @@
 - 현재 phase: Phase 6 target-only Sapiens2-5B + Phase 7/8 sequence streaming
 - acceptance gate: target selector `GO_FULL_DATASET`; SAM Mode B full 10-sequence와 private export smoke `PASS`
 
+## Transfer-ready checkpoint — 2026-08-14 10:01 KST
+
+- `STATUS: TRANSFER_READY`; durable freeze-ready **24/26**.
+- immutable build `exercise3d-predeadline-auto-024-322b3273896e`: 795 files,
+  928,955,092 bytes (0.865 GiB), follower integrity verification 재사용 `PASS`,
+  `freeze_eligible=true`, FAIL/INCOMPLETE 0. Export 당시 Git HEAD는
+  `54e330acdc3a4fbf0a20716c117bb44d118b6548`이다.
+- machine-readable transfer source of truth는 ignored
+  `.runtime/transfer_manifest.json`; 사람용 명령/목록은
+  `.runtime/TRANSFER_MANIFEST.md`; gate state는 `.runtime/transfer_snapshot_state.json`이다.
+- incomplete는 정확히 `deadlift_0002`, `squat_0003`이다. Snapshot 시점 둘 다
+  `SAPIENS2_TARGET_ONLY`: `deadlift_0002`는 Sapiens 1/3 camera, 1,237/3,711 finalized crop,
+  SAM 0/3 camera, triangulation/body/quality 미시작; `squat_0003`은 Sapiens/SAM 0/3,
+  triangulation/body/quality 미시작이다. Partial/finalized output은 삭제하지 않는다.
+- durable aggregate snapshot: Sapiens 73/78 camera, 59,134/65,430 crop,
+  PID 2979192; SAM Mode B 72/78 camera, 58,062/65,595 frame. Snapshot 당시 SAM child는
+  다음 pose를 기다려 active하지 않았고 autonomous supervisor PID 2980339가
+  `WAIT_RUNNING_SAPIENS2`로 정상 대기했다.
+- transfer inventory는 payload hashing/compression 없이 finalized regular file을 한 번
+  `scandir/lstat`했다. Critical 14,928,815,784 bytes (13.904 GiB), 40,572 files;
+  full resumable 74,533,208,877 bytes (69.414 GiB), 450,174 files;
+  optional/excluded 74,263,789,313 bytes (69.164 GiB), 69,553 files; scan error 0이다.
+  `.tmp`/`.partial`/`.part`/lock/hidden in-progress/rsync partial/symlink는 제외했고,
+  durable partial/final pathname은 보존한다.
+- Windows endpoint는 container 안에서 안전하게 추론할 수 없어 manifest 명령의
+  `<SSH_USERNAME>`, `<SERVER_HOST_OR_IP>`, `<SSH_PORT>`를 실제 접속값으로 치환한다.
+  WSL `rsync`는 `--partial`, `--delay-updates`, low-priority remote rsync,
+  `--bwlimit=30000`을 사용하며 `--delete`는 절대 쓰지 않는다. Stage A critical을 먼저,
+  Stage B resume intermediate를 뒤에 수행하고 generation/deadline snapshot 이후 final incremental
+  sync를 반복한다.
+- transfer 준비 때문에 process signal/restart/suspend 또는 GPU work 추가는 0이다. Generation과
+  13:00 KST deadline sentinel은 계속 실행한다.
+
 ## Current pipeline state
 
 - DONE: Phase 0–5, Phase 6 pilot/target selector, Phase 8 A/B/C pilot와 checkpoint integrity
 - RUNNING: Phase 6 full 5B inference, pose-complete sequence의 Phase 7→SAM Mode B→Phase 9 streaming
-- RUNNING: Phase 11 quality 21/26 sequence; CPU follower/watchdog + exporter fallback 연결
+- RUNNING: Phase 11 quality 24/26 sequence; CPU follower/watchdog + exporter fallback 연결
 - TODO: remaining triangulation, SAM prior consolidation, body fitting/QC, deadline private export/freeze
 - BLOCKED: 없음. Dashboard attention은 deadline ETA/coverage WARNING 두 개뿐이다.
-- REVIEW/FAIL: quality REVIEW 21/FAIL 0; body fit PASS 2/REVIEW 19/FAIL 0
+- REVIEW/FAIL: quality REVIEW 24/FAIL 0; body fit PASS 3/REVIEW 21/FAIL 0
 
 ## Active job
 
