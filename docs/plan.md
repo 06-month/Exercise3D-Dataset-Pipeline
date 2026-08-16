@@ -177,7 +177,7 @@
 - 목적: Phase 4 승인 알고리즘을 변경하지 않고 전체 sequence의 최종 camera geometry 후보 생성
 - 입력: Phase 2/3/4 산출물과 frozen default
 - 출력: 26 sequence의 camera/track/point/residual/metrics/validation 및 dataset summary
-- 방법: [configs/phase5_background_ba.json](configs/phase5_background_ba.json)의 default 그대로 실행
+- 방법: [configs/phase5_background_ba.json](../configs/phase5_background_ba.json)의 default 그대로 실행
 - Acceptance: 26/26 파일 완결, Stage 1/2 수렴, SE(3) consistency, source/VGGT payload 불변,
   PASS/REVIEW/FAIL과 uncertainty/gauge/scale provenance 보존
 - 결과: Phase 5.1 반영 후 PASS 11 / REVIEW 15 / FAIL 0; Stage 1/2 26/26;
@@ -433,7 +433,7 @@
 
 1. 시작 시 상태를 `IN_PROGRESS`로 변경한다.
 2. 구현·실험·validation을 수행한다.
-3. `process.md`에 날짜, 명령, 결과, 생성 파일, 실패와 결정을 기록한다.
+3. `docs/process.md`에 날짜, 명령, 결과, 생성 파일, 실패와 결정을 기록한다.
 4. acceptance gate를 적용하고 `DONE` 또는 `REVIEW`로 갱신한다.
 5. README 진행표를 갱신한다.
 6. source/report에서 private payload와 absolute path를 제거한다.

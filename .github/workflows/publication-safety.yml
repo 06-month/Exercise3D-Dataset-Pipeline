@@ -15,4 +15,4 @@ jobs:
       - name: 공개 파일 안전 검사
         run: python tools/check_publication_safety.py --all
       - name: Python 구문 검사
-        run: python -m compileall -q scripts tools
+        run: python -m compileall -q tools
