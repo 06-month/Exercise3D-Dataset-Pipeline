@@ -1,12 +1,12 @@
 # Runtime operations — 장시간 자율 generation
 
-README에서 분리한 운영 문서입니다. 장시간 generation을 이어받는 agent는 이 문서와
-[`HANDOFF.md`](../HANDOFF.md), [`AGENTS.md`](../AGENTS.md)를 함께 읽습니다.
+README에서 분리한 운영 문서입니다. `HANDOFF.md`와 `AGENTS.md`는 agent 전용 로컬 문서로
+Git에서 제외되어 있으므로, 이 문서는 저장소에 남는 운영 요약만 담습니다.
 
 장시간 generation을 이어받는 agent는 다른 문서보다 먼저
-[`HANDOFF.md`](../HANDOFF.md)를 읽습니다. 실시간 private command/PID/progress는 Git에서 제외된
+`HANDOFF.md`를 읽습니다. 실시간 private command/PID/progress는 Git에서 제외된
 `.runtime/handoff_state.json`에 30초 간격으로 atomic 저장되며, 살아 있는 inference를 중복
-실행하지 않는 startup 순서는 [`AGENTS.md`](../AGENTS.md)에 고정했습니다.
+실행하지 않는 startup 순서는 `AGENTS.md`에 고정했습니다.
 사람용 live dashboard와 machine-readable attention state는
 `tools/monitor_autonomous_generation.py`가 `.runtime/dashboard_state.json`에 atomic 저장합니다.
 Top-level `last_completed_event`는 polling state 갱신 시각이 아니라 atomic camera/sequence output과

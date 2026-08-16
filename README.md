@@ -57,12 +57,17 @@
 <img src="docs/assets/showcase/squat_0002_mhr_mesh.gif" width="100%"><br>
 471 frames · <a href="docs/assets/showcase/squat_0002_mhr_mesh.mp4">전체 MP4</a>
 </td>
-<td width="50%" align="center" valign="middle">
-GIF는 6초 발췌본이고, MP4는 전체 sequence(15 fps)입니다.<br><br>
-생성 방법과 공개 경계는 <a href="docs/showcase.md">showcase 문서</a>에 있습니다.
+<td width="50%" align="center">
+<b>Push-up</b> · <code>pushup_0000</code><br>
+<img src="docs/assets/showcase/pushup_0000_mhr_mesh.gif" width="100%"><br>
+312 frames · <a href="docs/assets/showcase/pushup_0000_mhr_mesh.mp4">전체 MP4</a>
 </td>
 </tr>
 </table>
+
+GIF는 6초 발췌본이고, MP4는 전체 sequence(15 fps)입니다. `pushup_0000`의 `cam1`은 몸의 장축을
+정면에서 바라보는 위치라 plank 자세가 짧게 투영됩니다 — 세 view의 시점 차이를 그대로 보여주는
+예시입니다. 생성 방법과 공개 경계는 [showcase 문서](docs/showcase.md)에 있습니다.
 
 ---
 
@@ -187,7 +192,6 @@ Exercise3D-Dataset-Pipeline/
 | [docs/design/reproducibility.md](docs/design/reproducibility.md) | 재현성 요구사항 |
 | [docs/tools.md](docs/tools.md) | tool별 역할과 source mutation 여부 |
 | [docs/runtime_operations.md](docs/runtime_operations.md) | 장시간 자율 generation 운영 |
-| [HANDOFF.md](HANDOFF.md) · [AGENTS.md](AGENTS.md) | generation을 이어받는 agent용 문서 |
 
 ---
 

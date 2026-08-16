@@ -16,7 +16,7 @@ class PublicationSafetyTest(unittest.TestCase):
     def test_allowlist_contains_only_requested_sequences(self) -> None:
         expected = {
             "benchpress_0004", "deadlift_0001", "barbellrow_0003",
-            "latpulldown_0003", "squat_0002",
+            "latpulldown_0003", "squat_0002", "pushup_0000",
         }
         actual = {Path(path).stem.removesuffix("_mhr_mesh") for path in PUBLIC_SHOWCASE_PATHS}
         self.assertEqual(actual, expected)

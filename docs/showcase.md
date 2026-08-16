@@ -5,13 +5,14 @@
 
 ## 공개 범위
 
-공개 영상은 다음 다섯 sequence의 MHR mesh-only render만 사용합니다.
+공개 영상은 다음 여섯 sequence의 MHR mesh-only render만 사용합니다.
 
 - `benchpress_0004`
 - `deadlift_0001`
 - `barbellrow_0003`
 - `latpulldown_0003`
 - `squat_0002`
+- `pushup_0000`
 
 각 MP4는 세 camera view를 나란히 표시합니다. 원본 RGB, 촬영 배경, 얼굴 pixel, audio,
 frame-level numeric label, mesh vertex/face payload와 checkpoint는 포함하지 않습니다.
@@ -26,6 +27,7 @@ frame-level numeric label, mesh vertex/face payload와 checkpoint는 포함하�
 | `barbellrow_0003` | 379 / 15 fps | [MP4](assets/showcase/barbellrow_0003_mhr_mesh.mp4) | [GIF](assets/showcase/barbellrow_0003_mhr_mesh.gif) |
 | `latpulldown_0003` | 331 / 15 fps | [MP4](assets/showcase/latpulldown_0003_mhr_mesh.mp4) | [GIF](assets/showcase/latpulldown_0003_mhr_mesh.gif) |
 | `squat_0002` | 471 / 15 fps | [MP4](assets/showcase/squat_0002_mhr_mesh.mp4) | [GIF](assets/showcase/squat_0002_mhr_mesh.gif) |
+| `pushup_0000` | 312 / 15 fps | [MP4](assets/showcase/pushup_0000_mhr_mesh.mp4) | [GIF](assets/showcase/pushup_0000_mhr_mesh.gif) |
 
 ## 재생성
 
