@@ -1,12 +1,42 @@
 # Exercise3D Dataset Pipeline
 
-이 저장소는 실제 Exercise3D 원본 데이터를 배포하는 저장소가 아니라, 동기화된
-멀티뷰 운동 영상으로부터 고품질 3D human/body pseudo-label을 생성하기 위한 데이터셋
-구축 파이프라인과 검증 절차를 공개하는 저장소입니다.
+동기화된 3-view 운동 영상에서 target tracking, 2D pose, camera-aware triangulation,
+temporal body prior, sequence fitting, quality control까지 연결하는 3D 운동 데이터셋 구축
+파이프라인입니다. 이 저장소는 데이터셋 자체를 배포하지 않고, 구축 방법과 검증 코드,
+비식별 집계 결과 및 mesh-only preview를 공개합니다.
 
 원본 영상, 얼굴을 포함할 수 있는 프레임, 개인정보, checkpoint 및 대용량 geometry
 payload는 공개하지 않습니다. 저장소에는 재현 가능한 코드, 방법론, QA 기준, 비식별
 수치 요약 및 synthetic schema example만 둡니다.
+
+## 현재 결과 — 24/26 freeze-ready
+
+- 전체 workload: 26 synchronized sequences / 78 camera views / 65,595 working frames
+- end-to-end 완료: **24/26 sequences**
+- 완료된 24개: body fitting과 quality metadata까지 존재하며 immutable checkpoint 검증 통과
+- quality 상태: REVIEW 24 / FAIL 0. 불확실성을 숨기거나 PASS로 승격하지 않음
+- 미완료: `deadlift_0002`, `squat_0003`
+- 다음 단계: 충분한 GPU 자원(A100급 5B/SAM inference 환경)이 확보되면 completion metadata를
+  검증하며 두 sequence만 resumable pipeline으로 이어서 처리
+
+`24/26`은 deadline 시점의 정직한 스냅샷입니다. 미완료 sequence를 완료로 표시하지 않았고,
+기존 완료 camera/chunk는 checksum과 schema가 일치할 때 재계산하지 않습니다.
+
+## Mesh-only showcase
+
+아래 영상은 공개를 위해 별도로 만든 3-view MHR mesh-only preview입니다. 실제 RGB frame,
+촬영 배경, 얼굴 pixel, audio와 private label payload는 포함하지 않습니다. MHR은 이 파이프라인에서
+SAM-Body4D가 생성한 body representation이며 SMPL-X라고 표기하지 않습니다.
+
+| Exercise sequence | Preview |
+|---|---|
+| Bench press — `benchpress_0004` | [MP4 보기](docs/assets/showcase/benchpress_0004_mhr_mesh.mp4) |
+| Deadlift — `deadlift_0001` | [MP4 보기](docs/assets/showcase/deadlift_0001_mhr_mesh.mp4) |
+| Barbell row — `barbellrow_0003` | [MP4 보기](docs/assets/showcase/barbellrow_0003_mhr_mesh.mp4) |
+| Lat pulldown — `latpulldown_0003` | [MP4 보기](docs/assets/showcase/latpulldown_0003_mhr_mesh.mp4) |
+| Squat — `squat_0002` | [MP4 보기](docs/assets/showcase/squat_0002_mhr_mesh.mp4) |
+
+생성 과정과 공개 경계는 [showcase 문서](docs/showcase.md)에 정리했습니다.
 
 장시간 generation을 이어받는 agent는 다른 문서보다 먼저
 [`HANDOFF.md`](HANDOFF.md)를 읽습니다. 실시간 private command/PID/progress는 Git에서 제외된
@@ -111,24 +141,25 @@ camera calibration을 구분합니다.
 | 6-0. Sapiens2-5B Environment | DONE | A100 80GB smoke PASS, 308 keypoints, peak 19.986 GiB, 4.517 s/image |
 | 6-1. Sapiens2 Pose Pilot | DONE | all-person baseline 보존, batch 1/2/4/8/12/16 완료 |
 | 6-1A. Primary Target Selection | DONE | 9,732 frame, identity switch 0, ambiguity 7, crop 50.37% 감소 |
-| 6-2. Target-only Runtime Gate | RUNNING | full selector `GO_FULL_DATASET`; 78 view/65,595 frame, target 65,430, identity/integrity failure 0; 5B batch 16 실행 중 |
-| 7. Timestamp-aware Triangulation | RUNNING | pilot 4/4 final schema PASS; pose-complete sequence CPU streaming, NO_GO에만 held-out recovery |
-| 8. SAM Body Runtime Feasibility | FULL RUNNING/REVIEW | 22.387 GiB integrity PASS; Mode B 11 sequence/21,441 camera-frame complete |
-| 9. Sequence Body Fitting | RUNNING/REVIEW | 11 sequence/7,147 reference frame; schema PASS, REVIEW 11/FAIL 0 |
+| 6-2. Target-only Runtime Gate | PARTIAL COMPLETE | selector `GO_FULL_DATASET`; target 65,430/65,595, pose 75/78 views·61,608 crops 완료 |
+| 7. Timestamp-aware Triangulation | PARTIAL COMPLETE | 25/26 sequence, PASS 5 / REVIEW 20 / FAIL 0 |
+| 8. SAM Body Runtime Feasibility | PARTIAL COMPLETE/REVIEW | checkpoint integrity PASS; Mode B 72/78 views·58,062 frames 완료 |
+| 9. Sequence Body Fitting | PARTIAL COMPLETE/REVIEW | 24/26 sequence, PASS 3 / REVIEW 21 / FAIL 0 |
 | 10. Body Shape / Proportion | IMPLEMENTED PARTIAL | sequence-level shape/scale provenance 보존; evidence-backed subject mapping 부재로 cross-sequence fusion 안 함 |
-| 11. Pseudo-label Quality Control | RUNNING | 11 sequence/7,147 frame, REVIEW 11/FAIL 0; freeze-ready 11/11, scalar accuracy score 없음 |
+| 11. Pseudo-label Quality Control | PARTIAL COMPLETE | freeze-ready 24/26, REVIEW 24 / FAIL 0; scalar accuracy score 없음 |
 | 12. Fit3D Validation | IMPLEMENTED/WAITING DATA | metric regression PASS; local Fit3D payload 부재로 실제 score 미주장 |
-| 13. Final Dataset Freeze | IMPLEMENTED/SMOKE PASS | quality-inclusive 36-file exact-tree smoke PASS; deadline build 입력 누적 중 |
+| 13. Final Dataset Freeze | DEADLINE SNAPSHOT COMPLETE | immutable deadline build: REVIEW 24 / INCOMPLETE 2 / FAIL 0; best 24-sequence checkpoint integrity PASS |
 
 `pushup_0003`은 Phase 5.1에서 observation, initialization, objective와 gate를 그대로 두고
 Stage 2 budget만 300에서 600으로 확장했습니다. 실제 322 evaluations에서 `xtol`로 수렴했고,
 제한된 sparse support 때문에 `RECOVERED_REVIEW`로 유지합니다. Dataset-level FAIL은 0이며
 camera geometry freeze는 REVIEW uncertainty 전파 조건으로 승인되었습니다.
 
-2026-08-14 13:00 KST deadline을 기준으로 full target-only Sapiens2 projection과 SAM을 한
-A100에서 모두 순차 실행하는 것은 불가능합니다. 따라서 5B/flip-test/abstention을 유지한 채
-기존 pilot output을 lossless하게 재사용하고, shortest-first resumable sequence 처리와 CPU QA를
-병행합니다. 미완료 항목은 `INCOMPLETE_DEADLINE` provenance로 남기며 PASS로 위장하지 않습니다.
+2026-08-14 13:00 KST deadline에는 24개 sequence가 end-to-end 완료됐고 `deadlift_0002`,
+`squat_0003`은 `INCOMPLETE_DEADLINE` provenance로 남았습니다. 이 시점의 immutable build는
+요청된 26개 상태를 REVIEW 24 / INCOMPLETE 2 / FAIL 0으로 고정했습니다. 이후 충분한 GPU 자원이
+확보되면 5B/flip-test/abstention 설정을 유지하고 completion metadata가 유효한 output은 건너뛰면서
+두 sequence의 미완료 stage만 재개합니다.
 
 Phase 7 pilot에서는 2D target이 정상인데도 `squat_0001`과 `pushup_0001`의 current camera와
 epipolar consistency가 무너지는 새 evidence가 확인됐습니다. 해당 3D proposal은 fitting/export에서
@@ -161,10 +192,11 @@ Body fit coverage/alignment는 1.0이고 prior-only joint는 0이지만 normaliz
 0.07936과 camera uncertainty를 전파해 REVIEW로 유지합니다. Mode C 후보는 0으로
 `PASS_MODE_B_FROZEN`이며 expensive Mode C를 실행하지 않았습니다.
 
-현재 장기 supervisor는 실행 중인 5B PID를 기다리고, 불완전 종료 시 동일 selection-bound 설정으로
-resume한 뒤 Phase 7 → SAM Mode B → prior consolidation → body fit → private export를 sequence별로
-이어갑니다. Full SAM 직전에는 8-frame Mode B smoke로 PTS/mesh/MHR numeric schema를 실제 GPU에서
-검사합니다. Mode C는 자동 full mode가 아니며
+장기 generation job은 deadline snapshot 이후 중단된 상태이며 자동 completion을 주장하지 않습니다.
+GPU 환경이 다시 준비되면 singleton/exact-command gate를 확인하고 동일 selection-bound 설정으로
+resume한 뒤 Phase 7 → SAM Mode B → prior consolidation → body fit → quality/private export를
+sequence별로 이어갑니다. Full SAM 직전에는 8-frame Mode B smoke로 PTS/mesh/MHR numeric schema를
+실제 GPU에서 검사합니다. Mode C는 자동 full mode가 아니며
 [`configs/sam_mode_c_escalation.json`](configs/sam_mode_c_escalation.json)의 occlusion+failure/outlier
 조건과 B/C 개선 gate를 모두 통과할 때만 선택 후보입니다.
 각 full Mode B sequence 뒤에는 이 조건을 실제로 평가해 후보 frame/clip 또는

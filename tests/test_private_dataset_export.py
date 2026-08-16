@@ -329,7 +329,9 @@ class PrivateDatasetExportTest(unittest.TestCase):
                 args.body_fit_root / sequence / "metadata.json",
                 args.sam_mode_c_review_root / sequence / "mode_c_escalation.json",
             ]
-            cutoff = datetime(2026, 8, 14, 4, tzinfo=timezone.utc)
+            # Keep the cutoff ahead of filesystem ctime so this provenance test
+            # remains valid after the original 2026 deadline has passed.
+            cutoff = datetime.now(timezone.utc) + timedelta(minutes=1)
             before_ns = int(cutoff.timestamp() * 1_000_000_000) - 1_000_000
             after_ns = int(cutoff.timestamp() * 1_000_000_000) + 1_000_000
             for path in markers:
