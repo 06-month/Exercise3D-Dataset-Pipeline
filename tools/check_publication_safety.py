@@ -17,10 +17,15 @@ PUBLIC_SHOWCASE_PATHS = {
     Path("docs/assets/showcase/barbellrow_0003_mhr_mesh.mp4"),
     Path("docs/assets/showcase/latpulldown_0003_mhr_mesh.mp4"),
     Path("docs/assets/showcase/squat_0002_mhr_mesh.mp4"),
+    Path("docs/assets/showcase/benchpress_0004_mhr_mesh.gif"),
+    Path("docs/assets/showcase/deadlift_0001_mhr_mesh.gif"),
+    Path("docs/assets/showcase/barbellrow_0003_mhr_mesh.gif"),
+    Path("docs/assets/showcase/latpulldown_0003_mhr_mesh.gif"),
+    Path("docs/assets/showcase/squat_0002_mhr_mesh.gif"),
 }
 FORBIDDEN_SUFFIXES = {
     ".mov", ".mp4", ".m4v", ".avi", ".mkv", ".webm", ".wav", ".mp3", ".m4a",
-    ".jpg", ".jpeg", ".png", ".webp", ".heic", ".tif", ".tiff",
+    ".jpg", ".jpeg", ".png", ".webp", ".heic", ".tif", ".tiff", ".gif",
     ".pt", ".pth", ".ckpt", ".safetensors", ".onnx", ".engine",
     ".npz", ".npy", ".ply", ".pcd", ".obj", ".gpx", ".kml", ".kmz",
 }
