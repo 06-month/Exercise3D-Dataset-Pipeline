@@ -1,0 +1,858 @@
+import csv
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from argparse import Namespace
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from unittest.mock import patch
+
+import numpy as np
+
+from tools.export_private_dataset import (
+    DEADLINE_BOUNDARY_POLICY,
+    acquire_build_lock,
+    capture_source_identities,
+    copy_exact,
+    deadline_eligibility,
+    dependency_identity_reasons,
+    deadline_publication_due,
+    deadline_terminal_markers,
+    ensure_quality_output,
+    finite_nan_contract,
+    git_provenance,
+    main as export_main,
+    prune_staging_tree,
+    publish_staged_build,
+    required_global_manifest_paths,
+    required_sequence_manifest_paths,
+    remove_staging_symlinks,
+    sequence_order_sha256,
+    sequence_dependencies,
+    sha256,
+    source_descriptor_identity,
+    validate_path_component,
+    validate_quality_for_export,
+    verify_frozen_build,
+    verify_deadline_marker_mtimes,
+    verify_deadline_marker_ctimes,
+    verify_deadline_manifest_timing,
+)
+
+
+class PrivateDatasetExportTest(unittest.TestCase):
+    def test_deadline_publication_gate_refuses_premature_build_without_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "freeze"
+            argv = [
+                "export_private_dataset.py",
+                "--dataset-root",
+                str(root / "dataset"),
+                "--selection-root",
+                str(root / "selection"),
+                "--pose-root",
+                str(root / "pose"),
+                "--triangulation-root",
+                str(root / "triangulation"),
+                "--sam-prior-root",
+                str(root / "sam_prior"),
+                "--sam-mode-c-review-root",
+                str(root / "mode_c"),
+                "--body-fit-root",
+                str(root / "body"),
+                "--quality-root",
+                str(root / "quality"),
+                "--output-root",
+                str(output),
+                "--build-id",
+                "deadline-build",
+                "--sequences",
+                "one",
+                "--deadline-cutoff-utc",
+                "9999-12-31T23:59:59+00:00",
+            ]
+            with patch.object(sys, "argv", argv), patch("builtins.print") as printed:
+                result = export_main()
+            self.assertEqual(result, 76)
+            self.assertFalse(output.exists())
+            payload = json.loads(printed.call_args.args[0])
+            self.assertEqual(payload["status"], "DEADLINE_CUTOFF_NOT_REACHED")
+
+    def test_deadline_manifest_timing_binds_creation_and_expected_cutoff(self) -> None:
+        cutoff = datetime(2026, 8, 14, 4, tzinfo=timezone.utc)
+        valid = {
+            "deadline_cutoff_utc": cutoff.isoformat(),
+            "deadline_boundary_policy": DEADLINE_BOUNDARY_POLICY,
+            "created_at_utc": "2026-08-14T04:00:01+00:00",
+        }
+        parsed, errors = verify_deadline_manifest_timing(valid, cutoff)
+        self.assertEqual(parsed, cutoff)
+        self.assertEqual(errors, [])
+
+        premature = {**valid, "created_at_utc": "2026-08-14T03:59:59+00:00"}
+        _, errors = verify_deadline_manifest_timing(premature, cutoff)
+        self.assertIn("deadline_build_created_before_cutoff", errors)
+
+        _, errors = verify_deadline_manifest_timing(
+            valid, cutoff + timedelta(seconds=1)
+        )
+        self.assertIn("expected_deadline_cutoff_mismatch", errors)
+
+        self.assertFalse(
+            deadline_publication_due(
+                cutoff, datetime(2026, 8, 14, 3, 59, 59, tzinfo=timezone.utc)
+            )
+        )
+        self.assertTrue(deadline_publication_due(cutoff, cutoff))
+
+    def test_frozen_build_verifier_rejects_premature_deadline_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.build_contract_v2(Path(temporary))
+            cutoff = datetime(2026, 8, 14, 4, tzinfo=timezone.utc)
+            sequence_manifest_path = (
+                root / "sequences" / "complete" / "sequence_manifest.json"
+            )
+            sequence_manifest = json.loads(sequence_manifest_path.read_text())
+            sequence_manifest["validation"] = {
+                "deadline_terminal_marker_mtimes": {
+                    "body/body_fit.npz": "2026-08-14T03:59:57+00:00",
+                    "body/metadata.json": "2026-08-14T03:59:58+00:00",
+                    "body/mode_c_escalation.json": "2026-08-14T03:59:59+00:00",
+                },
+                "deadline_terminal_marker_ctimes": {
+                    "body/body_fit.npz": "2026-08-14T03:59:57+00:00",
+                    "body/metadata.json": "2026-08-14T03:59:58+00:00",
+                    "body/mode_c_escalation.json": "2026-08-14T03:59:59+00:00",
+                }
+            }
+            sequence_manifest_path.write_text(
+                json.dumps(sequence_manifest), encoding="utf-8"
+            )
+            manifest_path = root / "dataset_manifest.json"
+            manifest = json.loads(manifest_path.read_text())
+            manifest.update(
+                {
+                    "deadline_cutoff_utc": cutoff.isoformat(),
+                    "deadline_boundary_policy": DEADLINE_BOUNDARY_POLICY,
+                    "created_at_utc": "2026-08-14T03:59:59+00:00",
+                }
+            )
+            sequence_manifest_relative = (
+                "sequences/complete/sequence_manifest.json"
+            )
+            for record in manifest["files"]:
+                if record["path"] == sequence_manifest_relative:
+                    record["bytes"] = sequence_manifest_path.stat().st_size
+                    record["sha256"] = sha256(sequence_manifest_path)
+            manifest["total_payload_bytes"] = sum(
+                record["bytes"] for record in manifest["files"]
+            )
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            result = verify_frozen_build(
+                root,
+                "contract-v2",
+                ["complete", "pending"],
+                cutoff,
+            )
+            self.assertFalse(result["valid"])
+            self.assertIn(
+                "deadline_build_created_before_cutoff", result["errors"]
+            )
+
+    def test_build_lock_is_scoped_by_build_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first = acquire_build_lock(root, "build-a")
+            self.assertIsNotNone(first)
+            self.assertIsNone(acquire_build_lock(root, "build-a"))
+            independent = acquire_build_lock(root, "build-b")
+            self.assertIsNotNone(independent)
+            assert first is not None and independent is not None
+            first.close()
+            independent.close()
+            recovered = acquire_build_lock(root, "build-a")
+            self.assertIsNotNone(recovered)
+            assert recovered is not None
+            recovered.close()
+
+    def test_build_lock_refuses_symlink_without_touching_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            lock_root = root / ".locks"
+            lock_root.mkdir()
+            target = root / "keep.txt"
+            target.write_text("keep", encoding="utf-8")
+            (lock_root / "build-a.lock").symlink_to(target)
+            with self.assertRaises(OSError):
+                acquire_build_lock(root, "build-a")
+            self.assertEqual(target.read_text(encoding="utf-8"), "keep")
+
+    def build_contract_v2(
+        self, root: Path, *, omit_sequence_path: str | None = None
+    ) -> Path:
+        complete = "complete"
+        pending = "pending"
+        records = []
+
+        def add_record(path: str, sequence: str, content: bytes) -> dict:
+            target = root / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+            record = {
+                "sequence": sequence,
+                "path": path,
+                "bytes": len(content),
+                "sha256": sha256(target),
+            }
+            records.append(record)
+            return record
+
+        for path in sorted(required_global_manifest_paths()):
+            add_record(path, "", b"{}\n")
+        sequence_manifest_path = f"sequences/{complete}/sequence_manifest.json"
+        sequence_records = []
+        for path in sorted(required_sequence_manifest_paths(complete)):
+            if path in {sequence_manifest_path, omit_sequence_path}:
+                continue
+            sequence_records.append(add_record(path, complete, b"payload"))
+        sequence_manifest = {
+            "schema_version": 1,
+            "sequence": complete,
+            "status": "REVIEW",
+            "files": sequence_records,
+        }
+        add_record(
+            sequence_manifest_path,
+            complete,
+            (json.dumps(sequence_manifest) + "\n").encode(),
+        )
+        with (root / "sequence_status.csv").open(
+            "w", newline="", encoding="utf-8"
+        ) as handle:
+            writer = csv.DictWriter(handle, fieldnames=["sequence", "status"])
+            writer.writeheader()
+            writer.writerows(
+                [
+                    {"sequence": complete, "status": "REVIEW"},
+                    {"sequence": pending, "status": "INCOMPLETE"},
+                ]
+            )
+        requested = [complete, pending]
+        manifest = {
+            "schema_version": 1,
+            "freeze_contract_version": 2,
+            "build_id": "contract-v2",
+            "requested_sequences": requested,
+            "sequence_order_sha256": sequence_order_sha256(requested),
+            "private_dataset": True,
+            "source_rgb_included": False,
+            "source_payload_modified": False,
+            "sequence_count": 2,
+            "pass_count": 0,
+            "review_count": 1,
+            "fail_count": 0,
+            "incomplete_count": 1,
+            "freeze_eligible": False,
+            "file_count": len(records),
+            "total_payload_bytes": sum(record["bytes"] for record in records),
+            "files": records,
+        }
+        (root / "dataset_manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        return root
+
+    def test_contract_v2_binds_requested_incomplete_sequence_universe(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.build_contract_v2(Path(temporary))
+            result = verify_frozen_build(
+                root, "contract-v2", ["complete", "pending"]
+            )
+            self.assertTrue(result["valid"], result["errors"])
+
+            with (root / "sequence_status.csv").open(
+                "w", newline="", encoding="utf-8"
+            ) as handle:
+                writer = csv.DictWriter(handle, fieldnames=["sequence", "status"])
+                writer.writeheader()
+                writer.writerow({"sequence": "complete", "status": "REVIEW"})
+            manifest_path = root / "dataset_manifest.json"
+            manifest = json.loads(manifest_path.read_text())
+            manifest.update(
+                {
+                    "sequence_count": 1,
+                    "review_count": 1,
+                    "incomplete_count": 0,
+                    "freeze_eligible": True,
+                }
+            )
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            tampered = verify_frozen_build(
+                root, "contract-v2", ["complete", "pending"]
+            )
+            self.assertFalse(tampered["valid"])
+            self.assertIn(
+                "sequence_status_order_or_universe_mismatch", tampered["errors"]
+            )
+
+    def test_contract_v2_rejects_omitted_required_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            omitted = "sequences/complete/quality/metadata.json"
+            root = self.build_contract_v2(
+                Path(temporary), omit_sequence_path=omitted
+            )
+            result = verify_frozen_build(
+                root, "contract-v2", ["complete", "pending"]
+            )
+            self.assertFalse(result["valid"])
+            self.assertIn(
+                "required_sequence_payload_set_mismatch:complete",
+                result["errors"],
+            )
+
+    def test_deadline_cutoff_excludes_post_deadline_terminal_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = Namespace(
+                body_fit_root=root / "body",
+                sam_mode_c_review_root=root / "mode_c",
+            )
+            sequence = "sequence"
+            markers = [
+                args.body_fit_root / sequence / "body_fit.npz",
+                args.body_fit_root / sequence / "metadata.json",
+                args.sam_mode_c_review_root / sequence / "mode_c_escalation.json",
+            ]
+            # Keep the cutoff ahead of filesystem ctime so this provenance test
+            # remains valid after the original 2026 deadline has passed.
+            cutoff = datetime.now(timezone.utc) + timedelta(minutes=1)
+            before_ns = int(cutoff.timestamp() * 1_000_000_000) - 1_000_000
+            after_ns = int(cutoff.timestamp() * 1_000_000_000) + 1_000_000
+            for path in markers:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.touch()
+                path.chmod(0o600)
+                os.utime(path, ns=(before_ns, before_ns))
+            eligible, reasons, mtimes, ctimes, identities = deadline_eligibility(
+                args, sequence, cutoff
+            )
+            self.assertTrue(eligible)
+            self.assertEqual(reasons, [])
+            self.assertEqual(len(mtimes), 3)
+            self.assertEqual(len(ctimes), 3)
+            self.assertEqual(len(identities), 3)
+
+            os.utime(markers[-1], ns=(after_ns, after_ns))
+            eligible, reasons, _, _, _ = deadline_eligibility(
+                args, sequence, cutoff
+            )
+            self.assertFalse(eligible)
+            self.assertEqual(
+                reasons,
+                ["deadline_after_cutoff:body/mode_c_escalation.json"],
+            )
+
+    def test_deadline_marker_provenance_verifier_rejects_late_marker(self) -> None:
+        cutoff = datetime(2026, 8, 14, 4, tzinfo=timezone.utc)
+        metadata = {
+            "validation": {
+                "deadline_terminal_marker_mtimes": {
+                    "body/body_fit.npz": "2026-08-14T03:59:58+00:00",
+                    "body/metadata.json": "2026-08-14T03:59:59+00:00",
+                    "body/mode_c_escalation.json": "2026-08-14T04:00:01+00:00",
+                }
+            }
+        }
+        self.assertEqual(
+            verify_deadline_marker_mtimes(metadata, cutoff),
+            ["deadline_terminal_marker_after_cutoff:body/mode_c_escalation.json"],
+        )
+
+    def test_deadline_ctime_rejects_backdated_post_cutoff_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = Namespace(
+                body_fit_root=root / "body",
+                sam_mode_c_review_root=root / "mode_c",
+            )
+            sequence = "sequence"
+            markers = list(deadline_terminal_markers(args, sequence).values())
+            for path in markers:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"payload")
+            cutoff = datetime.now(timezone.utc) - timedelta(seconds=1)
+            backdated_ns = int((cutoff - timedelta(seconds=1)).timestamp() * 1e9)
+            for path in markers:
+                os.utime(path, ns=(backdated_ns, backdated_ns))
+            eligible, reasons, mtimes, ctimes, _ = deadline_eligibility(
+                args, sequence, cutoff
+            )
+            self.assertFalse(eligible)
+            self.assertEqual(len(mtimes), 3)
+            self.assertEqual(len(ctimes), 3)
+            self.assertEqual(
+                reasons,
+                [
+                    f"deadline_identity_after_cutoff:{label}"
+                    for label in deadline_terminal_markers(args, sequence)
+                ],
+            )
+
+    def test_deadline_ctime_provenance_verifier_rejects_late_identity(self) -> None:
+        cutoff = datetime(2026, 8, 14, 4, tzinfo=timezone.utc)
+        metadata = {
+            "validation": {
+                "deadline_terminal_marker_ctimes": {
+                    "body/body_fit.npz": "2026-08-14T03:59:58+00:00",
+                    "body/metadata.json": "2026-08-14T03:59:59+00:00",
+                    "body/mode_c_escalation.json": "2026-08-14T04:00:01+00:00",
+                }
+            }
+        }
+        self.assertEqual(
+            verify_deadline_marker_ctimes(metadata, cutoff),
+            [
+                "deadline_terminal_marker_ctime_after_cutoff:"
+                "body/mode_c_escalation.json"
+            ],
+        )
+    def test_git_provenance_records_dirty_state_without_exposing_diff(self) -> None:
+        results = [
+            subprocess.CompletedProcess([], 0, stdout="a" * 40 + "\n", stderr=""),
+            subprocess.CompletedProcess([], 0, stdout=b" M safe.py\0", stderr=b""),
+            subprocess.CompletedProcess([], 0, stdout=b"synthetic diff", stderr=b""),
+        ]
+        with patch("tools.export_private_dataset.subprocess.run", side_effect=results):
+            provenance = git_provenance()
+        self.assertEqual(provenance["git_commit"], "a" * 40)
+        self.assertTrue(provenance["git_worktree_dirty"])
+        self.assertEqual(
+            provenance["git_diff_sha256"],
+            hashlib.sha256(b"synthetic diff").hexdigest(),
+        )
+        self.assertNotIn("synthetic diff", json.dumps(provenance))
+
+    def test_copy_is_byte_exact_and_resumable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source.bin"
+            destination = root / "nested" / "destination.bin"
+            source.write_bytes(bytes(range(255)))
+            first = copy_exact(source, destination)
+            second = copy_exact(source, destination)
+            self.assertEqual(sha256(source), sha256(destination))
+            self.assertFalse(first["resume_skipped"])
+            self.assertTrue(second["resume_skipped"])
+
+    def test_copy_rejects_source_symlink_without_touching_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "private.bin"
+            target.write_bytes(b"private")
+            link = root / "source.bin"
+            link.symlink_to(target)
+            destination = root / "freeze" / "payload.bin"
+            with self.assertRaises(RuntimeError):
+                copy_exact(link, destination)
+            self.assertFalse(destination.exists())
+            self.assertEqual(target.read_bytes(), b"private")
+
+    def test_copy_rejects_source_identity_change_and_removes_temp(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source.bin"
+            destination = root / "freeze" / "payload.bin"
+            source.write_bytes(b"stable source")
+            descriptor = os.open(source, os.O_RDONLY)
+            try:
+                real_identity = source_descriptor_identity(descriptor)
+            finally:
+                os.close(descriptor)
+            changed_identity = (*real_identity[:3], real_identity[3] + 1, real_identity[4] + 1)
+            with patch(
+                "tools.export_private_dataset.source_descriptor_identity",
+                side_effect=[real_identity, changed_identity],
+            ):
+                with self.assertRaisesRegex(RuntimeError, "changed while hashing"):
+                    copy_exact(source, destination)
+            self.assertFalse(destination.exists())
+            self.assertEqual(list((root / "freeze").glob("*.tmp")), [])
+
+    def test_copy_binds_deadline_eligibility_source_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "body_fit.npz"
+            destination = root / "freeze" / "body_fit.npz"
+            source.write_bytes(b"pre-deadline payload")
+            descriptor = os.open(source, os.O_RDONLY)
+            try:
+                eligible_identity = source_descriptor_identity(descriptor)
+            finally:
+                os.close(descriptor)
+            source.write_bytes(b"post-eligibility replacement")
+            with self.assertRaisesRegex(
+                RuntimeError, "changed since deadline eligibility"
+            ):
+                copy_exact(
+                    source,
+                    destination,
+                    expected_source_identity=eligible_identity,
+                )
+            self.assertFalse(destination.exists())
+
+    def test_capture_source_identities_detects_replacement(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source.bin"
+            source.write_bytes(b"before")
+            before = capture_source_identities({"source": source})
+            replacement = root / "replacement.bin"
+            replacement.write_bytes(b"after")
+            os.replace(replacement, source)
+            after = capture_source_identities({"source": source})
+            self.assertNotEqual(before, after)
+
+    def test_capture_source_identities_rejects_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "target.bin"
+            target.write_bytes(b"private")
+            source = root / "source.bin"
+            source.symlink_to(target)
+            with self.assertRaisesRegex(RuntimeError, "must not be a symlink"):
+                capture_source_identities({"source": source})
+
+    def test_dependency_identity_gate_covers_validation_and_deadline_windows(self) -> None:
+        first = (1, 2, 3, 4, 5)
+        changed = (1, 6, 3, 7, 8)
+        reasons = dependency_identity_reasons(
+            {"body/body_fit.npz": first, "quality/metadata.json": first},
+            {"body/body_fit.npz": changed, "quality/metadata.json": changed},
+            {"body/body_fit.npz": first},
+        )
+        self.assertEqual(
+            reasons,
+            [
+                "source_changed_during_validation",
+                "deadline_source_changed_after_eligibility:body/body_fit.npz",
+            ],
+        )
+
+    def test_finite_nan_contract_separates_invalid_payload(self) -> None:
+        points = np.asarray([[[1.0, 2.0, 3.0]], [[np.nan, np.nan, np.nan]]])
+        valid = np.asarray([[True], [False]])
+        self.assertEqual(finite_nan_contract(points, valid), (True, True))
+        points[1, 0, 0] = 0.0
+        self.assertEqual(finite_nan_contract(points, valid), (True, False))
+
+    def test_verified_build_is_published_by_directory_rename(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            staging = root / ".deadline-build.inprogress"
+            final = root / "deadline-build"
+            payload = staging / "provenance" / "source.json"
+            payload.parent.mkdir(parents=True)
+            payload.write_text("{}\n", encoding="utf-8")
+            with (staging / "sequence_status.csv").open(
+                "w", newline="", encoding="utf-8"
+            ) as handle:
+                writer = csv.DictWriter(handle, fieldnames=["sequence", "status"])
+                writer.writeheader()
+                writer.writerow({"sequence": "pending", "status": "INCOMPLETE"})
+            manifest = {
+                "schema_version": 1,
+                "build_id": "deadline-build",
+                "private_dataset": True,
+                "source_rgb_included": False,
+                "source_payload_modified": False,
+                "sequence_count": 1,
+                "pass_count": 0,
+                "review_count": 0,
+                "fail_count": 0,
+                "incomplete_count": 1,
+                "freeze_eligible": False,
+                "file_count": 1,
+                "total_payload_bytes": payload.stat().st_size,
+                "files": [
+                    {
+                        "sequence": "",
+                        "path": "provenance/source.json",
+                        "bytes": payload.stat().st_size,
+                        "sha256": sha256(payload),
+                    }
+                ],
+            }
+            (staging / "dataset_manifest.json").write_text(
+                json.dumps(manifest), encoding="utf-8"
+            )
+            before = verify_frozen_build(staging, "deadline-build")
+            self.assertTrue(before["valid"], before["errors"])
+            publish_staged_build(staging, final, "deadline-build")
+            self.assertFalse(staging.exists())
+            self.assertTrue(final.is_dir())
+            self.assertTrue(verify_frozen_build(final, "deadline-build")["valid"])
+
+            (final / "provenance" / "source.json").write_text(
+                "corrupt", encoding="utf-8"
+            )
+            corrupted = verify_frozen_build(final, "deadline-build")
+            self.assertFalse(corrupted["valid"])
+            self.assertTrue(
+                any("mismatch" in error for error in corrupted["errors"]),
+                corrupted["errors"],
+            )
+
+    def test_verifier_rejects_and_pruner_removes_unlisted_staging_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            staging = parent / ".deadline-build.inprogress"
+            payload = staging / "provenance" / "source.json"
+            stale = staging / "sequences" / "old" / "stale.bin"
+            payload.parent.mkdir(parents=True)
+            stale.parent.mkdir(parents=True)
+            payload.write_text("{}\n", encoding="utf-8")
+            stale.write_bytes(b"stale-private-staging-payload")
+            with (staging / "sequence_status.csv").open(
+                "w", newline="", encoding="utf-8"
+            ) as handle:
+                writer = csv.DictWriter(handle, fieldnames=["sequence", "status"])
+                writer.writeheader()
+                writer.writerow({"sequence": "pending", "status": "INCOMPLETE"})
+            manifest = {
+                "schema_version": 1,
+                "build_id": "deadline-build",
+                "private_dataset": True,
+                "source_rgb_included": False,
+                "source_payload_modified": False,
+                "sequence_count": 1,
+                "pass_count": 0,
+                "review_count": 0,
+                "fail_count": 0,
+                "incomplete_count": 1,
+                "freeze_eligible": False,
+                "file_count": 1,
+                "total_payload_bytes": payload.stat().st_size,
+                "files": [
+                    {
+                        "sequence": "",
+                        "path": "provenance/source.json",
+                        "bytes": payload.stat().st_size,
+                        "sha256": sha256(payload),
+                    }
+                ],
+            }
+            (staging / "dataset_manifest.json").write_text(
+                json.dumps(manifest), encoding="utf-8"
+            )
+            before = verify_frozen_build(staging, "deadline-build")
+            self.assertFalse(before["valid"])
+            self.assertIn(
+                "unlisted_file:sequences/old/stale.bin", before["errors"]
+            )
+
+            removed = prune_staging_tree(
+                staging,
+                "deadline-build",
+                {
+                    "dataset_manifest.json",
+                    "sequence_status.csv",
+                    "provenance/source.json",
+                },
+            )
+            self.assertEqual(removed, ["sequences/old/stale.bin"])
+            self.assertFalse(stale.exists())
+            self.assertTrue(verify_frozen_build(staging, "deadline-build")["valid"])
+
+    def test_staging_symlink_cleanup_never_touches_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            staging = parent / ".deadline-build.inprogress"
+            staging.mkdir()
+            outside = parent / "outside"
+            outside.mkdir()
+            marker = outside / "keep.txt"
+            marker.write_text("keep", encoding="utf-8")
+            link = staging / "sequences"
+            link.symlink_to(outside, target_is_directory=True)
+
+            removed = remove_staging_symlinks(staging, "deadline-build")
+            self.assertEqual(removed, ["sequences"])
+            self.assertFalse(link.exists())
+            self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
+
+    def test_verifier_rejects_symlink_build_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            target = parent / "target"
+            target.mkdir()
+            link = parent / ".deadline-build.inprogress"
+            link.symlink_to(target, target_is_directory=True)
+            result = verify_frozen_build(link, "deadline-build")
+            self.assertFalse(result["valid"])
+            self.assertEqual(result["errors"], ["build_root_symlink"])
+
+    def test_staging_prune_refuses_non_staging_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "ordinary-directory"
+            root.mkdir()
+            marker = root / "keep.txt"
+            marker.write_text("keep", encoding="utf-8")
+            with self.assertRaises(RuntimeError):
+                prune_staging_tree(root, "deadline-build", set())
+            self.assertTrue(marker.is_file())
+
+    def test_verifier_rejects_payload_for_incomplete_sequence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            staging = Path(temporary) / ".deadline-build.inprogress"
+            payload = staging / "sequences" / "pending" / "data.bin"
+            payload.parent.mkdir(parents=True)
+            payload.write_bytes(b"not-freeze-eligible")
+            with (staging / "sequence_status.csv").open(
+                "w", newline="", encoding="utf-8"
+            ) as handle:
+                writer = csv.DictWriter(handle, fieldnames=["sequence", "status"])
+                writer.writeheader()
+                writer.writerow({"sequence": "pending", "status": "INCOMPLETE"})
+            manifest = {
+                "schema_version": 1,
+                "build_id": "deadline-build",
+                "private_dataset": True,
+                "source_rgb_included": False,
+                "source_payload_modified": False,
+                "sequence_count": 1,
+                "pass_count": 0,
+                "review_count": 0,
+                "fail_count": 0,
+                "incomplete_count": 1,
+                "freeze_eligible": False,
+                "file_count": 1,
+                "total_payload_bytes": payload.stat().st_size,
+                "files": [
+                    {
+                        "sequence": "pending",
+                        "path": "sequences/pending/data.bin",
+                        "bytes": payload.stat().st_size,
+                        "sha256": sha256(payload),
+                    }
+                ],
+            }
+            (staging / "dataset_manifest.json").write_text(
+                json.dumps(manifest), encoding="utf-8"
+            )
+            result = verify_frozen_build(staging, "deadline-build")
+            self.assertFalse(result["valid"])
+            self.assertIn(
+                "file_for_noncomplete_sequence:sequences/pending/data.bin",
+                result["errors"],
+            )
+
+    def test_build_and_sequence_ids_are_single_components(self) -> None:
+        validate_path_component("deadline-build", "build id")
+        for unsafe in ("", ".", "..", "../escape", "nested/path"):
+            with self.assertRaises(RuntimeError):
+                validate_path_component(unsafe, "build id")
+
+    def test_sequence_dependencies_include_quality_payload(self) -> None:
+        root = Path("root")
+        args = Namespace(
+            selection_root=root / "selection",
+            pose_root=root / "pose",
+            triangulation_root=root / "triangulation",
+            sam_prior_root=root / "sam",
+            sam_mode_c_review_root=root / "mode_c",
+            body_fit_root=root / "body",
+            quality_root=root / "quality",
+        )
+        dependencies = sequence_dependencies(args, "sequence")
+        self.assertEqual(
+            dependencies["quality/quality_vector.npz"].name,
+            "quality_vector.npz",
+        )
+        self.assertEqual(
+            dependencies["quality/metadata.json"].name,
+            "metadata.json",
+        )
+
+    def test_export_reuses_valid_unsigned_legacy_quality(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = Namespace(
+                selection_root=root / "selection",
+                pose_root=root / "pose",
+                triangulation_root=root / "triangulation",
+                sam_prior_root=root / "sam",
+                sam_mode_c_review_root=root / "mode_c",
+                body_fit_root=root / "body",
+                quality_root=root / "quality",
+            )
+            body = args.body_fit_root / "sequence" / "body_fit.npz"
+            mode_c = (
+                args.sam_mode_c_review_root
+                / "sequence"
+                / "mode_c_escalation.json"
+            )
+            metadata = args.quality_root / "sequence" / "metadata.json"
+            for path in (body, mode_c, metadata):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("{}", encoding="utf-8")
+            with (
+                patch(
+                    "tools.export_private_dataset.validate_quality_output",
+                    return_value=(True, [], {"qa": {"sequence_status": "REVIEW"}}),
+                ),
+                patch(
+                    "tools.export_private_dataset.build_sequence_quality"
+                ) as build,
+            ):
+                result = ensure_quality_output(args, "sequence")
+            build.assert_not_called()
+            self.assertTrue(result["resume_skipped"])
+
+    def test_export_validates_signed_quality_against_current_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = Namespace(
+                selection_root=root / "selection",
+                pose_root=root / "pose",
+                triangulation_root=root / "triangulation",
+                sam_prior_root=root / "sam",
+                sam_mode_c_review_root=root / "mode_c",
+                body_fit_root=root / "body",
+                quality_root=root / "quality",
+            )
+            metadata = args.quality_root / "sequence" / "metadata.json"
+            metadata.parent.mkdir(parents=True)
+            metadata.write_text(
+                json.dumps({"source_dependency_signature": "stored"}),
+                encoding="utf-8",
+            )
+            with (
+                patch(
+                    "tools.export_private_dataset.quality_dependency_signature",
+                    return_value="current",
+                ),
+                patch(
+                    "tools.export_private_dataset.validate_quality_output",
+                    return_value=(False, ["source_dependency_signature_mismatch"], {}),
+                ) as validate,
+            ):
+                result = validate_quality_for_export(args, "sequence")
+            validate.assert_called_once_with(
+                args.quality_root.resolve() / "sequence",
+                args.body_fit_root.resolve() / "sequence" / "body_fit.npz",
+                "current",
+            )
+            self.assertFalse(result[0])
+            self.assertEqual(
+                result[1], ["source_dependency_signature_mismatch"]
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()

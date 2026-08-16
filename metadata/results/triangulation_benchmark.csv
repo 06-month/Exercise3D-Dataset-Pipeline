@@ -1,0 +1,2 @@
+status,benchmark_kind,frames,joints_per_frame,observations_per_joint,repeats,latency_median_seconds,frames_per_second,seconds_per_frame,full_dataset_estimate_seconds,scope_note
+PASS,synthetic_vectorized_3view_dlt_no_ransac,2000,308,3,3,2.947857,678.459017,0.001474,96.682332,"DLT core only; excludes timestamp pairing, robust gating, and I/O"

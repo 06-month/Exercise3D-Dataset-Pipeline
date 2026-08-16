@@ -1,12 +1,90 @@
 # Exercise3D Dataset Pipeline
 
-이 저장소는 실제 Exercise3D 원본 데이터를 배포하는 저장소가 아니라, 동기화된
-멀티뷰 운동 영상으로부터 고품질 3D human/body pseudo-label을 생성하기 위한 데이터셋
-구축 파이프라인과 검증 절차를 공개하는 저장소입니다.
+동기화된 3-view 운동 영상에서 target tracking, 2D pose, camera-aware triangulation,
+temporal body prior, sequence fitting, quality control까지 연결하는 3D 운동 데이터셋 구축
+파이프라인입니다. 이 저장소는 데이터셋 자체를 배포하지 않고, 구축 방법과 검증 코드,
+비식별 집계 결과 및 mesh-only preview를 공개합니다.
 
 원본 영상, 얼굴을 포함할 수 있는 프레임, 개인정보, checkpoint 및 대용량 geometry
 payload는 공개하지 않습니다. 저장소에는 재현 가능한 코드, 방법론, QA 기준, 비식별
 수치 요약 및 synthetic schema example만 둡니다.
+
+## 현재 결과 — 24/26 freeze-ready
+
+- 전체 workload: 26 synchronized sequences / 78 camera views / 65,595 working frames
+- end-to-end 완료: **24/26 sequences**
+- 완료된 24개: body fitting과 quality metadata까지 존재하며 immutable checkpoint 검증 통과
+- quality 상태: REVIEW 24 / FAIL 0. 불확실성을 숨기거나 PASS로 승격하지 않음
+- 미완료: `deadlift_0002`, `squat_0003`
+- 다음 단계: 충분한 GPU 자원(A100급 5B/SAM inference 환경)이 확보되면 completion metadata를
+  검증하며 두 sequence만 resumable pipeline으로 이어서 처리
+
+`24/26`은 deadline 시점의 정직한 스냅샷입니다. 미완료 sequence를 완료로 표시하지 않았고,
+기존 완료 camera/chunk는 checksum과 schema가 일치할 때 재계산하지 않습니다.
+
+## Mesh-only showcase
+
+아래 영상은 공개를 위해 별도로 만든 3-view MHR mesh-only preview입니다. 실제 RGB frame,
+촬영 배경, 얼굴 pixel, audio와 private label payload는 포함하지 않습니다. MHR은 이 파이프라인에서
+SAM-Body4D가 생성한 body representation이며 SMPL-X라고 표기하지 않습니다.
+
+| Exercise sequence | Preview |
+|---|---|
+| Bench press — `benchpress_0004` | [MP4 보기](docs/assets/showcase/benchpress_0004_mhr_mesh.mp4) |
+| Deadlift — `deadlift_0001` | [MP4 보기](docs/assets/showcase/deadlift_0001_mhr_mesh.mp4) |
+| Barbell row — `barbellrow_0003` | [MP4 보기](docs/assets/showcase/barbellrow_0003_mhr_mesh.mp4) |
+| Lat pulldown — `latpulldown_0003` | [MP4 보기](docs/assets/showcase/latpulldown_0003_mhr_mesh.mp4) |
+| Squat — `squat_0002` | [MP4 보기](docs/assets/showcase/squat_0002_mhr_mesh.mp4) |
+
+생성 과정과 공개 경계는 [showcase 문서](docs/showcase.md)에 정리했습니다.
+
+장시간 generation을 이어받는 agent는 다른 문서보다 먼저
+[`HANDOFF.md`](HANDOFF.md)를 읽습니다. 실시간 private command/PID/progress는 Git에서 제외된
+`.runtime/handoff_state.json`에 30초 간격으로 atomic 저장되며, 살아 있는 inference를 중복
+실행하지 않는 startup 순서는 [`AGENTS.md`](AGENTS.md)에 고정했습니다.
+사람용 live dashboard와 machine-readable attention state는
+`tools/monitor_autonomous_generation.py`가 `.runtime/dashboard_state.json`에 atomic 저장합니다.
+Top-level `last_completed_event`는 polling state 갱신 시각이 아니라 atomic camera/sequence output과
+immutable build manifest 중 가장 최근 durable completion을 구조화해 기록합니다.
+Dashboard는 frozen selector summary의 exact crop/frame workload와 live measured stage rate를 결합해
+deadline까지 terminal 가능 sequence 수의 `OPTIMISTIC_UPPER_BOUND`도 표시합니다. 이 값은
+triangulation/body-fit/quality/export overhead를 제외한 ceiling이며 완료 약속으로 해석하지 않습니다.
+완료된 sequence의 SAM-complete→body-fit/Mode-C terminal provenance에서 관측한 post-SAM latency도
+별도로 집계해 `EMPIRICAL_P90_POST_SAM_ADJUSTED` schedule을 함께 표시합니다. 이 값 역시
+미래 rate/latency 보장이 아니라 deadline risk 범위입니다.
+Phase 11 CPU follower는 quality가 완료된 sequence에 대해 final exporter과 동일 validation을
+미리 수행하고 dashboard에 `freeze-ready` count와 지속 dependency failure를 보고합니다.
+Follower는 lifetime singleton lock으로 duplicate writer를 거부합니다. 별도 exact-identity watchdog은
+validated quality/freeze-readiness 26/26 전까지 연속 process absence와 final rescan을 통과한 경우에만
+제한된 detached recovery를 수행합니다.
+별도 CPU-only predeadline checkpoint follower는 이 ready 집합이 기존 byte-verified
+checkpoint의 strict superset이 되었을 때만 deterministic immutable build를 추가합니다.
+동일 집합은 재export하지 않으며, final deadline snapshot과 별도 build ID/state를 사용합니다.
+그 follower의 watchdog은 live/resume argv digest를 pin하고 연속 absence와 final rescan 후에만
+detached recovery합니다. Follower lifetime lock이 recovery race의 duplicate launch를 차단하며,
+watchdog은 deadline 도달 이후에는 follower를 재실행하지 않습니다.
+별도 CPU-only supervisor watchdog은 살아 있는 supervisor의 exact argv를 persisted resume
+command와 digest pin하고, 3회 연속 absence와 final rescan을 통과한 때만 자동
+resume합니다. 신규 supervisor는 lifetime advisory lock으로 launch race에서도 중복
+stage 실행을 거부합니다.
+완료된 expensive camera output에는 checkpoint/config/source/selection/tool/command identity를
+담은 `run_provenance.json`을 별도 atomic sidecar로 남깁니다.
+고정 deadline에는 별도 private snapshot build가 현재 PASS/REVIEW/FAIL/INCOMPLETE 상태를 보존하며,
+장기 generation 자체는 snapshot 이후에도 중단하지 않습니다.
+Snapshot membership은 terminal body-fit/Mode-C marker의 deadline cutoff로 고정하여 export/retry 도중
+완료된 sequence를 소급 포함하지 않으며, transient failure는 hidden staging에서 checksum-resume합니다.
+Cutoff-eligible sequence의 derived sidecar가 순간적으로 누락된 경우 최대 90초를 재시도하되,
+최종 시도에도 불완전하면 INCOMPLETE를 숨기지 않고 immutable snapshot을 publish합니다.
+Freeze contract v2는 요청한 26-sequence universe/order와 필수 payload set을 manifest에 bind하여
+INCOMPLETE row나 quality/provenance file을 누락한 build을 integrity PASS로 인정하지 않습니다.
+Deadline sentinel과 build ID별 exporter는 각각 lifetime/advisory lock을 유지하여 recovery
+race에서도 동일 snapshot staging/copy/publish를 중복 실행하지 않습니다. Sentinel
+watchdog은 exact persisted command identity와 연속 process absence를 확인한 뒤에만 제한된
+자동 recovery를 수행합니다.
+Freeze copy는 source symlink를 거부하고 single open descriptor의 inode/size/time identity를
+hash·copy 전후로 검증하며, file과 final directory rename을 fsync한 뒤만 publish합니다.
+Dashboard의 export state는 final deadline build progress와 이미 보존된 best durable checkpoint를
+별도 field로 표시하여, deadline build이 아직 0이라도 유효한 checkpoint sequence를 숨기지 않습니다.
 
 ## 프로젝트 목표
 
@@ -58,12 +136,71 @@ camera calibration을 구분합니다.
 | 3. VGGT-Ω Initialization | DONE | 26/26 sequence, 78/78 camera, 624 sampled frames, 실패 0 |
 | 3G. Open3D Visual Gate | DONE | 전역 mirror/180° flip/exploding cloud 없음, 1 PASS + 3 REVIEW 대표 검사 |
 | 4. Fixed-Camera Background BA Pilot | DONE | 4 sequences, PASS 2 / REVIEW 2 / FAIL 0, Stage 1/2 모두 수렴 |
-| 5. Full Dataset Background BA | REVIEW | 26 sequences 실행 완료, PASS 11 / REVIEW 14 / FAIL 1, Stage 1 26/26·Stage 2 25/26 |
-| 6–13 | TODO | Phase 5 FAIL 처리 정책과 camera freeze gate 이후 진행 |
+| 5. Full Dataset Background BA | DONE | 26 sequences 실행 완료, Phase 5.1 후 PASS 11 / REVIEW 15 / FAIL 0, Stage 1/2 26/26 |
+| 5.1. `pushup_0003` Camera Recovery | DONE | 동일 objective에서 Stage 2 budget만 확장, 322 nfev에서 수렴, `RECOVERED_REVIEW` |
+| 6-0. Sapiens2-5B Environment | DONE | A100 80GB smoke PASS, 308 keypoints, peak 19.986 GiB, 4.517 s/image |
+| 6-1. Sapiens2 Pose Pilot | DONE | all-person baseline 보존, batch 1/2/4/8/12/16 완료 |
+| 6-1A. Primary Target Selection | DONE | 9,732 frame, identity switch 0, ambiguity 7, crop 50.37% 감소 |
+| 6-2. Target-only Runtime Gate | PARTIAL COMPLETE | selector `GO_FULL_DATASET`; target 65,430/65,595, pose 75/78 views·61,608 crops 완료 |
+| 7. Timestamp-aware Triangulation | PARTIAL COMPLETE | 25/26 sequence, PASS 5 / REVIEW 20 / FAIL 0 |
+| 8. SAM Body Runtime Feasibility | PARTIAL COMPLETE/REVIEW | checkpoint integrity PASS; Mode B 72/78 views·58,062 frames 완료 |
+| 9. Sequence Body Fitting | PARTIAL COMPLETE/REVIEW | 24/26 sequence, PASS 3 / REVIEW 21 / FAIL 0 |
+| 10. Body Shape / Proportion | IMPLEMENTED PARTIAL | sequence-level shape/scale provenance 보존; evidence-backed subject mapping 부재로 cross-sequence fusion 안 함 |
+| 11. Pseudo-label Quality Control | PARTIAL COMPLETE | freeze-ready 24/26, REVIEW 24 / FAIL 0; scalar accuracy score 없음 |
+| 12. Fit3D Validation | IMPLEMENTED/WAITING DATA | metric regression PASS; local Fit3D payload 부재로 실제 score 미주장 |
+| 13. Final Dataset Freeze | DEADLINE SNAPSHOT COMPLETE | immutable deadline build: REVIEW 24 / INCOMPLETE 2 / FAIL 0; best 24-sequence checkpoint integrity PASS |
 
-Phase 5의 계산 자체는 완료됐지만 `pushup_0003` Stage 2가 `max_nfev=300`에서 수렴하지
-않아 downstream camera freeze gate는 REVIEW 상태입니다. 이 결과를 임의로 PASS로 바꾸거나
-Phase 4에서 승인한 알고리즘을 조용히 변경하지 않습니다.
+`pushup_0003`은 Phase 5.1에서 observation, initialization, objective와 gate를 그대로 두고
+Stage 2 budget만 300에서 600으로 확장했습니다. 실제 322 evaluations에서 `xtol`로 수렴했고,
+제한된 sparse support 때문에 `RECOVERED_REVIEW`로 유지합니다. Dataset-level FAIL은 0이며
+camera geometry freeze는 REVIEW uncertainty 전파 조건으로 승인되었습니다.
+
+2026-08-14 13:00 KST deadline에는 24개 sequence가 end-to-end 완료됐고 `deadlift_0002`,
+`squat_0003`은 `INCOMPLETE_DEADLINE` provenance로 남았습니다. 이 시점의 immutable build는
+요청된 26개 상태를 REVIEW 24 / INCOMPLETE 2 / FAIL 0으로 고정했습니다. 이후 충분한 GPU 자원이
+확보되면 5B/flip-test/abstention 설정을 유지하고 completion metadata가 유효한 output은 건너뛰면서
+두 sequence의 미완료 stage만 재개합니다.
+
+Phase 7 pilot에서는 2D target이 정상인데도 `squat_0001`과 `pushup_0001`의 current camera와
+epipolar consistency가 무너지는 새 evidence가 확인됐습니다. 해당 3D proposal은 fitting/export에서
+제외했고, 원본 Phase 5 camera를 덮어쓰지 않는 recovery와 held-out 검증을 요구합니다.
+자세한 내용은 [Phase 7 문서](docs/phases/phase_7_triangulation.md)에 있습니다.
+
+Phase 8 primary-target pilot는 control/severe 두 clip의 Mode A/B/C 여섯 run을 완료했습니다.
+SAM full-stage projection은 16.35/20.80/32.63시간, Sapiens2 target-only와 한 GPU에서 순차
+실행하는 합계는 95.43/99.88/111.71시간입니다. Mode C는 약 2배 느렸지만 이번 severe clip에서
+content completion이 호출되지 않아 선택적 refiner 정책은 `REVIEW`로 유지합니다. full 기본은
+Mode B이며 Mode C는 evidence가 있는 frame/sequence만 selective escalation합니다. 상세 근거는
+[Phase 8 문서](docs/phases/phase_8_sam_body4d.md)에 있습니다.
+
+Full inference가 진행되는 동안 CPU에서는 세 view가 완결된 sequence부터 Phase 7을 자동 실행합니다.
+SAM compact prior는 MHR pose/shape/hand/expression/joint/model parameter와 source PTS를 보존하며,
+Phase 9는 triangulated geometry를 dominant observation으로 두는 staged fit만 허용합니다. 최종 private
+export는 source RGB를 포함하지 않고 stage payload의 byte equality와 SHA-256, PASS/REVIEW/FAIL/
+INCOMPLETE 상태를 versioned manifest에 기록합니다.
+
+첫 end-to-end `barbellrow_0000`은 Mode B 3-view 1,770 frame과 body fit 590 timestamp × 26 joint를
+완료했습니다. Numeric/mesh/provenance와 finite/NaN contract는 PASS했지만 camera REVIEW와 normalized
+geometry displacement p95 0.05167을 그대로 전파해 sequence는 `REVIEW_BODY_FIT_QUALITY`입니다.
+Complete sequence 하나만 사용한 private export smoke는 34 files의 size/SHA-256 불일치 없이
+freeze-eligible이었으며, REVIEW를 PASS로 승격하지 않았습니다.
+강화된 exact-tree exporter smoke는 Phase 11 quality 두 파일을 추가한 36 files/
+28,993,394 bytes를 전수 검증했고, clean commit provenance와 immutable read-only reuse까지 PASS했습니다.
+
+두 번째 `squat_0001`도 Mode B 3-view 3,801/3,801 frame과 1,267×26 body fit을 완료했습니다.
+Body fit coverage/alignment는 1.0이고 prior-only joint는 0이지만 normalized displacement p95
+0.07936과 camera uncertainty를 전파해 REVIEW로 유지합니다. Mode C 후보는 0으로
+`PASS_MODE_B_FROZEN`이며 expensive Mode C를 실행하지 않았습니다.
+
+장기 generation job은 deadline snapshot 이후 중단된 상태이며 자동 completion을 주장하지 않습니다.
+GPU 환경이 다시 준비되면 singleton/exact-command gate를 확인하고 동일 selection-bound 설정으로
+resume한 뒤 Phase 7 → SAM Mode B → prior consolidation → body fit → quality/private export를
+sequence별로 이어갑니다. Full SAM 직전에는 8-frame Mode B smoke로 PTS/mesh/MHR numeric schema를
+실제 GPU에서 검사합니다. Mode C는 자동 full mode가 아니며
+[`configs/sam_mode_c_escalation.json`](configs/sam_mode_c_escalation.json)의 occlusion+failure/outlier
+조건과 B/C 개선 gate를 모두 통과할 때만 선택 후보입니다.
+각 full Mode B sequence 뒤에는 이 조건을 실제로 평가해 후보 frame/clip 또는
+`PASS_MODE_B_FROZEN`을 private export provenance에 포함합니다.
 
 세부 상태와 acceptance gate는 [plan.md](plan.md), 시간순 실행 기록은
 [process.md](process.md)를 기준으로 합니다.
@@ -98,6 +235,11 @@ pip install open3d
 VGGT-Ω는 공식 구현과 사용 권한이 있는 local checkpoint를 별도로 준비해야 합니다.
 이 저장소는 checkpoint를 다운로드하거나 재배포하지 않습니다. PyTorch/CUDA dependency도
 공식 VGGT-Ω 환경을 우선합니다.
+
+Sapiens2 Pose 5B는 Python 3.12/PyTorch 2.7 이상을 요구하므로 Phase 0–5 환경과 분리합니다.
+검증된 dependency와 checkpoint hash는
+[configs/sapiens2_pose_5b_environment.json](configs/sapiens2_pose_5b_environment.json),
+설치·smoke 절차는 [Phase 6 문서](docs/phases/phase_6_sapiens2.md)에 기록했습니다.
 
 ## 외부 private dataset 연결
 
@@ -173,6 +315,16 @@ python tools/background_bundle_adjust.py \
 Phase 5에서 실제 사용한 수치 default는
 [configs/phase5_background_ba.json](configs/phase5_background_ba.json)에 freeze했습니다.
 
+Sapiens2 Pose 5B single-image smoke:
+
+```bash
+"$EXERCISE3D_SAPIENS2_PYTHON" tools/sapiens2_pose_smoke.py \
+  --image <PRIVATE_REPRESENTATIVE_FRAME> \
+  --sapiens2-root "$SAPIENS2_ROOT" \
+  --checkpoint-root "$EXERCISE3D_CHECKPOINT_ROOT" \
+  --output-json outputs/local/sapiens2/smoke.json
+```
+
 ## 도구
 
 | 파일 | 역할 | source mutation |
@@ -186,6 +338,34 @@ Phase 5에서 실제 사용한 수치 default는
 | `tools/visualize_vggt.py` | Open3D geometry QA | optional debug output만 생성 |
 | `tools/background_bundle_adjust.py` | shared physical-camera Background BA | 새 output에만 생성 |
 | `tools/finalize_background_ba_dataset.py` | dataset-level BA validation/report | BA output metadata 생성 |
+| `tools/analyze_background_ba_recovery.py` | Stage 2 budget-only recovery 재현·동일성 검증 | BA output metadata 생성 |
+| `tools/sapiens2_pose_smoke.py` | 공식 Sapiens2 5B + DETR single-image smoke/VRAM/latency | optional ignored output만 생성 |
+| `tools/sapiens2_pose_pipeline.py` | all-person 5B batch benchmark와 resumable baseline pilot | ignored output만 생성 |
+| `tools/detr_person_candidates.py` | explicit sequence allowlist의 official DETR detection-only pass | ignored private output만 생성 |
+| `tools/target_subject_selection.py` | all DETR candidate 보존 + bidirectional primary target tracking | ignored private output + aggregate report |
+| `tools/sapiens2_target_pipeline.py` | accepted target-only 5B batch benchmark/inference/verification | ignored output만 생성 |
+| `tools/validate_target_selection_full.py` | DETR candidate lossless 보존·identity/abstention full gate | ignored aggregate 생성 |
+| `tools/summarize_phase6_1.py` | all-person/target-only 비교, ETA와 acceptance gate 집계 | redacted aggregate 생성 |
+| `tools/triangulate_sapiens2.py` | PTS-aware weighted triangulation과 pose-camera consistency gate | ignored private output 생성 |
+| `tools/recover_cameras_from_pose_observations.py` | NO_GO camera의 별도 observation-conditioned/held-out recovery | ignored private output 생성 |
+| `tools/run_phase7_streaming.py` | pose-complete sequence의 triangulation/recovery 자동 streaming | ignored private output 생성 |
+| `tools/benchmark_sam_body4d.py` | SAM-Body4D checkpoint preflight와 refiner on/off runtime 측정 | ignored output만 생성 |
+| `tools/sam_body_primary_target_runner.py` | primary bbox 1개 adapter와 compact MHR parameter provenance 저장 | ignored private output만 생성 |
+| `tools/run_sam_body4d_full.py` | Mode B camera 단위 resume/completeness orchestration | ignored private output만 생성 |
+| `tools/run_autonomous_generation.py` | Sapiens resume부터 Phase 7–13까지 장시간 critical path supervision | ignored private output 생성 |
+| `tools/monitor_autonomous_generation.py` | 기존 runtime/process/GPU를 읽는 live dashboard와 atomic attention state | ignored `.runtime/dashboard_state.json` 생성 |
+| `tools/consolidate_sam_body_prior.py` | frame/PTS/identity-aware MHR numeric prior 통합 | ignored private output 생성 |
+| `tools/assess_sam_mode_c_escalation.py` | Mode B failure/outlier 기반 bounded Mode C review clip 선정 | ignored private output 생성 |
+| `tools/verify_mhr_parameter_replay.py` | compact 204-d MHR parameter의 official model exact replay 검사 | ignored aggregate 생성 |
+| `tools/fit_sequence_body.py` | geometry-dominant staged sequence body fit과 S0 | ignored private output 생성 |
+| `tools/build_pseudolabel_quality.py` | target/pose/SAM/geometry/body evidence의 frame/sequence quality vector | ignored private output 생성 |
+| `tools/run_quality_control_follower.py` | 완료 body-fit을 감지하는 CPU-only Phase 11 follower | ignored runtime/quality output 갱신 |
+| `tools/run_quality_control_follower_watchdog.py` | quality follower exact-identity/absence recovery watchdog | ignored runtime state/log 갱신 |
+| `tools/run_predeadline_checkpoint_follower.py` | 증가한 freeze-ready 집합만 immutable checkpoint로 보존하는 CPU-only follower | ignored runtime/private freeze 갱신 |
+| `tools/run_predeadline_checkpoint_follower_watchdog.py` | checkpoint follower exact-identity/absence recovery watchdog | ignored runtime state/log 갱신 |
+| `tools/export_private_dataset.py` | versioned private dataset export와 byte/SHA/schema 검증 | ignored private output 생성 |
+| `tools/evaluate_fit3d_metrics.py` | prepared Fit3D pair의 MPJPE/N-MPJPE/PA-MPJPE 분리 평가 | ignored aggregate 생성 |
+| `tools/summarize_sam_body_runtime.py` | A/B/C ratio, occlusion 증가와 best/expected/worst runtime 집계 | redacted aggregate 생성 |
 | `tools/check_publication_safety.py` | staged/tracked 공개 안전 검사 | 없음 |
 
 ## 저장소 구조
@@ -241,8 +421,9 @@ git diff --cached
 ## Pretrained model dependency
 
 - VGGT-Ω: camera/depth/point-map initialization 전용, 최종 camera로 직접 사용하지 않음
-- Sapiens2: Phase 6 primary offline 2D teacher 후보
-- SAM 3D Body / SAM-Body4D: Phase 8 pretrained temporal body prior 후보
+- Sapiens2 Pose 5B: Phase 6 primary offline 2D teacher로 확정; official DETR person detector 사용
+- SAM 3D Body / SAM-Body4D: checkpoint 28 files/22.387 GiB SHA-256 integrity와 primary-target
+  A/B/C pilot 완료; Mode B full 기본 후보, Mode C selective 정책은 REVIEW
 - Fit3D: Phase 12 정량 validation dataset 후보
 
 각 모델의 라이선스, 배포 조건, checkpoint 사용 권한은 upstream 정책을 따릅니다.

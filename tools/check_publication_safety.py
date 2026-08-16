@@ -11,6 +11,13 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MAX_PUBLIC_BYTES = 5 * 1024 * 1024
+PUBLIC_SHOWCASE_PATHS = {
+    Path("docs/assets/showcase/benchpress_0004_mhr_mesh.mp4"),
+    Path("docs/assets/showcase/deadlift_0001_mhr_mesh.mp4"),
+    Path("docs/assets/showcase/barbellrow_0003_mhr_mesh.mp4"),
+    Path("docs/assets/showcase/latpulldown_0003_mhr_mesh.mp4"),
+    Path("docs/assets/showcase/squat_0002_mhr_mesh.mp4"),
+}
 FORBIDDEN_SUFFIXES = {
     ".mov", ".mp4", ".m4v", ".avi", ".mkv", ".webm", ".wav", ".mp3", ".m4a",
     ".jpg", ".jpeg", ".png", ".webp", ".heic", ".tif", ".tiff",
@@ -47,11 +54,12 @@ def inspect(path: Path) -> list[str]:
         return errors
     if any(part in FORBIDDEN_PARTS for part in relative.parts):
         errors.append(f"private 경로 금지: {relative}")
-    if path.suffix.lower() in FORBIDDEN_SUFFIXES:
+    public_showcase = relative in PUBLIC_SHOWCASE_PATHS
+    if path.suffix.lower() in FORBIDDEN_SUFFIXES and not public_showcase:
         errors.append(f"payload 확장자 금지: {relative}")
     if path.exists() and path.stat().st_size > MAX_PUBLIC_BYTES:
         errors.append(f"5 MiB 초과 파일 금지: {relative} ({path.stat().st_size} bytes)")
-    if relative == Path("tools/check_publication_safety.py"):
+    if relative == Path("tools/check_publication_safety.py") or public_showcase:
         return errors
     if not path.exists() or path.suffix.lower() in FORBIDDEN_SUFFIXES:
         return errors

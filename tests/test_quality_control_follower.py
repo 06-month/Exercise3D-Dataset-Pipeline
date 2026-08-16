@@ -1,0 +1,270 @@
+import io
+import json
+import tempfile
+import unittest
+from argparse import ArgumentTypeError, Namespace
+from contextlib import redirect_stdout
+from pathlib import Path
+from unittest.mock import patch
+
+from tools.run_quality_control_follower import (
+    completed_quality_still_current,
+    dependency_paths,
+    main,
+    parse_list,
+    run_cycle,
+)
+from tools.run_autonomous_supervisor_watchdog import acquire_singleton_lock
+
+
+class QualityControlFollowerTest(unittest.TestCase):
+    def args(self, root: Path) -> Namespace:
+        return Namespace(
+            selection_root=root / "selection",
+            pose_root=root / "pose",
+            triangulation_root=root / "triangulation",
+            sam_prior_root=root / "sam_prior",
+            sam_mode_c_review_root=root / "mode_c",
+            body_fit_root=root / "body",
+            output_root=root / "quality",
+            runtime_state=root / "state.json",
+            sequences=["sequence"],
+            poll_seconds=1.0,
+            retry_seconds=30.0,
+            readiness_grace_seconds=60.0,
+            once=True,
+        )
+
+    def materialize_dependencies(self, args: Namespace) -> None:
+        for path in dependency_paths(args, "sequence").values():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+
+    def test_parse_list_rejects_duplicates(self) -> None:
+        self.assertEqual(parse_list("one,two"), ["one", "two"])
+        with self.assertRaises(ArgumentTypeError):
+            parse_list("one,one")
+
+    def test_lifetime_lock_rejects_duplicate_follower(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            lock = Path(temporary) / "quality.lock"
+            owner = acquire_singleton_lock(lock)
+            self.assertIsNotNone(owner)
+            try:
+                with redirect_stdout(io.StringIO()), patch(
+                    "sys.argv",
+                    [
+                        "run_quality_control_follower.py",
+                        "--sequences",
+                        "one",
+                        "--instance-lock",
+                        str(lock),
+                        "--once",
+                    ],
+                ):
+                    self.assertEqual(main(), 3)
+            finally:
+                assert owner is not None
+                owner.close()
+
+    def test_waits_without_building_until_all_dependencies_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            args = self.args(Path(temporary))
+            with patch(
+                "tools.run_quality_control_follower.build_sequence_quality"
+            ) as build:
+                state = run_cycle(args, {}, {}, monotonic_now=10.0)
+            build.assert_not_called()
+            self.assertEqual(state["status"], "RUNNING")
+            self.assertEqual(state["completed_sequence_count"], 0)
+            self.assertEqual(state["waiting"][0]["sequence"], "sequence")
+
+    def test_builds_ready_sequence_and_records_completion(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            args = self.args(Path(temporary))
+            self.materialize_dependencies(args)
+            completed: dict[str, str] = {}
+            with (
+                patch(
+                    "tools.run_quality_control_follower.validate_existing",
+                    side_effect=[(False, "missing"), (True, "REVIEW")],
+                ),
+                patch(
+                    "tools.run_quality_control_follower.build_sequence_quality",
+                    return_value={"qa": {"sequence_status": "REVIEW"}},
+                ) as build,
+                patch(
+                    "tools.run_quality_control_follower.assess_freeze_readiness",
+                    return_value={
+                        "sequence": "sequence",
+                        "status": "REVIEW",
+                        "reasons": [],
+                        "reference_frame_count": 2,
+                    },
+                ),
+            ):
+                freeze_ready: dict[str, dict] = {}
+                state = run_cycle(
+                    args,
+                    completed,
+                    {},
+                    freeze_ready,
+                    {},
+                    monotonic_now=10.0,
+                )
+            build.assert_called_once()
+            self.assertEqual(completed, {"sequence": "REVIEW"})
+            self.assertEqual(state["status"], "COMPLETE")
+            self.assertEqual(state["newly_validated"], ["sequence"])
+            self.assertEqual(state["materialized"], ["sequence"])
+            self.assertEqual(state["freeze_readiness"]["ready_sequence_count"], 1)
+            self.assertEqual(state["freeze_readiness"]["newly_ready"], ["sequence"])
+
+    def test_incomplete_freeze_readiness_gets_grace_then_attention(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            args = self.args(Path(temporary))
+            self.materialize_dependencies(args)
+            quality = args.output_root / "sequence"
+            quality.mkdir(parents=True)
+            (quality / "quality_vector.npz").touch()
+            (quality / "metadata.json").write_text("{}", encoding="utf-8")
+            completed = {"sequence": "REVIEW"}
+            readiness_state: dict[str, dict] = {}
+            result = {
+                "sequence": "sequence",
+                "status": "INCOMPLETE",
+                "reasons": ["missing:view/cam1_pose_run_provenance.json"],
+                "reference_frame_count": 0,
+            }
+            with patch(
+                "tools.run_quality_control_follower.assess_freeze_readiness",
+                return_value=result,
+            ):
+                first = run_cycle(
+                    args,
+                    completed,
+                    {},
+                    {},
+                    readiness_state,
+                    monotonic_now=10.0,
+                )
+                second = run_cycle(
+                    args,
+                    completed,
+                    {},
+                    {},
+                    readiness_state,
+                    monotonic_now=80.0,
+                )
+            self.assertEqual(first["status"], "RUNNING")
+            self.assertEqual(len(first["freeze_readiness"]["waiting"]), 1)
+            self.assertEqual(second["status"], "ATTENTION")
+            self.assertEqual(len(second["freeze_readiness"]["failures"]), 1)
+            self.assertIn(
+                "pose_run_provenance",
+                second["freeze_readiness"]["failures"][0]["reasons"][0],
+            )
+
+    def test_changed_dependency_signature_revalidates_freeze_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            args = self.args(Path(temporary))
+            quality = args.output_root / "sequence"
+            quality.mkdir(parents=True)
+            (quality / "quality_vector.npz").touch()
+            (quality / "metadata.json").write_text("{}", encoding="utf-8")
+            completed = {"sequence": "REVIEW"}
+            freeze_ready = {
+                "sequence": {
+                    "sequence": "sequence",
+                    "status": "REVIEW",
+                    "reasons": [],
+                    "dependency_signature": "old",
+                }
+            }
+            result = {
+                "sequence": "sequence",
+                "status": "REVIEW",
+                "reasons": [],
+                "reference_frame_count": 2,
+                "dependency_signature": "new",
+            }
+            with (
+                patch(
+                    "tools.run_quality_control_follower.export_dependency_signature",
+                    return_value="new",
+                ),
+                patch(
+                    "tools.run_quality_control_follower.assess_freeze_readiness",
+                    return_value=result,
+                ) as assess,
+            ):
+                state = run_cycle(
+                    args,
+                    completed,
+                    {},
+                    freeze_ready,
+                    {},
+                    monotonic_now=10.0,
+                )
+            assess.assert_called_once_with(args, "sequence")
+            self.assertEqual(
+                freeze_ready["sequence"]["dependency_signature"], "new"
+            )
+            self.assertEqual(state["freeze_readiness"]["newly_ready"], ["sequence"])
+
+    def test_failure_reason_survives_retry_cooldown(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            args = self.args(Path(temporary))
+            self.materialize_dependencies(args)
+            retry_state: dict[str, dict] = {}
+            with (
+                patch(
+                    "tools.run_quality_control_follower.validate_existing",
+                    return_value=(False, "missing"),
+                ),
+                patch(
+                    "tools.run_quality_control_follower.build_sequence_quality",
+                    side_effect=RuntimeError("synthetic failure"),
+                ),
+            ):
+                first = run_cycle(args, {}, retry_state, monotonic_now=10.0)
+                second = run_cycle(args, {}, retry_state, monotonic_now=20.0)
+            self.assertEqual(first["status"], "ATTENTION")
+            self.assertIn("synthetic failure", first["failures"][0]["reason"])
+            self.assertIn("synthetic failure", second["failures"][0]["reason"])
+            self.assertEqual(second["failures"][0]["retry_in_seconds"], 20.0)
+
+    def test_signed_completion_is_invalidated_by_source_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            args = self.args(Path(temporary))
+            self.materialize_dependencies(args)
+            quality = args.output_root / "sequence"
+            quality.mkdir(parents=True)
+            (quality / "quality_vector.npz").touch()
+            with patch(
+                "tools.run_quality_control_follower.quality_dependency_signature",
+                return_value="current",
+            ):
+                (quality / "metadata.json").write_text(
+                    json.dumps({"source_dependency_signature": "current"}),
+                    encoding="utf-8",
+                )
+                self.assertTrue(completed_quality_still_current(args, "sequence"))
+            with patch(
+                "tools.run_quality_control_follower.quality_dependency_signature",
+                return_value="changed",
+            ):
+                self.assertFalse(completed_quality_still_current(args, "sequence"))
+
+    def test_unsigned_persisted_completion_is_grandfathered(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            args = self.args(Path(temporary))
+            quality = args.output_root / "sequence"
+            quality.mkdir(parents=True)
+            (quality / "quality_vector.npz").touch()
+            (quality / "metadata.json").write_text("{}", encoding="utf-8")
+            self.assertTrue(completed_quality_still_current(args, "sequence"))
+
+
+if __name__ == "__main__":
+    unittest.main()

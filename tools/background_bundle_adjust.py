@@ -1393,6 +1393,8 @@ def run_bundle_adjustment(
     scene_scale: float,
     image_shapes: list[tuple[int, int]],
     args: argparse.Namespace,
+    max_nfev: int | None = None,
+    verbose: int = 0,
 ) -> dict[str, Any]:
     import numpy as np
     from scipy.optimize import least_squares
@@ -1440,8 +1442,8 @@ def run_bundle_adjustment(
         ftol=1e-4,
         xtol=1e-4,
         gtol=1e-4,
-        max_nfev=args.max_nfev,
-        verbose=0,
+        max_nfev=args.max_nfev if max_nfev is None else max_nfev,
+        verbose=verbose,
     )
     cameras, optimized_points = decode_ba_state(
         result.x, base_cameras, base_intrinsics, scene_scale, point_count,
@@ -1814,6 +1816,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--focal-refinement-fraction", type=float, default=0.05)
     parser.add_argument("--principal-refinement-fraction", type=float, default=0.02)
     parser.add_argument("--max-nfev", type=int, default=300)
+    parser.add_argument(
+        "--stage2-max-nfev", type=int, default=None,
+        help="recovery-only Stage 2 budget; Stage 1 keeps --max-nfev",
+    )
+    parser.add_argument(
+        "--optimizer-verbose", type=int, choices=(0, 1, 2), default=0,
+        help="SciPy least_squares diagnostic verbosity; objective is unchanged",
+    )
     parser.add_argument("--save-debug-images", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
@@ -1837,6 +1847,8 @@ def main(argv: list[str] | None = None) -> int:
         raise RuntimeError(f"output root overlaps immutable dataset input: {output_root}")
     if not 0 <= args.confidence_percentile < 100 or not 0 < args.static_mad_percentile <= 100:
         raise RuntimeError("invalid percentile configuration")
+    if args.max_nfev < 1 or (args.stage2_max_nfev is not None and args.stage2_max_nfev < 1):
+        raise RuntimeError("optimization budgets must be positive")
     sequence_dir = resolve_sequence(vggt_root, args.sequence)
     sequence_metadata = json.loads((sequence_dir / "metadata.json").read_text(encoding="utf-8"))
     validate_eis(args.root, args.sequence)
@@ -1938,9 +1950,12 @@ def main(argv: list[str] | None = None) -> int:
     initial_residual_vectors = observation_residual_vectors(
         initial_camera_list, arrays["points_initial"], observations
     )
+    if args.optimizer_verbose:
+        print("=== OPTIMIZER_TRACE stage1 ===", flush=True)
     stage1 = run_bundle_adjustment(
         initial_camera_list, initial_intrinsics, arrays["points_initial"], observations,
         np.ones(len(initial_errors)), scene_scale, image_shapes, args,
+        max_nfev=args.max_nfev, verbose=args.optimizer_verbose,
     )
     stage1_errors = observation_errors(stage1["cameras"], stage1["points"], observations)
     stage1_residual_vectors = observation_residual_vectors(
@@ -1977,10 +1992,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     if len(kept_old_tracks) < 8 or len(stage2_observations["track"]) < 24:
         raise RuntimeError("robust gates removed too much support for stage 2")
+    if args.optimizer_verbose:
+        print("=== OPTIMIZER_TRACE stage2 ===", flush=True)
     stage2 = run_bundle_adjustment(
         stage1["cameras"], [camera["intrinsic"] for camera in stage1["cameras"]],
         stage1["points"][kept_old_tracks], stage2_observations, stage2_weights,
         scene_scale, image_shapes, args,
+        max_nfev=args.stage2_max_nfev or args.max_nfev,
+        verbose=args.optimizer_verbose,
     )
     points_refined_all = stage1["points"].copy()
     points_refined_all[kept_old_tracks] = stage2["points"]
@@ -2216,6 +2235,11 @@ def main(argv: list[str] | None = None) -> int:
             "intrinsics": args.intrinsics,
             "stage1": "all filtered tracks/observations",
             "stage2": "track outliers removed; sample GOOD=1, DOWNWEIGHT=0.25, REJECT=0",
+            "optimization_budget": {
+                "stage1_max_nfev": args.max_nfev,
+                "stage2_max_nfev": args.stage2_max_nfev or args.max_nfev,
+                "only_budget_differs_in_recovery": args.stage2_max_nfev is not None,
+            },
         },
         "reprojection_pre": pre_summary,
         "reprojection_post": post_summary,

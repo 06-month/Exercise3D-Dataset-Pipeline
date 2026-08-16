@@ -2,37 +2,145 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Exercise3D final pseudo-label record",
   "type": "object",
-  "required": ["sequence_id", "subject_id", "exercise_id", "timestamp", "camera", "quality"],
+  "required": [
+    "sequence_id",
+    "subject_id",
+    "subject_mapping_status",
+    "exercise_id",
+    "timestamp_pts_seconds",
+    "views",
+    "camera_geometry",
+    "triangulation",
+    "body",
+    "quality",
+    "provenance"
+  ],
   "properties": {
     "sequence_id": {"type": "string"},
-    "subject_id": {"type": "string", "description": "공개 시 비식별 ID"},
+    "subject_id": {
+      "type": ["string", "null"],
+      "description": "근거 매핑이 있을 때만 비식별 ID, 현재 v1은 null"
+    },
+    "subject_mapping_status": {
+      "enum": ["MAPPED_WITH_PROVENANCE", "SUBJECT_MAPPING_UNAVAILABLE"]
+    },
     "exercise_id": {"type": "string"},
-    "timestamp": {"type": "number", "description": "seconds, PTS provenance"},
-    "camera": {
+    "timestamp_pts_seconds": {"type": "number", "description": "cam1 reference PTS seconds"},
+    "views": {
       "type": "object",
-      "required": ["K", "R", "t", "camera_quality"],
+      "required": ["cam1", "cam2", "cam3"],
+      "additionalProperties": false,
+      "patternProperties": {
+        "^cam[123]$": {
+          "type": "object",
+          "required": [
+            "source_frame_index",
+            "source_frame_name",
+            "source_pts_seconds",
+            "target_status",
+            "keypoints_2d",
+            "keypoint_confidence",
+            "target_identity"
+          ],
+          "properties": {
+            "source_frame_index": {"type": "integer", "minimum": 0},
+            "source_frame_name": {"type": "string"},
+            "source_pts_seconds": {"type": "number"},
+            "target_status": {"enum": ["TARGET", "TARGET_AMBIGUOUS", "NO_TARGET"]},
+            "keypoints_2d": {"type": "array", "minItems": 308, "maxItems": 308},
+            "keypoint_confidence": {"type": "array", "minItems": 308, "maxItems": 308},
+            "target_identity": {
+              "type": "object",
+              "required": [
+                "num_person_candidates",
+                "target_candidate_index",
+                "target_selection_confidence",
+                "background_person_count",
+                "target_ambiguous",
+                "occlusion_risk"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "camera_geometry": {
+      "type": "object",
+      "required": ["source", "world_gauge", "camera_status", "K", "R", "t", "uncertainty"],
       "properties": {
+        "source": {
+          "enum": ["PHASE5_BACKGROUND_BA", "REVIEW_OBSERVATION_CONDITIONED"]
+        },
+        "world_gauge": {"const": "sequence-local arbitrary scale; cam1 identity gauge"},
         "K": {"type": "array"},
         "R": {"type": "array"},
         "t": {"type": "array"},
-        "camera_quality": {"type": "object"}
+        "camera_status": {"enum": ["PASS", "REVIEW", "FAIL"]},
+        "uncertainty": {"type": "object"}
       }
     },
-    "image_references": {"type": "object"},
-    "keypoints_2d": {"type": "object"},
-    "keypoints_3d": {"type": "object"},
-    "body": {"type": "object"},
+    "triangulation": {
+      "type": "object",
+      "required": [
+        "joint_names",
+        "keypoints_3d",
+        "valid_mask",
+        "supporting_views",
+        "reprojection_px",
+        "ray_angle_deg",
+        "timing_uncertainty_ms",
+        "joint_confidence"
+      ]
+    },
+    "body": {
+      "type": "object",
+      "required": [
+        "canonical_keypoints_3d",
+        "valid_mask",
+        "confidence",
+        "evidence_type",
+        "shape_params_consensus",
+        "scale_params_consensus",
+        "body_pose_params_consensus",
+        "s0",
+        "sam_mode_c_status"
+      ],
+      "properties": {
+        "evidence_type": {
+          "enum": [
+            "MISSING",
+            "TRIANGULATED_GEOMETRY_ONLY",
+            "TRIANGULATED_GEOMETRY_PLUS_ALIGNED_SAM_PRIOR",
+            "ALIGNED_SAM_PRIOR_ONLY_AT_LEAST_TWO_VIEWS"
+          ]
+        },
+        "s0": {"type": "object"},
+        "sam_mode_c_status": {
+          "enum": ["PASS_MODE_B_FROZEN", "REVIEW_MODE_C_CANDIDATE", "MODE_C_ACCEPTED"]
+        }
+      }
+    },
     "quality": {
       "type": "object",
+      "required": ["frame_status", "camera", "teacher_2d", "triangulation", "body_fit"],
       "properties": {
-        "reprojection": {"type": "number"},
-        "triangulation": {"type": "number"},
-        "temporal": {"type": "number"},
-        "teacher": {"type": "number"},
-        "camera": {"type": "number"},
-        "overall": {"type": "number"}
+        "frame_status": {"enum": ["PASS", "REVIEW", "FAIL", "INCOMPLETE"]},
+        "camera": {"type": "object"},
+        "teacher_2d": {"type": "object"},
+        "triangulation": {"type": "object"},
+        "body_fit": {"type": "object"}
       }
     },
-    "metadata": {"type": "object"}
-  }
+    "provenance": {
+      "type": "object",
+      "required": ["build_id", "git_commit", "source_rgb_included", "source_payload_modified"],
+      "properties": {
+        "build_id": {"type": "string"},
+        "git_commit": {"type": "string"},
+        "source_rgb_included": {"const": false},
+        "source_payload_modified": {"const": false}
+      }
+    }
+  },
+  "additionalProperties": false
 }

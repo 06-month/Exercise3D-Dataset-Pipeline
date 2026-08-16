@@ -1,0 +1,4 @@
+scenario,sam_hours,sapiens2_target_only_hours,sequential_total_hours,sam_policy,basis,deadline_verdict
+OPTIMISTIC,16.3477,79.0853,95.4330,MODE_B_ALL_FRAMES,control_execution_rate,NO_GO_BY_2026-08-15_00UTC
+EXPECTED,20.7976,79.0853,99.8829,MODE_B_PLUS_SELECTIVE_MODE_C,phase6_pilot_occlusion_proxy_27.3018pct,NO_GO_BY_2026-08-15_00UTC
+PESSIMISTIC,32.6287,79.0853,111.7140,MODE_C_ALL_FRAMES,severe_execution_rate,NO_GO_BY_2026-08-15_00UTC

@@ -23,7 +23,16 @@ DEFAULT_DATASET_ROOT = Path(
 ).expanduser()
 CAMERAS = ("cam1", "cam2", "cam3")
 STATUS_RANK = {"PASS": 0, "REVIEW": 1, "FAIL": 2}
-IGNORED_CONFIGURATION_KEYS = {"sequence", "root", "vggt_root", "output_root"}
+IGNORED_CONFIGURATION_KEYS = {
+    "sequence",
+    "root",
+    "vggt_root",
+    "output_root",
+    # Phase 5.1 diagnostic controls. They do not alter the objective, observations,
+    # initialization, gates, or the frozen Phase 5 default path.
+    "stage2_max_nfev",
+    "optimizer_verbose",
+}
 REQUIRED_SEQUENCE_FILES = (
     "cameras_initial.json",
     "cameras_refined.json",

@@ -48,6 +48,16 @@ manifest.jsonl
 *.tif
 *.tiff
 
+# Explicitly reviewed public-safe mesh-only showcase videos. Keep this allowlist
+# narrow: source RGB, face pixels, and arbitrary videos remain ignored above.
+!docs/assets/
+!docs/assets/showcase/
+!docs/assets/showcase/benchpress_0004_mhr_mesh.mp4
+!docs/assets/showcase/deadlift_0001_mhr_mesh.mp4
+!docs/assets/showcase/barbellrow_0003_mhr_mesh.mp4
+!docs/assets/showcase/latpulldown_0003_mhr_mesh.mp4
+!docs/assets/showcase/squat_0002_mhr_mesh.mp4
+
 # Model weights and large numeric geometry payloads
 checkpoints/
 weights/
@@ -71,6 +81,7 @@ outputs/*
 reports/
 logs/
 *.log
+.runtime/
 
 # Location / archive / editor artifacts
 *.gpx

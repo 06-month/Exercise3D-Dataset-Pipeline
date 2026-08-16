@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "default_full_mode": "B",
+  "automatic_full_mode_c": false,
+  "candidate_requires_occlusion_risk": true,
+  "candidate_signals_any": [
+    "MODE_B_MISSING_OR_NONFINITE_PRIOR",
+    "MODE_B_TEMPORAL_DELTA_ABOVE_SEQUENCE_MEDIAN_PLUS_5_MAD",
+    "MODE_B_ALIGNMENT_RESIDUAL_ABOVE_SEQUENCE_MEDIAN_PLUS_5_MAD_WITH_LESS_THAN_3_GEOMETRY_VIEWS"
+  ],
+  "clip_policy": {
+    "padding_frames_each_side": 15,
+    "merge_overlapping_clips": true,
+    "maximum_sequence_fraction": 0.1
+  },
+  "accept_mode_c_only_if_all": [
+    "TARGET_IDENTITY_AND_SOURCE_PTS_EXACT_MATCH_MODE_B",
+    "MODE_C_SCHEMA_AND_FINITE_CHECK_PASS",
+    "CONTENT_COMPLETION_CALLED_OR_CANONICAL_ALIGNMENT_RESIDUAL_IMPROVES_AT_LEAST_10_PERCENT",
+    "TRIANGULATED_GEOMETRY_DISPLACEMENT_DOES_NOT_INCREASE_MORE_THAN_5_PERCENT"
+  ],
+  "fallback": "RETAIN_MODE_B_AND_MARK_REVIEW",
+  "notes": [
+    "Sapiens2 and SAM evidence are correlated learned observations, not independent GT.",
+    "Mode C never replaces a valid Mode B result solely because occlusion_risk is true.",
+    "Pilot Mode C invoked no content completion and was about 1.99x slower than Mode B."
+  ]
+}

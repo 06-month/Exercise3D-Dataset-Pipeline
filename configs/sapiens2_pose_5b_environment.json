@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "phase": "Phase 6-0",
+  "official_repository": "https://github.com/facebookresearch/sapiens2",
+  "official_repository_commit": "7e5bae88456ac418ff0e58e74106c9fe192055d4",
+  "pose_model": {
+    "model_id": "facebook/sapiens2-pose-5b",
+    "checkpoint_filename": "sapiens2_5b_pose.safetensors",
+    "checkpoint_relative_path": "sapiens2/pose/sapiens2_5b_pose.safetensors",
+    "size_bytes": 20480899148,
+    "sha256": "b4848da8691c72e14d3ff71319f077363107129bf4128019eb39d072129b2a52",
+    "parameters": 5071000000,
+    "input_height": 1024,
+    "input_width": 768,
+    "keypoint_count": 308,
+    "keypoint_convention": "Sociopticon keypoints308",
+    "precision_smoke_tested": "float32",
+    "flip_test": true
+  },
+  "person_detector": {
+    "model_id": "facebook/detr-resnet-101-dc5",
+    "checkpoint_relative_path": "sapiens2/detector/detr-resnet-101-dc5",
+    "snapshot_revision": "96317ca979e231bd960cb3cac31328e0165a3e94",
+    "safetensors_size_bytes": 242797616,
+    "safetensors_sha256": "707de69ca32dee6b518798a866219809eb3e76c190f70acda1c1f67c9f7de6c7",
+    "pytorch_bin_size_bytes": 243011543,
+    "pytorch_bin_sha256": "7bd3d719aaea1dc63844e7ced0c820fa5e4cc7b041beea54f18559a88717f287"
+  },
+  "runtime": {
+    "python": "3.12.13",
+    "torch": "2.7.1+cu118",
+    "torchvision": "0.22.1+cu118",
+    "transformers": "5.14.1",
+    "safetensors": "0.8.0",
+    "opencv_python": "5.0.0.93",
+    "numpy": "2.4.4",
+    "scipy": "1.18.0",
+    "gpu": "NVIDIA A100-SXM4-80GB",
+    "driver": "535.183.06",
+    "cuda_runtime": "11.8",
+    "compute_capability": "8.0"
+  },
+  "smoke_test": {
+    "status": "PASS",
+    "person_count": 1,
+    "keypoint_count": 308,
+    "confidence_count": 308,
+    "finite_coordinates": true,
+    "finite_confidence": true,
+    "body_left_right_flip_pairs_valid": true,
+    "confident_points_in_frame_fraction": 1.0,
+    "peak_allocated_bytes": 21459755008,
+    "peak_reserved_bytes": 22506635264,
+    "end_to_end_latency_median_seconds": 4.51691650878638,
+    "latency_repeats": 3,
+    "warmup_count": 1
+  },
+  "checkpoint_payload_committed": false,
+  "private_frame_or_visualization_committed": false
+}

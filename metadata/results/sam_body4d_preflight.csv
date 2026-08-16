@@ -1,0 +1,7 @@
+status,candidate,camera,frames_available,target_valid_frames,occlusion_risk_frames,frames_processed,persons_targeted,repository_revision,mode,completion_enabled,missing_path_count,required_bytes,required_gib,reason
+BLOCKED_CHECKPOINT,squat_0001,cam1,1267,1267,0,0,1,b5c765a0d89d789985e186d396315e7590887b94,A,False,4,4129056986,3.845,required official pretrained payload is unavailable locally and gated access approval is pending
+BLOCKED_CHECKPOINT,squat_0001,cam1,1267,1267,0,0,1,21af1020979ef32ddf6be3597ef59a68bad2f1bf,B,False,5,7579119227,7.059,required official pretrained payload is unavailable locally and gated access approval is pending
+BLOCKED_CHECKPOINT,squat_0001,cam1,1267,1267,0,0,1,21af1020979ef32ddf6be3597ef59a68bad2f1bf,C,True,8,24037668123,22.387,required official pretrained payload is unavailable locally and gated access approval is pending
+BLOCKED_CHECKPOINT,latpulldown_0002,cam2,1136,1136,959,0,1,b5c765a0d89d789985e186d396315e7590887b94,A,False,4,4129056986,3.845,required official pretrained payload is unavailable locally and gated access approval is pending
+BLOCKED_CHECKPOINT,latpulldown_0002,cam2,1136,1136,959,0,1,21af1020979ef32ddf6be3597ef59a68bad2f1bf,B,False,5,7579119227,7.059,required official pretrained payload is unavailable locally and gated access approval is pending
+BLOCKED_CHECKPOINT,latpulldown_0002,cam2,1136,1136,959,0,1,21af1020979ef32ddf6be3597ef59a68bad2f1bf,C,True,8,24037668123,22.387,required official pretrained payload is unavailable locally and gated access approval is pending

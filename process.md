@@ -4,6 +4,1094 @@
 개인정보, media screenshot 및 대용량 numeric payload를 기록하지 않는다. 명령의 private
 경로는 `<PRIVATE_DATASET_ROOT>`처럼 치환한다.
 
+## 2026-08-11 — 2026-08-14 13:00 KST autonomous deadline 시작
+
+### 2026-08-12 인계, supervisor 복구와 autonomous dashboard
+
+- startup protocol에 따라 handoff/runtime/plan/process/phase/Git을 먼저 읽고 live process를 대조했다.
+- Sapiens2 PID 373049, handoff monitor PID 608232, deadline sentinel PID 607755은 정상이고 GPU는
+  100%였다. 반면 supervisor state는 23:45 UTC에서 멈췄고 supervisor/SAM process는 없었다.
+- duplicate/child 부재를 재확인한 뒤 `.runtime/handoff_state.json`의 frozen exact command로
+  supervisor만 복구했다. 기존 10개 PASS/REVIEW row는 재사용했으며 `latpulldown_0003` Phase 7→
+  Mode B streaming을 이어갔다. Sapiens/sentinel/handoff monitor는 중단·재실행하지 않았다.
+- `tools/monitor_autonomous_generation.py`를 추가했다. 기존 handoff/supervisor/deadline/output state와
+  `/proc`, `nvidia-smi`, disk를 읽어 Rich live dashboard 및 atomic
+  `.runtime/dashboard_state.json`을 생성하며 별도 progress DB는 만들지 않는다.
+- attention은 expected process/supervisor/sentinel 사망, stale/stall, duplicate root process,
+  traceback/CUDA OOM/retry exhaustion, validation/NaN-Inf gate FAIL, disk reserve, sustained GPU idle,
+  deadline ETA risk/worsening을 탐지한다. 단발 `nvidia-smi` timeout은 마지막 정상 표본을 유지하고
+  stale window를 넘겨야 경고한다.
+- 첫 실제 dashboard snapshot: Sapiens 33/78 camera, 21,433/65,430 crop; SAM 30/78 camera,
+  19,455/65,595 frame; triangulation 11, body fit 10; GPU 100%, combined 62,693 MiB.
+  Runtime failure/OOM/retry는 없고 Sapiens ETA가 deadline보다 약 1.1시간 늦어질 위험만 경고했다.
+- Mode C assessor의 intentional abstention all-NaN alignment row는 finite row에만 median을 계산하고
+  finite value가 없으면 기존대로 NaN을 유지하도록 수정했다. Threshold/candidate/acceptance 변화는
+  없으며 warning-free regression을 추가했다. Monitor/state/attention regression을 포함한 전체
+  56개 unit test가 PASS했고 30초 state-only dashboard monitor를 시작했다.
+
+### Deadline freeze atomic publication hardening
+
+- Deadline sentinel/export 경로를 요구사항별로 감사했다. 기존 file/manifest write는 atomic이었지만
+  build directory가 생성 중에도 final path에 노출되고 direct rerun이 같은 build ID를 갱신할 수 있어,
+  immutable snapshot 경계가 충분히 강하지 않았다.
+- Export는 hidden `.<build_id>.inprogress` root에서 partial copy를 checksum-resume하고,
+  manifest-listed 34-file 기존 smoke를 포함해 byte/SHA-256, safe relative path, duplicate path,
+  sequence status/count, freeze eligibility, privacy/source-mutation flag를 검증하도록 보강했다.
+- 검증 PASS 뒤 directory rename으로 final build를 한 번에 publish한다. Final manifest가 이미 있으면
+  전체 integrity PASS에서 read-only reuse만 하며 corrupt/incomplete final root를 같은 ID로 덮어쓰지 않는다.
+- Sentinel도 parseable manifest만으로 COMPLETE 처리하지 않고 integrity verifier를 통과해야 한다.
+  현재 살아 있는 sentinel은 deadline에 새 exporter subprocess를 호출하므로 restart하지 않았다.
+- 기존 `exercise3d-streaming-smoke-v1`을 read-only 전수 검증해 34 files/28,960,929 bytes,
+  mismatch 0을 확인했고 focused regression 7개와 전체 59개 unit test가 PASS했다.
+- Dashboard는 sentinel의 `EXPORT_FAILED`, `EXPORT_INTEGRITY_FAILED`, `EXISTING_BUILD_INVALID`와
+  구체적 integrity error를 `DEADLINE_SNAPSHOT_FAILED` attention으로 승격하도록 연결했다.
+
+### Phase 11 pseudo-label quality vector streaming 시작
+
+- 기존 Phase 6–9 output의 frame/PTS와 component evidence를 감사하고
+  `tools/build_pseudolabel_quality.py`를 구현했다. Correlated learned signal을 calibrated accuracy
+  probability나 단일 scalar로 축약하지 않고 source별 vector와 explicit reason bitmask를 저장한다.
+- 완료된 10 sequence/6,485 reference frame을 CPU-only materialize했다. Sequence REVIEW 10/FAIL 0,
+  target abstention/unmapped 8 view, SAM rejected/unmapped 8 view이며 prior-only/body-missing/
+  triangulation-missing joint frame은 0이다. `pushup_0001` ambiguity 7은 강제 target 없이 그대로 남았다.
+- Required field/shape/frame index/PTS/status count validation을 통과한 output만 resume-skip한다.
+  실제 single-sequence 재호출에서 `resume_skipped=true`와 전역 10-sequence summary 보존을 확인했다.
+- New supervisor code는 Mode C assessment 뒤 Phase 11을 호출한다. 현재 살아 있는 supervisor는 restart하지
+  않았고, updated deadline/final exporter가 quality 누락 sequence를 CPU-only materialize한 뒤
+  `quality/quality_vector.npz`와 metadata를 immutable private build에 포함한다.
+- 현재 10 sequence 모두 final exporter validation REVIEW, dependency reason 0이다.
+- Phase 11 builder unit/integration regression을 포함한 당시 전체 65개 unit test가 PASS했다.
+
+### Phase 11 CPU-only follower 시작
+
+- Live supervisor는 재시작하지 않았기 때문에 현재 process memory에는 Phase 11 stage가 없다.
+  Deadline exporter fallback만으로도 correctness는 보존되지만 새 body-fit의 quality 오류가 deadline에서야
+  드러날 수 있어 `tools/run_quality_control_follower.py`를 CPU-only background process로 추가했다.
+- Dependency가 모두 있는 sequence만 처리하고, existing valid output은 resume-skip하며 sequence-local
+  advisory lock으로 exporter/future supervisor와 concurrent duplicate write를 방지한다. Failure reason은 atomic
+  runtime state에 남기고 300초 후 자동 재시도한다.
+- 실제 one-shot에서 기존 10/26을 재계산 없이 REVIEW로 검증했고 failure 0,
+  나머지 16은 body-fit/Mode-C/SAM prior dependency wait로 정확히 분류했다. 이후 30초 follower를 시작했다.
+- Dashboard는 body-fit→quality lag에서 follower 사망과 follower `ATTENTION` failure reason을 자동 승격한다.
+- Follower wait/build/retry, dashboard death/stale/failure 계약을 포함한 전체 69개 unit test가 PASS했다.
+
+### Deadline freeze exact-tree hardening
+
+- Resumable hidden staging에서 이전 crash temp나 이전에 complete였다가 현재 incomplete로 분류된
+  sequence payload가 남아도 기존 verifier가 manifest-listed file만 검사해 final root에 포함할 수
+  있는 공백을 확인했다.
+- Exporter는 exact `.<build_id>.inprogress` root에서만 unlisted artifact를 prune하며, nested symlink은
+  copy 전에 제거하고 mount point는 거부한다. Source/final build은 삭제하지 않는다.
+- Verifier는 actual tree와 manifest tree, sequence status↔file owner, per-sequence↔global file record의
+  path/byte/SHA를 exact-match한다. INCOMPLETE/FAIL sequence에 payload가 있으면 publish를 거부한다.
+- Git HEAD만 기록하던 provenance를 dirty flag/status hash/tracked diff hash로 보강했다. Hash만
+  저장하며 diff text/private path는 manifest에 포함하지 않는다.
+- 기존 immutable smoke를 강화 verifier로 read-only 재검증해 34 files/28,960,929 bytes,
+  error 0을 확인했다.
+- Hardening commit `250ee73`의 clean worktree에서 `barbellrow_0000` quality-inclusive private smoke를
+  새 build ID로 publish했다. REVIEW 1/FAIL 0/INCOMPLETE 0, 36 files/28,993,394 bytes,
+  `git_worktree_dirty=false`, status/diff empty hash, exact-tree/ownership/SHA error 0이다.
+- 같은 build ID를 즉시 재호출했을 때 copy/publish를 반복하지 않고
+  `IMMUTABLE_BUILD_REUSED`로 36 files/28,993,394 bytes를 read-only 재검증했다.
+- Exact-tree, stale payload, symlink root/target, INCOMPLETE ownership, Git provenance regression을 포함한
+  전체 74개 unit test와 publication-safety가 PASS했다.
+
+### Streaming freeze-readiness preflight
+
+- Quality follower에 final exporter의 동일 `validate_sequence()` preflight를 연결했다. Quality만
+  존재해도 pose/SAM run provenance, frame/PTS/finite, triangulation/body/quality gate 중 하나가
+  깨지면 freeze-ready로 세지 않는다.
+- INCOMPLETE dependency는 provenance monitor와 atomic stage publish의 순간적 lag을 허용하려고 300초
+  grace를 두고, 이후에도 지속되면 `FREEZE_READINESS_FAILED`로 승격한다. Validation
+  FAIL은 즉시 attention이며 valid output을 재계산하지 않는다.
+- Freeze-ready dependency의 path/size/mtime signature를 매 cycle 비교해 completed payload가 교체/삭제되면
+  해당 sequence만 exporter validation을 다시 수행하도록 했다. Numeric payload을 매번 재로드하지
+  않으며 source output을 수정하지 않는다.
+- 실제 10개 completed quality sequence를 CPU-only로 검증해 freeze-ready REVIEW 10,
+  PASS 0/FAIL 0/dependency reason 0을 확인했다. Quality materialization은 0이어서 기존 payload를
+  재계산하지 않았다.
+- Readiness grace/failure/dashboard/dependency-change regression을 포함한 전체 77개 unit test와
+  publication-safety가 PASS했다.
+
+### `latpulldown_0003` autonomous completion
+
+- Live supervisor가 Mode B cam3 완료 후 compact prior, Phase 9 fit, Mode C assessor까지 자동 관통했다.
+  Full Mode B aggregate는 11 sequence/33 camera/21,441 frame이며 OOM/retry는 0이다.
+- Body fit은 662×26, coverage/alignment 1.0, prior-only/missing 0, displacement p95 0.07748이다.
+  Frozen gate에 따라 displacement + camera uncertainty REVIEW, FAIL 0을 유지했다.
+- Mode C candidate 79 frame을 review metadata로 보존했지만 Mode C를 실행/채택하지 않았다.
+  Quality follower가 즉시 662-frame vector와 exporter preflight를 완료해 quality/freeze-ready를
+  11/26 REVIEW로 증가시켰고 failure/dependency reason은 0이다.
+
+### Deadline point-in-time membership와 export retry
+
+- 기존 sentinel은 deadline 후 exporter를 한 번만 호출했다. Transient copy/source race도
+  복구하지 못하고, export 중 새로 완료된 sequence가 순서에 따라 포함될 수 있어
+  exact deadline snapshot 경계가 불명확했다.
+- Deadline exporter는 body fit NPZ/metadata와 Mode-C assessment의 mtime이 모두 deadline UTC
+  이하인 sequence만 eligible로 분류한다. Post-deadline terminal marker는 retry 중에 발견되어도
+  `INCOMPLETE`를 유지한다. Derived quality/manifest는 이 terminal payload에서 deadline 후 생성할
+  수 있고, marker mtime은 sequence manifest에 보존해 final verifier가 다시 검증한다.
+- Exporter가 final verified manifest를 만들지 못한 transient failure에는 기존 hidden staging을
+  checksum-resume하며 30초 간격으로 최대 3회 재시도한다. Parseable final integrity error는
+  immutable build을 덮어쓰지 않고 즉시 attention으로 종료한다.
+- Cutoff-eligible이지만 quality/provenance sidecar lag로 INCOMPLETE인 sequence는 초기 3회에서
+  manifest publish를 defer한다. 네 번째 최종 시도에는 defer를 해제해 recovery가 불가해도
+  INCOMPLETE를 숨기지 않은 point-in-time snapshot을 생성한다.
+- Clean commit `868c0a1`에서 cutoff smoke를 실행했다. `barbellrow_0000`은 REVIEW,
+  terminal marker가 없던 `benchpress_0001`은 INCOMPLETE로 고정됐다. Final build는
+  2 sequence/36 files/28,993,641 bytes, REVIEW 1/INCOMPLETE 1, exact-tree/marker/SHA error 0,
+  `git_worktree_dirty=false`, `freeze_eligible=false`로 정직하게 publish됐다.
+- Cutoff/retry/final truthful publish regression을 포함한 전체 81개 unit test와 publication-safety가 PASS했다.
+- CPU sleeper sentinel만 PID 1834674로 교체했다. Persistent state는 `WAITING_DEADLINE`,
+  point-in-time policy와 `--export-retries 3 --retry-seconds 30`을 보존한다. GPU inference/supervisor는
+  중단/재시작하지 않았다.
+
+### Freeze contract v2 sequence-universe binding
+
+- 기존 verifier는 manifest 내부 count/CSV가 서로 맞는지는 검사했지만, requested 26개 중
+  INCOMPLETE row 하나를 삭제한 뒤 count를 함께 바꾸는 외부-universe 누락을 독립적으로
+  탐지할 수 없었다.
+- Contract v2 manifest에 `requested_sequences`와 canonical ordered-list SHA-256을 추가했다.
+  Status CSV identity/order가 exact-match해야 하며 sentinel은 자신의 frozen 26-sequence list를
+  verifier에 별도 전달한다.
+- Global provenance는 source inventory/temporal audit/frame mapping 3 files, complete PASS/REVIEW sequence는
+  3-view target/pose/run provenance/SAM prior + geometry/body/quality/sequence manifest 33 files와 exact-match해야
+  한다. Internal manifest와 tree에서 둘 다 누락한 payload도 이제 verifier가 거부한다.
+- Missing INCOMPLETE row, order mutation, required quality payload omission regression을 포함한 전체
+  83개 unit test와 publication-safety가 PASS했다.
+- Clean commit `7b54214`에서 deadline partial smoke를 실행했다. Contract v2가 requested
+  `barbellrow_0000,benchpress_0001` universe/order를 exact bind했고 REVIEW 1/INCOMPLETE 1,
+  36 files/28,993,641 bytes, verifier error 0, dirty false, freeze eligible false로 검증됐다.
+- 기존 CPU sleeper PID 1834674의 exact command와 child 0을 확인한 뒤 그 sentinel만
+  TERM하고 PID 1846229로 교체했다. 새 process는 `WAITING_DEADLINE`이며 고정된
+  26-sequence list를 final verifier에 별도로 전달하는 contract v2 code를 load했다.
+  GPU inference와 autonomous supervisor는 중단·재시작하지 않았다.
+
+### Supervisor single-instance recovery watchdog
+
+- 이전에 supervisor 자체가 한 번 종료되어 agent가 수동 복구한 실제 event를 무인
+  운영의 single point of failure로 확인했다. Dashboard attention만으로는 자동 복구되지 않았다.
+- `run_autonomous_supervisor_watchdog.py`는 현재 live supervisor argv와 handoff의 exact resume
+  command SHA-256이 같을 때만 identity를 pin한다. Supervisor가 3회 연속 보이지 않고
+  2초 final scan에서도 없을 때만 shell 없이 detached resume하며, 1시간 3회로 제한한다.
+- Watchdog singleton lock과 새 supervisor의 lifetime advisory lock을 결합해 동시 launch race에서
+  하나만 stage를 진행한다. Duplicate가 보이면 어느 process도 kill하지 않고 attention만 남긴다.
+- One-shot live identity gate에서 supervisor PID 1701200과 persisted command digest가 exact-match,
+  launch 0, attention false였다. Dashboard는 watchdog death/stale/identity/restart exhaustion을
+  machine-readable attention으로 승격한다.
+- Code checkpoint `bd943fb`를 push한 뒤 watchdog PID 1864229를 persistent mode로 시작했다.
+  Supervisor PID 1701200 observation, child/launch/restart 0, attention false를 확인했다.
+- 새 watchdog schema를 load하도록 CPU-only handoff/dashboard monitor만 각각 PID
+  1866064/1866198로 교체했다. 첫 handoff monitor 입력의 sequence typo는 즉시
+  종료했고 private output을 건드리지 않았다. 수정 process의 frozen order는
+  26/26 exact·unique, handoff universe exact, watchdog resume command 보존을 재검증했다.
+- Persistent dashboard에서 watchdog RUNNING/restart 0이며 전체 attention은 기존
+  `DEADLINE_ETA_AT_RISK` warning 하나뿐이다. GPU inference/supervisor는 중단·재시작하지 않았다.
+
+### Deadline sentinel/export single-instance recovery hardening
+
+- Deadline build의 hidden staging/atomic rename은 이미 강했지만 동일 build ID exporter 두 개가
+  동시 시작하면 staging copy/prune/publish를 경쟁할 process-level lock이 없었다.
+- Exporter에 build-ID-scoped non-blocking advisory lock을 추가했다. Lock loser는 staging을
+  수정하기 전 `BUILD_ALREADY_IN_PROGRESS`/exit 75로 종료하고 sentinel retry path가 재검증한다.
+- Deadline sentinel에도 lifetime lock을 추가해 동시 recovery launch를 stage 실행 전
+  거부한다. `run_deadline_sentinel_watchdog.py`는 live/persisted exact argv digest를 pin하고,
+  3회 연속 absence + 2초 final rescan + 1시간 3회 cap을 통과한 때만 detached recovery한다.
+- One-shot identity gate에서 live sentinel PID 1846229와 persisted command digest exact-match,
+  launch/restart 0, attention false, snapshot state `WAITING_DEADLINE`를 확인했다.
+- 전체 96개 regression과 publication-safety PASS 후 code checkpoint `195d52a`를 push했다.
+  Lock file symlink는 `O_NOFOLLOW`로 거부하고 target을 수정하지 않는 regression을 포함한다.
+- Exact PID/command/child 0을 확인한 뒤 CPU sleeper sentinel만 PID 1882473으로 교체했다.
+  `WAITING_DEADLINE`, single process, child 0이며 cross-process probe가 lifetime lock held를 확인했다.
+- Sentinel watchdog PID 1882820을 persistent mode로 시작했다. Live PID 1882473과 persisted
+  digest exact-match, launch/restart 0, attention false다. CPU-only handoff/dashboard monitor도 새 schema로
+  PID 1883380/1883591에서 각각 단일 인스턴스로 실행 중이다.
+- Frozen sequence order/universe는 26/26 exact·unique이고 handoff에 두 watchdog resume command가
+  보존됐다. Dashboard attention은 `DEADLINE_ETA_AT_RISK` warning 하나뿐이며
+  GPU inference/SAM/autonomous supervisor는 중단·재시작하지 않았다.
+
+### Freeze source byte-snapshot/durability hardening
+
+- 기존 `copy_exact()`은 source hash와 copied hash mismatch를 검출했지만 source path를 hash/copy에서
+  두 번 다시 열어 concurrent atomic replacement의 point-in-time semantics가 명시적이지 않았다.
+- Source symlink를 거부하고 `O_NOFOLLOW` regular-file descriptor 하나를 통해 hash와 copy를
+  수행한다. Device/inode/size/mtime/ctime을 hash·resume-check·copy 전후에 비교하여
+  in-place mutation이나 mixed byte stream을 reject한다.
+- Copied file/temp metadata의 fsync 후 parent directory를 fsync하고, verified staging을 final build로
+  rename한 뒤 output root도 fsync해 crash/power-loss 내구성을 보강했다.
+- Source symlink/identity-change/temp cleanup regression을 포함한 전체 98 tests와 publication-safety가
+  PASS했고 clean code checkpoint `f1b701e`를 push했다.
+- Clean commit에서 `barbellrow_0000` 실제 private smoke를 새 build ID로 publish했다.
+  Contract v2 REVIEW 1, 36 files/28,993,437 bytes, requested order/tree/ownership/SHA error 0,
+  dirty false, freeze eligible true다. 동일 build ID 재실행은 `IMMUTABLE_BUILD_REUSED`로
+  copy/publish 없이 36 files/28,993,437 bytes를 재검증했다.
+
+### 11-sequence predeadline durable checkpoint
+
+- Deadline sentinel을 기다리는 동안 이미 freeze-ready인 11 sequence 전체를 final deadline
+  build과 다른 immutable build ID로 미리 보존했다. GPU inference/supervisor는 건드리지 않았다.
+- Contract v2 result는 REVIEW 11/FAIL 0/INCOMPLETE 0, 366 files/344,922,733 bytes,
+  requested order exact, tree/ownership/SHA error 0, dirty false, freeze eligible true다.
+- 동일 build ID를 재호출해 `IMMUTABLE_BUILD_REUSED`와 366-file/344,922,733-byte
+  전수 재검증을 확인했다. 남은 sequence generation과 deadline point-in-time snapshot은
+  기존 autonomous process에서 계속한다.
+- 기존 dashboard는 target deadline build이 아직 없으면 `Export 0 sequences`만 표시해,
+  이미 보존된 11-sequence checkpoint를 `latest_materialized_build_id`로만 간접 노출했다.
+- Export state에 `durable_checkpoint`를 별도 추가했다. Contract v2 requested/status count/privacy
+  consistency와 FAIL/INCOMPLETE 0, freeze eligible를 확인한 build 중 completed sequence 수가 가장
+  큰 build를 선택하며, final deadline progress 0과 checkpoint 11을 섞지 않고 모두 표시한다.
+- 전체 99 tests와 publication-safety PASS 후 code checkpoint `80f48ab`를 push했다.
+  CPU-only quiet dashboard daemon만 exact command/child 0을 확인한 뒤 PID 1900669로 교체했다.
+  Persistent state에서 deadline 0, checkpoint 11, REVIEW 11, 366 files/344,922,733 bytes,
+  contract consistent/freeze true, 다른 attention 없음을 확인했다.
+
+### Freeze-ready 증가분 autonomous checkpoint follower
+
+- AI polling 없이 이후 완료 sequence도 내구적으로 보존하도록
+  `tools/run_predeadline_checkpoint_follower.py`를 추가했다. 이 process는 GPU/inference를 호출하지
+  않고 기존 quality follower의 atomic `freeze_readiness`만 소비한다.
+- 시작 시 contract-v2 candidate를 큰 순서로 전수 byte/SHA 검증하여 largest valid checkpoint를
+  source of truth로 선택한다. Ready 집합이 그 checkpoint의 strict superset이고 deadline 전일 때만
+  frozen sequence order와 집합 SHA에 묶인 deterministic build ID로 새 immutable export를 실행한다.
+- 기존 집합과 동일하면 아무것도 생성하지 않는다. 변경된 same-size/non-superset 집합, readiness
+  validation failure, integrity failure와 disk reserve 부족은 structured attention으로 남긴다.
+  Export build lock의 exit 75는 recoverable coordination event로 분류해 자동 재시도한다.
+- Follower state는 `.runtime/predeadline_checkpoint_follower_state.json`에 atomic rename+directory fsync로
+  저장한다. Lifetime singleton lock으로 duplicate follower를 거부하며 final deadline sentinel/build과
+  별도 state/build prefix를 쓴다.
+- Dashboard/handoff process discovery에 follower alive/stale/duplicate/structured-attention을 연결했고,
+  deadline이 지난 뒤 정상 종료한 follower를 사망으로 오인하지 않도록 predeadline에서만 생존을 요구한다.
+- 실제 one-shot은 현재 freeze-ready 11과 기존 checkpoint 11을 전수 검증한 뒤
+  `WAITING_FOR_NEW_FREEZE_READY_SEQUENCE`, attempted build/exit code 없음, attention false였다.
+  신규 export나 GPU process는 생성하지 않았다. 전체 105개 regression이 PASS했다.
+- Publication-safety PASS 후 code commit `711d4fd`를 push하고 persistent follower PID 1916854를
+  시작했다. 기존 11-sequence build를 다시 byte-verify한 뒤 child/export 없이 대기한다.
+- 새 process marker/state schema를 load하도록 exact argv/cwd/child 0을 확인한 CPU-only dashboard와
+  handoff monitor만 각각 PID 1917825/1917827로 교체했다. Sapiens/SAM/supervisor/watchdog/sentinel은
+  signal하거나 restart하지 않았다.
+- Persistent dashboard는 follower alive/RUNNING, ready 11, best verified checkpoint 11,
+  final deadline build 0을 분리해 표시한다. Follower attention은 없고 전체 attention은 기존
+  `DEADLINE_ETA_AT_RISK` 하나다.
+
+### Deadline freeze coverage upper-bound forecast
+
+- 기존 dashboard의 Sapiens/SAM 개별 ETA는 전체 26-sequence 종료 시각만 보여 주어, deadline 시점에
+  몇 sequence까지 terminal body-fit/freeze 가능할지 직접 드러내지 못했다.
+- 78개 selector `summary.json`의 exact `target_only_sapiens_crops`/`frame_count`를 frozen order로
+  읽고, 현재 durable crop/SAM camera/partial frame과 measured recent rate를 적용하는 CPU-only
+  schedule upper bound를 추가했다. Selector REVIEW의 abstention crop 감소는 그대로 사용하며
+  background person이나 ambiguous target을 보충하지 않는다.
+- Forecast는 pose-ready dependency와 단일 sequential Mode B stream을 계산하지만
+  triangulation/body-fit/quality/export overhead를 의도적으로 0으로 둔다. 따라서
+  `OPTIMISTIC_UPPER_BOUND`라는 이름과 assumptions를 machine-readable state에 함께 기록한다.
+- 실제 26-sequence inventory는 65,430 target crop/65,595 SAM frame으로 기존 global total과 exact-match했다.
+  2026-08-12 12:04 KST rate snapshot에서는 deadline upper bound 25/26, 첫 late sequence
+  `squat_0003`, all-sequence optimistic terminal 2026-08-14 15:44 KST였다. 이 ceiling도 전량을
+  충족하지 못하므로 `DEADLINE_FREEZE_COVERAGE_AT_RISK` warning을 별도로 기록한다.
+- Forecast helper/inventory/partial-SAM scheduling regression을 포함한 전체 107 tests가 PASS했다.
+- Code commit `8b55df7`를 push한 뒤 exact argv/cwd/child 0을 확인한 CPU-only quiet dashboard만
+  PID 1932669로 교체했다. 이 확인 시점에 기존 supervisor가 `benchpress_0001` pose completion을
+  감지해 SAM Mode B PID 1930239를 정상 시작했으며, Sapiens는 36/78 camera 완료 후
+  `benchpress_0002/cam1`로 진행했다. GPU inference/supervisor는 signal/restart하지 않았다.
+
+### Empirical post-SAM deadline adjustment
+
+- Overhead-free upper bound가 실제 terminal body-fit 시각을 낙관하는 정도를 정량화하기 위해,
+  완료 11 sequence의 세 camera `sam_body_benchmark.csv.created_at_utc`와 body-fit/Mode-C
+  `created_at_utc`를 frozen provenance에서 읽었다. Source payload나 output은 수정하지 않았다.
+- SAM 최종 camera 완료→body-fit/Mode-C terminal latency는 median 998.73초, p90 1,399.83초,
+  최소 847.06초/최대 2,037.30초였다. 음수·6시간 초과·누락 timing은 sample로 사용하지 않고
+  machine-readable error로 남긴다.
+- 기존 `OPTIMISTIC_UPPER_BOUND`는 그대로 보존하고, 각 future sequence에 관측 p90을 더해
+  supervisor의 sequential post-SAM stage를 반영하는 `EMPIRICAL_P90_POST_SAM_ADJUSTED`를 추가했다.
+  Pre-SAM/quality/export와 p90 밖 variance는 여전히 제외됨을 assumptions에 명시한다.
+- 실제 snapshot에서는 upper/adjusted 모두 deadline 25/26, 첫 late `squat_0003`이었다. Count는 같지만
+  adjusted all-sequence terminal은 upper보다 약 23분 늦어져 risk 해석을 더 보수적으로 만든다.
+- Provenance timing, p90 schedule, dashboard available-forecast integration을 포함한 전체 113 tests가 PASS했다.
+- Publication-safety PASS 후 commit `7ffeb9a`를 push하고 exact argv/cwd/child 0인 CPU-only dashboard만
+  PID 1959115로 교체했다. Persistent state는 sample 11, p90 1,399.83초, upper/adjusted 25/26을
+  표시한다. SAM concurrency로 Sapiens ETA가 직전보다 57분 악화돼 warning이 추가됐지만 GPU 100%,
+  62,823 MiB, OOM/retry/stall 0이므로 frozen concurrent policy를 변경하지 않았다.
+
+### Predeadline checkpoint follower recovery watchdog
+
+- Predeadline checkpoint follower는 lifetime singleton lock과 internal export retry를 갖지만,
+  terminal/session 자체가 사라진 경우 dashboard attention 외에는 자동 복구 경로가 없었다.
+- `tools/run_predeadline_checkpoint_follower_watchdog.py`를 추가해 repository-local live process와
+  handoff에 보존된 exact resume argv SHA를 pin한다. 3회 연속 absence와 2초 final rescan 뒤에만
+  detached recovery하며, 최대 3회/시간으로 제한한다. Live process에는 절대 signal하지 않는다.
+- Follower 자체 lifetime lock이 watchdog/manual launch race를 닫는다. Watchdog command는 `--once`를
+  거부하고 follower와 동일한 timezone-aware deadline만 허용하며, deadline 도달 후에는 restart하지
+  않고 `COMPLETE`로 종료한다.
+- Dashboard는 deadline 전 아직 quality 또는 unexported ready set이 남은 동안 watchdog의
+  dead/stale/duplicate/structured attention을 검사한다. Quality 26/26이더라도 ready count가 durable
+  checkpoint보다 크면 follower/watchdog 사망을 숨기지 않는다.
+- 실제 live follower PID 1916854에 대한 one-shot은 expected/resume command SHA exact-match,
+  missing 0, launch/restart 0, attention false로 identity pin을 완료했다. 전체 111 tests가 PASS했다.
+- Publication-safety PASS 후 commit `16fd41f`를 push하고 watchdog PID 1944186을 persistent mode로
+  시작했다. Follower PID 1916854 exact-match, restart 0, attention false를 확인했다.
+- 새 marker/state를 load하도록 exact argv/cwd/child 0인 CPU-only dashboard/handoff monitor만
+  PID 1945200/1945203으로 교체했다. Handoff에는 watchdog exact resume command가 저장됐고,
+  dashboard attention은 기존 deadline ETA/coverage warning 두 개뿐이다. GPU job은 건드리지 않았다.
+
+### Phase 11 quality follower lifetime lock과 recovery watchdog
+
+- Quality follower는 sequence-local quality build lock과 internal retry는 갖고 있었지만 process lifetime
+  lock이 없어 manual/watchdog recovery race에서 state writer가 중복될 수 있었고, terminal/session
+  소실 시 dashboard attention 외 자동 복구가 없었다.
+- `run_quality_control_follower.py`에 lifetime singleton advisory lock을 추가했다. 동일 lock owner가
+  있으면 output/state를 읽거나 쓰기 전에 exit 3으로 거부한다. Valid existing quality는 기존처럼
+  revalidation/resume하고 expensive GPU work는 호출하지 않는다.
+- `tools/run_quality_control_follower_watchdog.py`는 live/persisted exact argv SHA를 pin하고 3회 연속
+  absence + 2초 final rescan 후에만 최대 3회/시간 detached recovery한다. Live follower에는 signal하지
+  않으며 follower lifetime lock이 launch race를 닫는다.
+- Watchdog은 state `COMPLETE`, completed 26/26, freeze-ready 26/26, quality/readiness failure 0을 모두
+  확인한 뒤에만 recovery를 종료한다. `--once` 또는 sequence set이 없는 resume command는 거부한다.
+- Dashboard/handoff에 watchdog dead/stale/duplicate/structured attention과 exact resume command를
+  연결했다. 실제 live PID 1819560 one-shot identity pin은 expected/resume SHA exact-match,
+  missing/restart 0, attention false였다. 전체 117 tests가 PASS했다.
+
+### Quality follower/watchdog persistent activation
+
+- Publication-safety PASS 후 implementation commit `4600dff`를 push했다. 기존 CPU-only quality
+  follower PID 1819560은 exact cwd/argv, child 0, `WAITING_FOR_BODY_FIT`, failure 0을 확인한 뒤에만
+  종료했고 GPU inference/supervisor에는 signal하지 않았다.
+- 동일 frozen argv를 새 code로 재개한 quality follower PID는 1973073이다. Lifetime lock
+  `.runtime/quality_follower.lock`이 held임을 별도 non-mutating probe로 확인했고, 기존 complete 11
+  sequence는 materialize/recompute 없이 revalidation했다.
+- Persistent quality follower watchdog PID 1973668은 expected/live/resume command SHA exact-match,
+  restart 0, attention false다. Exact resume command는 `.runtime/handoff_state.json`에 보존된다.
+- 새 watchdog state를 읽도록 exact cwd/argv, child 0인 CPU-only dashboard/handoff monitor만
+  PID 1974702/1974706으로 교체했다. 2026-08-12 12:34 KST atomic snapshot은 Sapiens 36/78 camera와
+  23,708/65,430 crop, SAM Mode B 34/78 camera와 22,114/65,595 frame, triangulation 12/26,
+  body fit/quality/freeze-ready 11/26을 기록했다.
+- GPU는 100%, 62,823 MiB, OOM/retry/stall 0이다. Dashboard attention은 Sapiens deadline ETA
+  약 2시간 21분 초과와 upper/p90-adjusted freeze coverage 25/26 경고뿐이며 acceptance failure는 없다.
+
+### SAM output storage reserve forecast
+
+- 정적 20 GiB disk threshold만으로는 Mode B 잔여 payload가 reserve를 침범하기 전에 경고할 수 없어,
+  dashboard에 완료 PASS camera benchmark의 `output_bytes/frame` nearest-rank p90 forecast를 추가했다.
+  현재 partial camera payload는 filesystem free에 이미 포함되므로 produced frame에만 더하고 byte sample은
+  atomic complete camera에서만 읽어 중복 차감을 방지한다.
+- 2026-08-12 12:45 KST 기준 sample 34 camera/22,114 frame/22,455,935,524 bytes,
+  p90 1,038,271.11 bytes/frame이다. Current partial 포함 produced 22,737 frame, remaining 42,858 frame의
+  예상 추가 payload는 41.44 GiB다. 현재 free 145.14 GiB에서 SAM 완료 후 103.70 GiB가 예상돼
+  20 GiB reserve margin은 83.70 GiB다.
+- Forecast는 Sapiens/downstream/checkpoint/unrelated write를 제외한다고 state에 명시한다. 예상 free가
+  reserve 아래로 내려가면 `DISK_FORECAST_RESERVE_AT_RISK` warning을 atomic dashboard state에 기록한다.
+- 전체 118 tests와 publication safety가 PASS했고 commit `b24f509`를 push했다. Exact argv/cwd/child 0인
+  CPU-only dashboard PID 1974702만 종료한 뒤 동일 argv로 PID 1992655를 시작했다. GPU inference,
+  SAM, supervisor에는 signal하지 않았다.
+- 새 daemon의 first snapshot에서 forecast/schema publish를 확인했다. 같은 시각 Sapiens rate는
+  0.223 crop/s, ETA는 deadline 3시간 25분 후이며 upper/p90-adjusted freeze coverage는 24/26,
+  첫 projected late sequence는 `deadlift_0002`다. Process alive, GPU saturation, retry/error 0이므로
+  frozen shortest-first order와 acceptance policy는 변경하지 않았다.
+
+### Dashboard/handoff monitoring-plane continuity
+
+- Persistent dashboard와 handoff checkpoint monitor에는 lifetime singleton lock이 없고 exact resume
+  command도 handoff에 보존되지 않아 terminal/session loss 시 AI polling 없이 복구할 수 없었다.
+- 두 persistent mode에 symlink-safe advisory lifetime lock을 추가했다. `--once` 진단은 lock owner의
+  state를 수정하지 않고 계속 사용할 수 있으며, duplicate daemon은 output write 전에 exit 3으로 거부한다.
+- Handoff process inventory는 basename-exact argv match와 `shlex.join`을 사용하고 dashboard, handoff
+  monitor, monitoring watchdog의 last-known exact command를 보존한다. 이 monitoring plane은 workload
+  RUNNING 판정에서는 제외해 pipeline completion status를 왜곡하지 않는다.
+- `tools/run_monitoring_watchdog.py`는 두 target별 live/resume argv SHA pin, 3-cycle absence confirmation,
+  2초 final rescan, 최대 3회/시간 detached recovery를 제공한다. Live target을 signal하지 않고 각
+  lifetime lock이 manual/watchdog race를 닫는다. State는 `.runtime/monitoring_watchdog_state.json`이다.
+- Dashboard는 watchdog dead/stale/duplicate/structured attention을 표시한다. 관련 22개와 전체 123개
+  tests, publication safety가 PASS했다. Implementation `16a8600`과 default handoff output-path validator
+  fix `5c93d4e`를 push했다.
+- Exact cwd/argv/child 0 확인 후 CPU-only dashboard PID 1992655와 handoff monitor PID 1974706만
+  SIGTERM하고 동일 argv로 PID 2006908/2006909를 시작했다. 두 target lock held와 handoff exact command
+  persistence를 확인했으며 GPU inference/SAM/supervisor에는 signal하지 않았다.
+- Monitoring watchdog PID 2009359은 두 target 모두 live/resume SHA exact, missing/restart 0,
+  attention false다. Watchdog command도 handoff에 보존됐고 세 lifetime lock이 모두 held다.
+- 2026-08-12 12:55 KST snapshot은 SAM cam2의 새 durable PASS를 반영해 35/78 camera,
+  22,787 frame이며 cam3 Mode B 192 frame으로 전진했다. Sapiens 23,964/65,430 crop,
+  OOM/retry/stall 0이고 deadline 경고 외 operational attention은 없다.
+
+### Immutable checkpoint/final snapshot storage forecast
+
+- Predeadline follower는 ready set이 1개 늘 때마다 모든 기존 complete sequence를 다시 포함하는 별도
+  immutable cumulative build를 만들므로, SAM-only forecast는 freeze write duplication을 제외했다.
+- Dashboard가 largest verified checkpoint manifest의 sequence별 payload bytes를 selector frame 수로
+  정규화한다. Future sequence에는 관측 최대 16,149.38 bytes/frame을 적용하고, current 11개 이후
+  매 sequence checkpoint와 별도 deadline build ID의 final snapshot을 모두 합산한다.
+- 2026-08-12 13:01 KST empirical p90 deadline coverage 24/26 기준 새 checkpoint 13개 + final snapshot
+  1개의 remaining write는 8.58 GiB다. 모든 26개가 deadline 전에 ready가 되는 observed-max
+  시나리오는 checkpoint 15개 + final snapshot 1개, 10.61 GiB다.
+- SAM forecast와 합친 projected free는 deadline 24개 기준 95.08 GiB, all-sequence observed-max
+  93.05 GiB이며 20 GiB reserve margin은 각각 75.08/73.05 GiB다. Sapiens/compact downstream/
+  unrelated write와 manifest filesystem overhead 제외를 state assumptions에 명시한다.
+- All-sequence observed-max combined free가 reserve 아래면
+  `DISK_COMBINED_FORECAST_RESERVE_AT_RISK`를 기록한다. Helper/real snapshot과 전체 124 tests,
+  publication safety가 PASS했고 implementation commit `5bb9c4c`를 push했다.
+- Exact argv/cwd/child 0인 CPU-only dashboard PID 2006908만 SIGTERM 후 동일 argv PID 2019834로
+  교체했다. Dashboard lock held, monitoring watchdog live/resume SHA exact, restart 0이며 GPU
+  inference/SAM/supervisor에는 signal하지 않았다.
+- 같은 snapshot에서 Sapiens `benchpress_0002/cam1`이 새 durable PASS가 되어 37/78 camera,
+  24,135 crop이며 cam2로 진행했다. SAM은 35/78 camera, cam3 partial 449 frame이고
+  OOM/retry/stall 0이다.
+
+### Remaining deadline sequence-order dominance audit
+
+- Deadline projection 24/26에서 process restart/order 변경이 completion count를 개선할 수 있는지
+  private frame 없이 selector aggregate workload로 감사했다. 남은 14 sequence는 target crop과 SAM
+  frame 수가 모두 같은 오름차순이며, measured-rate combined cost 순서도 동일하다.
+- Dashboard에 `REMAINING_TWO_STAGE_WORKLOAD_DOMINANCE`를 추가했다. 완료 pose sequence를 제외한
+  모든 earlier/later pair를 비교해 later item이 crops/frames 모두 이하이고 하나 이상 strict-smaller면
+  `DEADLINE_SEQUENCE_ORDER_DOMINANCE_INVERSION` warning을 기록한다.
+- Live snapshot은 `PARETO_NONDECREASING`, dominance inversion 0, weighted inversion 0이다. 이는
+  global two-machine flow-shop optimum 증명이 아니라 명백한 component-wise order 오류가 없다는
+  evidence이며 frozen command를 변경하거나 GPU process를 재시작하지 않았다.
+- Helper/attention integration과 전체 125 tests, publication safety가 PASS했고 implementation
+  commit `f8f603b`를 push했다. Exact CPU-only dashboard PID 2019834만 동일 argv PID 2026797로
+  교체했다. Lock held, monitoring watchdog exact identity/restart 0이며 transient observation warning은
+  다음 atomic refresh에서 제거돼 deadline warning 두 건만 남았다.
+- Activation 중 `benchpress_0001/cam3`가 durable PASS로 완료됐다. SAM 36/78 camera, 23,460 frame,
+  body fit 673×26 REVIEW, Mode C candidate 0 `PASS_MODE_B_FROZEN`, quality REVIEW sidecar까지 정상
+  materialize됐다. Supervisor는 `WAIT_RUNNING_SAPIENS2`; 다음 `benchpress_0002` 3-view pose 완료를
+  기다리며 SAM child 부재는 정상이다. Quality follower/freeze checkpoint의 다음 CPU cycle은 자동으로
+  처리하도록 두고 수동 duplicate materialization은 수행하지 않았다.
+
+### Automatic 12-sequence durable checkpoint
+
+- Quality follower가 `benchpress_0001`의 673-frame quality vector와 exporter preflight를 검증해
+  quality/freeze-ready를 12/26 REVIEW로 증가시켰다. Failure/dependency reason은 0이며 GPU work나
+  기존 sequence recomputation은 수행하지 않았다.
+- Predeadline checkpoint follower가 readiness strict superset을 감지해 build
+  `exercise3d-predeadline-auto-012-77ac2165e283`를 자동 publish했다. Contract v2 결과는
+  REVIEW 12/FAIL 0/INCOMPLETE 0, 399 files/377,238,045 bytes, freeze eligible true다.
+- Follower 자체 검증은 manifest file/byte count 399/377,238,045와 verified count가 exact-match했고,
+  별도 read-only `verify_frozen_build`도 valid true, errors 0, requested order/tree/ownership/SHA와
+  status count 일치를 재확인했다. 이 immutable build는 재-export하지 않는다.
+- 2026-08-12 13:09 KST dashboard는 durable checkpoint 12, body fit/quality/freeze-ready 12/26,
+  supervisor `WAIT_RUNNING_SAPIENS2`, OOM/retry/stall 0을 기록했다. 기존 11-sequence checkpoint도
+  삭제하지 않으며 final deadline sentinel은 별도 build ID로 계속 대기한다.
+- 12-sequence 관측치를 반영한 remaining immutable checkpoint + final snapshot forecast는 deadline
+  24개 시나리오 8.23 GiB, 모든 26개 관측-max 시나리오 10.25 GiB다. Remaining SAM과 합친 projected
+  free는 95.20/93.17 GiB, 20 GiB reserve margin은 75.20/73.17 GiB여서 storage attention은 없다.
+
+### Durable last-completion event monitoring
+
+- 기존 top-level `last_event`는 supervisor의 현재 stage만 반복해 마지막 완료 산출물을 식별하지 못했다.
+  Dashboard가 Sapiens/SAM camera terminal metadata, triangulation/body/Mode-C/quality atomic output과
+  immutable export manifest의 provenance timestamp를 비교해 `last_completed_event`를 구조화하도록 했다.
+- Watchdog/follower의 주기적 state `updated_at`은 후보에서 제외한다. Sequence output은 required payload
+  marker가 함께 있을 때만 완료로 인정하며 partial metadata가 더 최신이어도 선택하지 않는다.
+  Supervisor stage는 `current_operational_event`로 별도 유지한다.
+- 실제 one-shot integration은 최신 event를 12-sequence build
+  `exercise3d-predeadline-auto-012-77ac2165e283`의 `DURABLE_CHECKPOINT_PUBLISHED`,
+  `FREEZE_ELIGIBLE`, 2026-08-12 13:06:55 KST로 산출했다. GPU/supervisor에는 signal이나 launch를
+  수행하지 않았으며 전체 126 regression이 PASS했다.
+- Publication-safety PASS 후 implementation commit `a0ad72c`를 push했다. 기존 dashboard PID
+  2026797의 cwd/exact argv/child 0/lock을 확인하고 CPU-only daemon만 교체했으나, exec-scoped manual
+  PID 2042374는 첫 atomic state를 쓴 뒤 session과 함께 종료됐다. 추가 manual launch로 경합하지 않고
+  기존 monitoring watchdog recovery를 사용했다.
+- Watchdog은 3회 absence와 final rescan 후 동일 command로 PID 2044638을 1회 복구했다. Cwd/argv exact,
+  child 0, singleton lock held, live/resume SHA exact, missing 0, attention false를 확인했다. 새 persistent
+  dashboard state는 durable checkpoint event와 `WAIT_RUNNING_SAPIENS2` operational event를 분리해
+  기록한다. Inference/SAM/supervisor/follower/sentinel에는 signal·restart·duplicate launch가 없었다.
+
+### Deadline snapshot premature-publication gate
+
+- Deadline sentinel/export 경로를 다시 감사해, 알려진 final build ID가 cutoff 전에 수동 materialize되면
+  기존 sentinel이 valid immutable build로 받아 조기 종료할 수 있는 시간 경계 gap을 확인했다. 이는
+  이후 deadline 전 완료 sequence를 snapshot에서 놓칠 수 있으므로 실제 correctness risk다.
+- Deadline cutoff가 있는 exporter는 현재 UTC가 cutoff보다 이르면 output root, build lock, staging을
+  전혀 생성하지 않고 exit 76 `DEADLINE_CUTOFF_NOT_REACHED`로 종료하도록 했다. 기존 checkpoint
+  follower build는 cutoff가 없어 영향받지 않는다.
+- Generic frozen-build verifier는 deadline manifest의 `created_at_utc >= deadline_cutoff_utc`를 강제하고,
+  sentinel wrapper는 manifest cutoff가 요청된 2026-08-14 04:00 UTC와 exact-match하는지도 검증한다.
+  Marker mtime·sequence universe/order·payload SHA 기존 gate는 그대로 유지한다.
+- Future-cutoff no-write, premature manifest, wrong expected cutoff, sentinel delegation regression을
+  추가했고 전체 130 tests가 PASS했다. 현재 deadline build는 아직 `NOT_STARTED`여서 충돌하는 final
+  build가 없으며, live sentinel PID 1882473은 중단하지 않았다. Deadline 시 exporter subprocess가
+  새 code를 load하므로 GPU/supervisor/sentinel restart 없이 hardening이 적용된다.
+
+### Deadline terminal-marker identity binding
+
+- Deadline 후 generation은 계속되므로 cutoff eligibility의 marker mtime을 기록한 직후 해당 source가
+  atomic replacement되면, 기존 code는 새 descriptor bytes를 copy하면서 과거 mtime provenance만
+  sequence manifest에 남길 수 있었다. Per-copy source stability 검사는 있었지만 eligibility 시점과
+  copy 시점 사이의 TOCTOU는 결합하지 않았다.
+- `deadline_eligibility`가 body fit NPZ/metadata와 Mode-C assessment의
+  dev/inode/size/mtime/ctime identity를 내부 snapshot으로 함께 반환한다. `copy_exact`는 terminal marker
+  source descriptor를 연 뒤 hashing 전 이 identity와 exact-match하는지 검사한다. Replacement가 있으면
+  destination publish 없이 `freeze source changed since deadline eligibility`로 실패해 sentinel의 기존
+  staging resume/retry 경로로 넘어간다.
+- Manifest에는 기존 privacy-safe marker mtime만 기록하며 private path나 filesystem identity는 노출하지
+  않는다. Cutoff 없는 predeadline checkpoint와 global/nonterminal source copy semantics는 변하지 않는다.
+  Eligibility identity capture와 replacement rejection regression을 포함한 전체 131 tests가 PASS했다.
+
+### Deadline sentinel loaded-code identity
+
+- Live sentinel PID 1882473의 `/proc` start time은 2026-08-12 03:08 UTC이고 sentinel/exporter hardening
+  file mtime은 04:22/04:27 UTC라, exact argv가 같아도 process 내부 verifier는 이전 Python code를
+  유지한다는 사실을 확인했다. Export subprocess는 deadline에 current file을 load하지만 premature
+  final-build 검사까지 live sentinel에서 활성화됐다고 주장할 수는 없었다.
+- Sentinel이 process start 시 읽은 `run_deadline_snapshot.py`와 `export_private_dataset.py` SHA-256을
+  `implementation` state에 모든 atomic cycle마다 보존하도록 했다. Hash는 매 cycle disk에서 다시 읽지
+  않아 loaded-code identity가 current file 변경을 따라가며 위장되지 않는다.
+- Dashboard는 runtime loaded SHA와 current on-disk SHA를 비교하고 sentinel이 아직 필요한 상태에서
+  missing/mismatch이면 `DEADLINE_SENTINEL_CODE_DRIFT` attention을 낸다. Deadline section에도 loaded/current
+  pair와 exact boolean을 machine-readable하게 노출한다.
+- Missing/mismatch/exact helper와 live-dashboard attention regression을 추가했고 전체 133 tests가 PASS했다.
+  GPU inference/SAM/supervisor에는 변화가 없으며 CPU-only sentinel activation은 watchdog recovery gate로
+  별도 수행한다.
+
+### Deadline loaded-code activation
+
+- Publication-safety PASS 후 implementation commit `60eadb8`를 push했다. Dashboard PID 2044638의
+  cwd/exact argv/child 0/singleton lock과 monitoring watchdog의 exact identity를 확인한 뒤 dashboard만
+  TERM했다. 수동 launch 없이 3-cycle/final-rescan recovery로 PID 2065337이 기동됐고 live identity exact,
+  missing 0, attention false를 확인했다.
+- 새 dashboard는 기존 sentinel state에 implementation hash가 없어
+  `DEADLINE_SENTINEL_CODE_DRIFT`를 실제로 올렸다. Sentinel PID 1882473의 cwd/exact argv/child 0/lock과
+  sentinel watchdog restart 0/identity exact를 확인한 뒤 CPU-only sentinel만 TERM했다.
+- Sentinel watchdog은 3회 absence와 final rescan 후 동일 frozen command로 PID 2068008을 1회 복구했다.
+  새 state의 loaded sentinel/exporter SHA는 current file SHA와 각각 exact-match하며 dashboard
+  `implementation.exact=true`, drift attention 제거, watchdog missing 0/attention false다. Sentinel과
+  dashboard 모두 child 0 및 lifetime lock held를 재확인했다.
+- Sapiens PID 373049, autonomous supervisor PID 1701200, SAM policy/follower/checkpoint output에는
+  signal·restart·duplicate launch가 없었다. 남은 attention은 기존 deadline ETA/coverage warning 두 건뿐이다.
+
+### Deadline marker ctime cutoff attestation
+
+- Terminal marker mtime과 eligibility→copy identity는 결합됐지만, deadline 후 파일을 교체한 뒤 mtime만
+  cutoff 이전으로 backdate하면 다음 retry eligibility가 새 파일을 받아들일 수 있었다. Linux source
+  ctime은 일반 caller가 과거로 설정할 수 없으므로 이를 point-in-time boundary의 추가 evidence로 사용한다.
+- `deadline_eligibility`는 body fit NPZ/metadata와 Mode-C assessment의 source ctime도 cutoff 이하인지
+  검사한다. 초과하면 `deadline_identity_after_cutoff:<marker>`로 sequence를 INCOMPLETE 처리한다.
+  dev/inode/size/mtime/ctime identity는 기존처럼 copy descriptor exact binding에도 사용한다.
+- PASS/REVIEW sequence manifest에는 privacy-safe `deadline_terminal_marker_ctimes` timestamp map을 기록한다.
+  Verifier는 marker set exact, ISO timestamp validity, ctime ≤ cutoff를 재검사한다. dev/inode는 private
+  filesystem detail이므로 manifest에 포함하지 않는다.
+- Backdated post-cutoff source gate, ctime provenance rejection, existing mtime/identity/full contract
+  regression을 포함한 전체 135 tests가 PASS했다. Cutoff 없는 predeadline checkpoint에는 영향이 없다.
+- Publication-safety PASS 후 implementation commit `6e802b1`을 push했다. Dashboard가 expected
+  `DEADLINE_SENTINEL_CODE_DRIFT`를 감지한 상태에서 sentinel PID 2068008의 exact argv/cwd/child 0/lock과
+  watchdog identity/restart budget을 확인하고 CPU-only sentinel만 TERM했다.
+- Watchdog은 3-cycle/final-rescan 후 PID 2076548을 동일 command로 복구했다. Runtime policy는 ctime-aware
+  boundary를 기록하며 loaded/current sentinel/exporter SHA가 모두 exact, dashboard drift 제거,
+  watchdog missing 0/attention false다. Sapiens/SAM/supervisor/dashboard에는 signal이나 restart가 없었다.
+
+### Sapiens target-inference duplicate-resume guard
+
+- Autonomous supervisor는 monitored Sapiens PID가 종료되면 missing camera resume command를 실행한다.
+  그러나 기존 `process_alive(pid)` 경계는 동일 output job의 worker/orphan이나 PID 변화가 남은 경우를
+  재탐색하지 않아 duplicate 5B model load 가능성이 있었다. Current 정상 job은 중단하지 않고 future
+  `sapiens2_target_pipeline.py infer` entrypoint를 hardening했다.
+- New invocation은 `.runtime/sapiens2_target_inference.lock`을 lifetime 동안 보유한 뒤 `/proc`에서 exact
+  script path, `infer` subcommand, resolved `--output-root`가 같은 non-zombie process를 검색한다. Lock 도입
+  전 legacy process도 탐지하며 PID만 출력하고 private command/path는 출력하지 않는다. `/proc` 자체가
+  unavailable/unreadable이면 새 inference를 fail-closed로 거부한다.
+- Duplicate lock, symlink-safe lock, exact command/output binding, legacy refusal-before-model-load,
+  lifetime lock retention/release, process-table fail-closed regression을 추가했다. 전체 141 tests가 PASS했고
+  real read-only probe는 현재 output-bound legacy PID 373049 하나를 exact-match했다.
+- Current Sapiens PID 373049와 supervisor PID 1701200은 signal/restart하지 않았다. 이 guard는 현재 output을
+  재계산하지 않으며 향후 resume subprocess가 on-disk current entrypoint를 load할 때 자동 적용된다.
+- Sapiens target environment CLI help, 전체 141 tests와 publication-safety PASS 후 implementation commit
+  `30a051d`를 push했다. Current legacy process는 계속 동일 PID로 실행한다.
+
+### SAM Mode B duplicate/orphan resume guard
+
+- Supervisor lifetime lock은 duplicate supervisor를 막지만, legacy SAM coordinator가 비정상 종료된 뒤
+  benchmark 또는 primary GPU child가 살아남으면 새 supervisor가 같은 output subtree를 다시 시작할 수
+  있었다. Current Sapiens/supervisor는 건드리지 않고 future `run_sam_body4d_full.py` entrypoint만
+  hardening했다.
+- New coordinator는 `.runtime/sam_body4d_full.lock`을 전체 camera run 동안 보유한다. Lock 획득 뒤
+  `/proc`에서 exact `run_sam_body4d_full.py --output-root`, 또는 동일 resolved root 아래의 exact
+  `benchmark_sam_body4d.py --mode B --run --output-dir`와
+  `sam_body_primary_target_runner.py --mode B --output-dir .../mode_b_private_output` process를 검색한다.
+  Non-zombie PID만 취급하며 private argv/path 대신 matching PID만 출력한다. Process table을 검사할 수
+  없으면 GPU child 생성 전에 fail-closed한다.
+- Lock lifetime/symlink safety, coordinator·benchmark·primary output binding, wrong mode/non-run rejection,
+  legacy/orphan refusal-before-run, lock retention/release, process-table fail-closed regression을 추가했다.
+  전체 147 tests와 compile, CLI help, publication-safety가 PASS했다. Real read-only `/proc` probe는
+  dashboard의 dependency wait와 동일하게 matching SAM coordinator/child 0을 확인했다.
+- Implementation commit `46cdced`를 push했다. Supervisor PID 1701200과 Sapiens PID 373049에는
+  signal/restart가 없었으며, 다음 normal SAM subprocess가 on-disk guarded entrypoint를 자동 load한다.
+
+### Streaming transient sequence retry
+
+- 기존 supervisor는 Sapiens가 살아 있는 동안 pose-ready sequence가 한 번 실패하면 hot-loop 방지를 위해
+  해당 sequence를 teacher 종료까지 제외했다. SAM 내부 camera retry가 있어도 Phase 7, derived stage,
+  orphan-guard refusal 같은 transient failure는 여러 시간 뒤에야 다시 시도될 수 있어 deadline freeze
+  coverage를 불필요하게 낮출 수 있었다.
+- Future recovered supervisor에 최초 시도 + 1회로 제한된 sequence retry와 기본 300초 backoff를 추가했다.
+  Backoff 중에는 frozen order에서 다음으로 준비된 sequence를 실행해 GPU를 놀리지 않으며, retry 가능
+  시각 전에는 같은 sequence를 hot-loop하지 않는다. Stage는 기존 completion/resume gate를 그대로 사용하고
+  attempt, max attempt, `retry_not_before_utc`, privacy-safe pending retry를 atomic supervisor state에 남긴다.
+- Backoff order, elapsed retry eligibility, exhaustion, pending-state regression을 추가했다. 전체 149 tests,
+  Python compile, CLI help와 publication-safety가 PASS했고 implementation commit `0412590`을 push했다.
+- Current supervisor PID 1701200과 Sapiens/SAM에는 signal/restart가 없었다. Live supervisor는 변경 전 code를
+  load한 상태이며, 정상 process를 중단해 활성화하지 않는다. 향후 watchdog recovery가 동일 persisted
+  command로 current entrypoint를 시작할 때 defaults가 자동 적용된다.
+
+### SAM camera provenance completion gate
+
+- Downstream consolidation/export는 SAM prior finite·abstention 계약을 강제했지만 camera-level
+  `completion_status`는 provenance field 존재와 frame 수만 확인했다. 따라서 손상된 source index,
+  forced ambiguous target, invalid bbox/PTS가 downstream에서 거부되기 전까지 durable camera PASS와
+  progress count에 잠시 포함될 수 있었다.
+- Camera gate에 모든 provenance array의 expected length, exact zero-based source index, first accepted
+  seed, `target_valid`과 ambiguous/no-target 비중첩, valid bbox finite/positive extent, abstention bbox
+  all-NaN, confidence finite/[0,1], PTS finite/strictly increasing 검사를 추가했다. Numeric payload는
+  primary runner와 downstream consolidation이 전수 finite 검사하므로 deadline overhead를 늘리는
+  두 번째 full array decode는 추가하지 않았다.
+- Invalid forced-target/bbox/confidence/PTS regression을 포함해 전체 150 tests, compile과
+  publication-safety가 PASS했다. 마지막 완료 `benchpress_0001/cam3` 673-frame output에 신규 gate를
+  read-only 적용해 모든 check가 PASS했다.
+- Implementation commit `11a91ca`를 push했다. Current inference/supervisor에는 signal/restart가 없고,
+  다음 정상 SAM coordinator child가 current on-disk gate를 자동 load한다.
+
+### SAM single-target exact-tree gate
+
+- Camera completion은 `mesh_4d_individual/1`과 `mhr_numeric/1`의 expected count만 확인해, interrupted
+  legacy/all-person output에서 stale object `2` directory 또는 extra payload가 남아도 primary object
+  count가 맞으면 PASS할 수 있었다. 이는 downstream이 object `1`만 읽더라도 private working output의
+  identity 정책과 exact resume 판단을 약화한다.
+- Required mesh/numeric object root는 symlink가 아닌 directory `1` 하나만 허용한다. Optional
+  focal/rendered per-object root도 존재하면 같은 exact contract를 적용한다. Mesh/numeric recursive
+  payload count가 expected frames와 같아야 하고, 모든 compact numeric archive의 scalar `object_id`가
+  정확히 1이어야 한다.
+- Extra object directory/payload regression을 추가했다. 전체 150 tests, compile,
+  publication-safety가 PASS했고 마지막 완료 `benchpress_0001/cam3` 673-frame 실출력은 신규
+  exact-root/recursive/object-id checks까지 전부 PASS했다.
+- Implementation commit `d3fc911`를 push했다. Existing GPU/supervisor에는 signal/restart가 없고 다음
+  normal SAM coordinator child가 current gate를 자동 load한다.
+
+### Source-bound SAM prior consolidation resume
+
+- `consolidate_sam_body_prior.py`는 retry/recovered supervisor가 호출하면 valid compact prior가 있어도
+  3 camera를 항상 다시 읽고 덮어썼다. 또한 existing prior가 current SAM provenance/numeric source와
+  같은 generation인지 증명하는 dependency identity가 없어 무조건 skip도 안전하지 않았다.
+- Current target provenance와 object-1 numeric inventory의 relative label, size, mtime_ns, ctime_ns를
+  privacy-safe SHA-256 signature로 묶어 metadata에 저장한다. Existing output은 signature/canonical mapping,
+  frame/source identity, PTS, target flags/confidence/bbox, output-valid/accepted-prior 관계, canonical finite,
+  frames CSV와 QA count/status를 모두 재검증한 뒤에만 `resume_skipped=true`로 재사용한다. Source 또는
+  consolidated payload가 바뀌면 기존 atomic writers로 rebuild한다.
+- Exact skip이 metadata timestamp를 보존하는지, forced accepted-prior corruption을 수리하는지, numeric
+  source drift가 rebuild되는지 regression을 추가했다. 전체 150 tests, compile과 publication-safety가
+  PASS했고 implementation commit `e641bfa`를 push했다.
+- Existing 12 completed sequence는 supervisor successful-row gate가 consolidation command 자체를 skip하므로
+  재계산하지 않는다. Current GPU/supervisor에는 signal/restart가 없으며 다음 새 sequence의 child부터
+  source-bound metadata가 생성된다.
+
+### Source-bound sequence body-fit resume
+
+- `fit_sequence_body.py`도 recovered supervisor가 downstream failure를 retry하면 valid body-fit을 다시
+  계산했다. Body-fit은 triangulation, 3-view prior, gate config와 fitting parameter에 모두 의존하므로
+  단순 file-exists skip은 stale acceptance를 재사용할 위험이 있었다.
+- Canonical triangulation NPZ/metadata, 세 camera의 compact prior NPZ/metadata, gate config file의
+  privacy-safe size/mtime_ns/ctime_ns inventory와 max-gap/alignment/geometry/SAM/temporal parameter를 SHA-256
+  signature로 묶는다. Existing output은 signature, frame index/PTS/joint convention, source valid/quality,
+  fitted finite/invalid-NaN, confidence range, evidence code/count, shape/scale finite, frames CSV와 QA를
+  검사하고 current gate config로 PASS/REVIEW 및 reason을 다시 산출한 뒤 exact할 때만 skip한다.
+- Signature source-drift, output nonfinite, acceptance-gate regression을 추가했다. 전체 152 tests, compile과
+  publication-safety가 PASS했고 기존 `benchpress_0001` 673-frame REVIEW body-fit은 signature를 요구하지
+  않는 read-only output/gate audit에서 PASS했다.
+- Implementation commit `6cacff1`을 push했다. 기존 12 completed sequence는 supervisor successful-row
+  gate로 호출하지 않아 재계산하지 않으며, current GPU/supervisor에는 signal/restart가 없었다. 다음
+  새 sequence body-fit부터 source-bound metadata가 자동 생성된다.
+
+### Source-bound Mode C assessment resume
+
+- Mode C assessment JSON은 deadline cutoff의 terminal marker이지만 dependency identity가 없고 retry마다
+  다시 기록됐다. Unchanged decision의 mtime/ctime을 불필요하게 바꾸거나, 반대로 단순 exists skip으로
+  stale body/prior evidence를 유지하는 두 문제를 함께 피해야 했다.
+- Body-fit NPZ/metadata, triangulation supporting-view NPZ, 세 camera compact prior, policy/canonical config의
+  privacy-safe size/mtime_ns/ctime_ns inventory를 SHA-256 signature로 저장한다. Existing marker는 signature와
+  frozen policy, camera order/reference counts, nonnegative signal/candidate counts, sorted unique source indices,
+  non-overlapping bounded clips와 coverage, threshold evidence, selected-total과
+  `PASS_MODE_B_FROZEN`/`REVIEW_MODE_C_CANDIDATE` 결정을 검증한 뒤에만 timestamp를 보존해 skip한다.
+- Source drift, status/candidate inconsistency, clip/threshold structure regression을 포함해 전체 154 tests,
+  compile과 publication-safety가 PASS했다. 기존 `benchpress_0001` marker는 signature를 요구하지 않는
+  read-only audit에서 candidate 0 `PASS_MODE_B_FROZEN` contract PASS였다.
+- Implementation commit `1c8046e`를 push했다. 기존 12 completed marker를 다시 쓰지 않았고 current
+  GPU/supervisor에는 signal/restart가 없었다. 다음 새 sequence assessment부터 source-bound marker가
+  자동 생성된다.
+
+### Source-bound Phase 7 triangulation resume
+
+- Phase 7 streaming은 기존 initial/final `metadata.json`과 finite canonical payload만 확인해, pose 또는
+  selected camera artifact가 교체된 stale triangulation도 재사용할 수 있었다.
+- 실제 triangulator가 읽는 3-view pose NPZ/metadata, selected camera refinement/validation, camera별 첫
+  source frame, temporal alignment report, 단일 VGGT metadata, canonical config와 tool file의 privacy-safe
+  size/mtime_ns/ctime_ns inventory를 SHA-256 signature로 묶는다. Absolute private path는 sidecar에 쓰지 않는다.
+- Initial/final output별 atomic `.phase7_source_identity.json`은 selected camera source와 상태를 함께
+  저장한다. 재실행 직전 `IN_PROGRESS`, output schema/finite 검증과 실행 전후 dependency signature가 모두
+  같을 때만 `COMPLETE`로 승격한다. Missing/mismatch, symlink dependency 또는 실행 중 source replacement는
+  fail-closed이며 다음 supervisor bounded retry에서만 다시 계산한다.
+- Missing/matching/mismatching marker, dependency drift, in-progress 상태와 symlink rejection regression을
+  추가했다. 전체 157 tests, compile, staged publication-safety가 PASS했다. Implementation `fadd5c7`과
+  in-flight source race guard `c55bc5c`를 push했다.
+- 기존 12 completed sequence는 supervisor successful-row gate가 Phase 7 호출 자체를 skip하므로 재계산하지
+  않았다. Current Sapiens/SAM/supervisor에는 signal/restart/duplicate launch가 없으며, 다음 새
+  pose-complete sequence부터 current Phase 7 subprocess가 source-bound marker를 생성한다.
+
+### Source-bound Phase 11 quality resume
+
+- Quality builder의 기존 resume validation은 body frame/PTS와 output QA count만 비교해 selection, pose,
+  compact SAM prior, triangulation 또는 Mode C evidence가 바뀐 stale quality vector도 skip할 수 있었다.
+  Follower의 persisted `completed` fast path는 file existence만으로 validation 전체를 건너뛰었다.
+- 실제 계산 입력인 3-view selection/pose/prior NPZ, triangulated/canonical 3D와 metadata, body fit/metadata,
+  Mode C assessment와 builder code를 privacy-safe size/mtime_ns/ctime_ns SHA-256 signature로 묶어 quality
+  metadata에 저장한다. Build 전후 signature가 바뀌면 output을 publish하지 않고 bounded retry로 남긴다.
+- Newly signed completion은 follower fast path에서도 current signature와 exact-match해야 skip한다. 도입 전
+  persisted completion에 기록된 기존 12개 unsigned output은 grandfather해 재계산하지 않는다. Invalid/
+  truncated NPZ의 `EOFError`도 follower process를 죽이지 않고 sequence retry state에 기록한다.
+- Dependency drift/symlink, signed fast-path invalidation과 unsigned legacy preservation regression을 추가했다.
+  전체 161 tests, compile과 staged publication-safety가 PASS했고 implementation `533959e`를 push했다.
+- Current Sapiens/SAM/supervisor/quality follower에는 signal/restart/duplicate launch가 없었다. 다음 새
+  sequence의 supervisor quality subprocess부터 source-bound metadata가 자동 생성된다.
+- 14:34 KST 단일 dashboard snapshot에서 같은 Sapiens PID 373049가 25,330/65,430 crops,
+  38/78 durable camera로 진행했고 recent/average rate는 0.232/0.217 crop/s였다. GPU 100%,
+  OOM/retry/stall/error 0이며 supervisor는 `benchpress_0002/cam3` pose completion을 기다린다. Deadline
+  Sapiens ETA risk는 +1시간 31분으로 개선됐고 optimistic/p90-adjusted freeze coverage 모두 25/26,
+  first late `squat_0003`이다. 이 snapshot 뒤 정상 진행 확인을 위한 추가 AI polling은 수행하지 않는다.
+
+### Validation-bound private freeze copy
+
+- Deadline/predeadline exporter는 eligible sequence마다 quality builder를 호출하므로, source signature 도입 전
+  완료된 12개 unsigned quality를 다음 cumulative checkpoint에서 다시 쓸 위험이 있었다. Export validation도
+  signed quality의 stored signature를 current sources와 대조하지 않았다.
+- Exporter는 legacy unsigned quality를 full schema/body frame·PTS 검증 후 그대로 재사용한다. Signed quality는
+  current Phase 11 dependency signature와 exact-match해야 하며 mismatch는 builder의 bounded rebuild 경로로
+  보낸다. 따라서 기존 12개 output은 보존하면서 다음 signed sequence의 source drift는 거부한다.
+- 기존 copy gate는 deadline terminal marker 3개만 eligibility identity에 묶었다. 이제 complete sequence의
+  32개 selection/pose/provenance/triangulation/prior/body/Mode-C/quality copied source dependency를 validation 전후
+  dev/inode/size/mtime/ctime으로 캡처한다. 두 snapshot과 deadline marker identity가 같아야 PASS/REVIEW를
+  유지하고, 실제 `copy_exact` descriptor도 동일 identity를 요구한다. Race/symlink/missing input은
+  `INCOMPLETE` 또는 sentinel retry로 남고 partial을 complete로 publish하지 않는다.
+- Legacy reuse, signed source validation, dependency replacement/symlink와 validation↔deadline window regression을
+  포함해 전체 166 tests, compile과 staged publication-safety가 PASS했다. Implementation `2cfd6b7`을 push했다.
+- 14:36 KST 단일 snapshot은 같은 Sapiens PID가 39/78 camera, 25,501/65,430 crops로 진행하고
+  `benchpress_0002` 3-view PASS 뒤 supervisor가 sequence pipeline에 진입했음을 보였다. GPU 100%,
+  OOM/retry/stall 0이고 ETA warning은 deadline +58분으로 개선됐다. Existing GPU/follower/supervisor에는
+  signal/restart/duplicate launch가 없었다.
+
+### First source-bound Phase 7 activation과 sentinel code-drift recovery
+
+- `benchpress_0002`가 14:36 KST에 3-view Sapiens PASS가 되면서 live supervisor가 current Phase 7 subprocess를
+  처음 호출했다. Initial/final `.phase7_source_identity.json`은 각각 `COMPLETE`, 15 dependency,
+  `PHASE5_BACKGROUND_BA`이며 current recomputed signature와 exact-match했다. Canonical schema/finite/source
+  validation도 양쪽 모두 PASS했고 marker label에 absolute private path는 없었다. Phase 7 count는 13/26이다.
+- Exporter implementation 변경을 dashboard가 `DEADLINE_SENTINEL_CODE_DRIFT`로 정확히 탐지했다. Sentinel
+  watchdog은 policy상 live process를 signal하지 않으므로 자동 code activation은 하지 않는다. Old CPU-only
+  sentinel PID 2076548의 exact argv/cwd, child 0, `WAITING_DEADLINE`, lifetime lock, watchdog RUNNING과 restart
+  budget 0/3을 확인한 뒤 이 PID에만 SIGTERM을 보냈고 직접 launch하지 않았다.
+- Watchdog은 3-cycle absence confirmation과 final rescan 후 PID 2171153을 동일 pinned command로 detached
+  recovery했다. 새 state는 current exporter SHA exact, `WAITING_DEADLINE`, restart 1/3, attention false이며
+  dashboard의 code-drift ERROR가 해소됐다. Sapiens PID 373049, SAM PID 2158180, autonomous supervisor와
+  다른 followers에는 signal/restart가 없었다.
+- 14:45 KST snapshot은 SAM `benchpress_0002/cam1` 64-frame partial, combined VRAM 62,947 MiB, GPU 100%,
+  OOM/retry/stall 0을 확인했다. 남은 attention은 deadline ETA +1시간 7분과 25/26 coverage forecast뿐이며,
+  이 recovery 검증 뒤 정상 상태 확인용 추가 AI polling은 수행하지 않는다.
+
+### Source-of-truth 재검증
+
+- HEAD `ae89fe6`, worktree clean, Draft PR #1과 remote branch 동기화
+- A100 80GB idle, private source 65,595 frames와 checkpoint storage 정상, source mutation 0
+- deadline 2026-08-14 13:00 KST = 2026-08-14 04:00 UTC
+- 2026-08-11 17:31 KST 기준 remaining wall-clock 67.48 h
+- 전달된 과거 target 수치 대신 최신 repository result를 채택: 9,732 frames, 9,725 target crops,
+  ambiguity 7, identity switch 0, crop reduction 50.3725%
+- full target selector/Sapiens2/SAM output은 아직 없고, 4개 pilot sequence Sapiens2 output만 보존됨
+
+### 중간 계획 변경 보고 — 이번 deadline cycle의 유일한 major 변경 보고
+
+- 변경 사유: target-only Sapiens2 실측 projection 79.09 GPUh만으로 remaining 67.48 h를 넘고,
+  SAM Mode B 16.35 h 및 downstream을 더하면 한 A100에서 전량 완료가 물리적으로 불가능
+- 기존 계획: 전체 Sapiens2 → 전체 triangulation → 전체 SAM → fitting → freeze
+- 변경 계획: 기존 4개 pilot output 재사용 + sequence-complete streaming. GPU는 Sapiens2 우선,
+  CPU triangulation/QC 병행, SAM Mode B를 dependency 가능한 sequence에만 실행
+- 정확도 영향: 5B, official flip-test, detector, target abstention과 accepted threshold는 변경하지 않음
+- deadline 영향: 전체 26개 완료 보장은 포기하지 않되, deadline에는 완결 sequence 수를 최대화하고
+  나머지는 resumable `INCOMPLETE_DEADLINE` provenance로 동결
+- 리스크: Sapiens throughput 저하, Phase 7/9 구현 critical path, SAM output disk 증가
+- 즉시 적용: official DETR full 26-sequence resumable pass 시작; full selector 후 Sapiens2 진입
+
+### Phase 6 full 준비와 lossless pilot 재사용
+
+- official DETR full pass는 26 sequence/78 camera에 대해 batch 16, chunk 512, source mutation 없이
+  실행 중이다. 완료 camera마다 consolidated bbox/candidate payload와 QA를 원자적으로 기록한다.
+- 기존 `ALL_DETECTIONS_BASELINE`에는 모든 candidate의 308-keypoint 결과가 보존되어 있으므로,
+  accepted target candidate만 exact gather해 4개 pilot의 target-only output을 만들었다.
+- 결과: 12 cameras, 9,732 frames, target poses 9,725, 새 5B inference 0회, elapsed 72.29 s.
+- baseline 대비 confident XY/confidence 최대 delta는 12/12 camera 모두 0.0이었다.
+- resume chunk는 frame 이름뿐 아니라 현재 selector의 abstention/status/index 및 selected bbox/score가
+  일치해야 재사용하도록 강화했다. 기존 45 chunks는 selection-bound 검증 PASS.
+- 17개 unit test와 compile PASS.
+
+### Full selector incremental gate
+
+DETR이 먼저 끝난 9 sequences/27 cameras에 full selector와 별도 lossless validator를 적용했다.
+
+- frames 19,224, all candidates 37,966, target crops 19,068
+- ambiguity 130, `NO_TARGET` 26, background candidates 18,898
+- identity-switch risk 0, forward/backward disagreement 0, integrity failure 0
+- candidate offsets/boxes/scores는 DETR consolidated arrays와 exact-match
+- gate `GO_FULL_DATASET`
+
+`barbellrow_0003`의 130 ambiguity와 26 NO_TARGET은 촬영 종료 후 target이 화면에서 나가는
+구간에 집중됐다. 16-frame private overlay에서 background 사람을 강제 선택하지 않는 올바른
+abstention임을 확인했다. 전체 78-camera 완료 후 동일 gate를 다시 실행한다.
+
+### Full DETR / target selector gate와 5B 실행 시작
+
+- official DETR full candidate pass 완료: 26 sequences, 78/78 cameras PASS,
+  65,595 frames, person candidates 120,586, pose inference 0회
+- full selector/독립 validator 결과: target crops 65,430, ambiguity 139,
+  `NO_TARGET` 26, background candidates 55,156, occlusion-risk 19,525
+- detector candidate count/offset/bbox/score, source frame/PTS, selected index와 abstention contract를
+  전수 검사했고 integrity failure 0, forward/backward disagreement 0, identity-switch risk 0이다.
+- 4개 pilot/12 camera의 full selector arrays는 기존 accepted selector와 모든 field가 exact-match했다.
+  기존 9,725 target pose의 selection-bound resume가 유효하므로 재추론하지 않는다.
+- private representative overlay에서 pushup ambiguity, squat candidate-index 역전,
+  benchpress 누운 자세와 10-person scene, mirror/reflection 후보를 다시 확인했다. background를
+  target으로 바꾼 사례는 없고, ambiguous pushup frame은 target을 강제 선택하지 않았다.
+- 최종 gate: `GO_FULL_DATASET`.
+
+2026-08-11 18:35 KST에 batch 16, chunk 256, official flip-test, primary target only로
+resumable full Sapiens2-5B를 시작했다. 새 inference 대상은 55,705 crops이다. cached-detector
+benchmark의 보수적 end-to-end 환산 0.234 crops/s에서는 약 66.1 GPUh로, deadline까지 reserve가
+매우 작다. GPU는 Sapiens2에 전용하고 CPU triangulation/recovery/QC만 병행한다. 실제 첫 신규
+camera wall-clock이 확보되면 ETA를 다시 갱신한다.
+
+### Phase 7 timestamp-aware triangulation pilot
+
+```bash
+python tools/triangulate_sapiens2.py \
+  --dataset-root <PRIVATE_DATASET_ROOT> \
+  --pose-root <PRIVATE_OUTPUT_ROOT>/sapiens2_target_only_full \
+  --camera-root <PRIVATE_OUTPUT_ROOT>/background_ba \
+  --output-root <PRIVATE_OUTPUT_ROOT>/triangulation \
+  --runtime-dir <PRIVATE_OUTPUT_ROOT>/runtime/phase7_triangulation_pilot_gate \
+  --sequences barbellrow_0000,squat_0001,pushup_0001,benchpress_0003
+```
+
+- schema/finite/NaN contract 4/4 PASS, 3,244 reference timestamps
+- canonical source-joint reprojection median/p90 px:
+  `barbellrow_0000` 7.06/30.62, `squat_0001` 26.24/164.93,
+  `pushup_0001` 326.93/2,004.04, `benchpress_0003` 7.91/97.84
+- Huber scale 10 px 배수의 사전 명시 gate 결과: REVIEW 2, NO_GO 2
+- private overlay상 squat/pushup target 2D pose는 정상이므로 identity error로 덮지 않았다.
+  current refined camera와 human observations의 epipolar inconsistency로 판정했다.
+- NO_GO proposal은 진단용으로 보존하지만 `eligible_for_body_fitting=false`이며 export에 사용하지 않는다.
+- Phase 5 camera를 덮어쓰지 않고, recovery를 수행한다면 observation-conditioned provenance와
+  held-out-frame 검증을 요구한다.
+
+### Phase 7 observation-conditioned camera recovery
+
+원 Phase 5 geometry는 수정하지 않고 별도 private output root에 recovery candidate를 만들었다.
+canonical body direct joints와 timestamp-aware pairing을 사용하며, 세 essential-pair/PnP topology 중
+fit residual이 가장 작은 것만 선택한 뒤 사전 분리한 20% held-out frame으로 검증했다.
+
+- fit/held-out overlap: 두 sequence 모두 0
+- `squat_0001`: held-out median/p90 26.21/164.86 → 5.70/18.88 px,
+  all-frame canonical 5.71/18.93 px
+- `pushup_0001`: held-out 311.60/2,020.79 → 8.12/95.12 px,
+  all-frame canonical 8.11/96.04 px
+- 두 sequence schema PASS, NO_GO 0, REVIEW 2
+- threshold/Huber scale은 변경하지 않았고 원 NO_GO proposal도 진단용으로 보존
+
+이는 같은 Sapiens2 observation으로 만든 geometry라 독립 calibration evidence가 아니다.
+`camera_source=SAPIENS2_2D_OBSERVATION_CONDITIONED`, 최종 상태는 둘 다
+`REVIEW_OBSERVATION_CONDITIONED`이며 camera/pose uncertainty를 fitting/export까지 전파한다.
+특히 pushup p90 96.04 px는 NO_GO 경계 100 px에 가까워 selective REVIEW QA 대상이다.
+
+### SAM Mode B full-run contract 준비
+
+GPU contention 때문에 5B 실행 중 SAM을 함께 올리지는 않는다. 대신 CPU에서 full runner와
+resume validation을 준비했다.
+
+- sequence/camera 단위 Mode B 실행과 PASS output resume
+- primary target seed 정확히 1개, source frame index와 selector confidence/ambiguity/occlusion 보존
+- upstream PLY 변환 직전 MHR pose/shape/scale/joints를 compact NPZ로 추가 저장
+- frame 수와 mesh/MHR numeric/provenance count가 모두 exact일 때만 camera PASS
+- partial/old mesh-only output은 complete로 오인하지 않고 deterministic rerun
+
+Mode C는 여전히 selective evidence가 없는 전체 기본값으로 사용하지 않는다.
+
+### First full camera 실측과 Phase 7 streaming 시작
+
+- 첫 신규 대상 `barbellrow_0001/cam1` 481/481 target crop을 약 36분에 완료했다.
+- 두 atomic chunk와 consolidated `poses_2d.npz`, bbox/frame/metadata가 모두 생성됐고
+  308-keypoint selected payload finite, ambiguity/NO_TARGET 강제 pose 0, camera QA PASS다.
+- 첫 camera 기준 serialization 포함 실측은 약 0.22 crop/s이며 A100 utilization 100%, VRAM 약
+  36.4 GiB, power 약 300–380 W 범위였다. 2026-08-11 19:12 KST remaining은 65.79 h로
+  Sapiens 완료 ETA와 거의 같아 GPU는 계속 5B 전용으로 유지한다.
+- `tools/run_phase7_streaming.py`를 별도 CPU process로 시작했다. 각 sequence의 세 camera
+  Sapiens schema/수량을 전수 확인한 뒤 Phase 5 geometry를 먼저 triangulate하며,
+  `NO_GO_TRIANGULATION`일 때만 disjoint held-out gate를 통과한 observation-conditioned recovery를
+  별도 root에서 선택한다. 원 Phase 5 output은 수정하지 않는다.
+- 첫 streaming 결과 `barbellrow_0000`은 canonical median/p90 7.06/30.62 px,
+  schema PASS, `REVIEW_POSE_CAMERA_CONSISTENCY`, body fitting eligible을 재현했다.
+- 기존 pilot 4개를 final root에 모두 materialize했다. schema PASS/body-fitting eligible 4/4,
+  원 Phase 5 camera 사용 2, held-out 승인 recovery 사용 2이며 최종 NO_GO는 0이다. Watcher는
+  나머지 22 sequence의 세 view pose가 완결될 때까지 30초 간격으로 대기한다.
+
+### SAM numeric provenance와 Phase 9/13 구현 준비
+
+- SAM target provenance에 selector의 `TARGET_AMBIGUOUS`, `NO_TARGET`, source PTS를 추가했다.
+- full Mode B compact payload는 bbox/focal/keypoint/camera translation뿐 아니라 MHR global/body/hand
+  pose, scale/shape/expression, 127 joint coordinates/global rotations와 204-d model parameter를 보존한다.
+- 기존 Mode A private numeric sample의 shape 45, expression 72, model parameter 204를 official MHR
+  JIT와 checkpoint의 `308 x 18,566` landmark mapping에 다시 넣었다. 저장 keypoint 최대 차이는
+  `2.6822e-7 m`, 평균 `5.1895e-8 m`, mesh 최대 차이는 `7.1526e-7 m`로 exact replay를 확인했다.
+- `tools/consolidate_sam_body_prior.py`는 camera별 compact prior를 frame/PTS/identity uncertainty와
+  함께 원자적으로 통합하되 ambiguous output은 보존하고 accepted prior로 사용하지 않는다.
+- `tools/fit_sequence_body.py`는 triangulated geometry dominant anchor, per-view MHR robust similarity
+  alignment, weak correlated-prior fusion, temporal second-difference의 staged fit을 구현했다.
+  geometry가 없는 prior-only joint는 최소 두 view가 합의할 때만 low-confidence로 생성한다.
+- `tools/export_private_dataset.py`는 source RGB를 복사하지 않고 frame name/index/PTS 및 immutable
+  inventory를 보존하며, versioned private payload를 byte-exact copy/SHA-256 검증한다. FAIL과
+  INCOMPLETE는 freeze-eligible로 승격하지 않는다.
+- 이 단계는 implementation readiness이며 아직 full SAM/body input이 없으므로 실제 Phase 9/13
+  acceptance 결과로 간주하지 않는다. 관련 신규/회귀 unit test 18개와 전체 31개 test가 PASS했다.
+
+### 장시간 critical path supervisor 시작
+
+- current Sapiens2 PID가 정상인 동안 30초 간격으로 상태/deadline만 기록하고 GPU에는 개입하지 않는다.
+- process 종료 시 78-camera pose completeness를 전수 검사하고, incomplete이면 동일 batch 16/chunk 256,
+  selector-bound resume를 최대 2회 수행한다.
+- 이후 sequence별 Phase 7 final gate, SAM Mode B, compact prior consolidation, staged body fit을 실행하고
+  마지막에 versioned private export/SHA/schema validation을 실행한다.
+- stage 실패는 sequence row에 남기고 다른 sequence를 계속 처리하며, export에서 FAIL/INCOMPLETE를
+  freeze-eligible로 승격하지 않는다.
+- supervisor 시작 시 private storage 여유는 170 GiB다. SAM 예상 약 78 GiB와 compact/export payload를
+  수용 가능하지만 sequence마다 확인하고 20 GiB reserve 아래에서는 새 SAM run을 시작하지 않는다.
+- Mode C 자동 full 실행은 금지했다. candidate/acceptance는
+  `configs/sam_mode_c_escalation.json`에 동결했으며, occlusion 단독으로 escalation하지 않는다.
+- supervisor process-alive/storage helper를 포함한 전체 unit test 32개가 PASS했다.
+- 5B 종료 직후 full SAM에 들어가기 전에 accepted target 8-frame Mode B smoke를 1회 실행한다.
+  source PTS provenance, mesh 8, compact numeric 8과 MHR required field 전체가 exact할 때만 full
+  camera run을 허용한다. 이 gate를 포함한 전체 unit test는 33개 PASS다.
+- Mode B/body fit 뒤 `assess_sam_mode_c_escalation.py`가 occlusion과 missing/nonfinite,
+  median+5 scaled-MAD temporal/alignment outlier의 교집합을 판정한다. 후보 clip은 양쪽 15-frame,
+  sequence 10% 상한이며 결과는 export dependency다. 후보를 찾는 것과 C 결과 채택은 분리하고,
+  실제 B/C 개선 gate 전에는 Mode B를 덮어쓰지 않는다. 전체 unit test 35개 PASS다.
+- private export file manifest에는 sequence payload뿐 아니라 immutable source inventory,
+  temporal audit/frame mapping과 각 sequence manifest 자체의 byte count/SHA-256도 포함한다.
+- inventory가 피험자 수 3명 aggregate만 보존하고 sequence→subject mapping은 `UNKNOWN`으로 명시하므로,
+  외형이나 learned shape로 identity를 추측하지 않는다. Freeze v1은 sequence-level S0를 생성하되
+  `subject_id=null`, `SUBJECT_MAPPING_UNAVAILABLE`을 기록하고 cross-sequence shape fusion을 보류한다.
+
+### Sapiens2 full steady-state ETA 갱신
+
+- `barbellrow_0001/cam1`과 cam2는 각각 481/481 target crop, schema PASS로 완료됐다.
+- 두 camera completion timestamp 사이 steady-state rate는 `0.23323 crop/s`다. 2026-08-11
+  19:50 KST 기준 완료 pose 10,687/65,430, 남은 crop 54,743, complete camera 14/78이다.
+- recent-camera rate projection은 Sapiens 종료 `2026-08-14 12:58 KST`로 deadline과 사실상 동일하고
+  retry/QC reserve는 없다. Saved-chunk 기준 전체 effective rate는 current incomplete chunk 때문에
+  `0.216 crop/s`로 보수적으로 진동한다.
+- supervisor state에 current KST 대응 UTC, remaining wall, completed/remaining crop, recent/effective
+  throughput, camera/sequence 수, Sapiens ETA, SAM expected 20.8 h와 free storage를 30초마다 기록한다.
+- recent-camera ETA monitor 회귀 test를 포함한 전체 unit test 36개가 PASS했다.
+
+### Phase 9 body-fit quality gate 사전 동결
+
+- Full SAM/body 결과 확인 전에 `configs/phase9_body_fit.json`을 추가했다.
+- REVIEW: final joint coverage <95%, alignment success <90%, normalized geometry displacement p95 >0.05,
+  prior-only >2%, median bone-length CV >0.10 또는 camera status non-PASS.
+- FAIL: coverage <80%, normalized displacement p95 >0.20, anthropometric reference invalid,
+  valid finite/invalid NaN contract 실패.
+- Threshold는 실제 결과를 보고 완화하지 않는다. Gate unit test 포함 전체 37개 PASS다.
+
+### Fit3D metric implementation readiness
+
+- Local workspace에 Fit3D payload가 없어 실제 score나 camera error를 주장하지 않는다.
+- Root-aligned MPJPE, per-frame scale-only N-MPJPE, similarity Procrustes PA-MPJPE를 별도로 계산하는
+  `tools/evaluate_fit3d_metrics.py`를 구현했다.
+- Known scale/rotation synthetic regression 포함 전체 unit test 39개 PASS다.
+- Dataset freeze 뒤 Fit3D access/convention을 확보하면 30 fps, 3-camera, timing/JPEG/camera
+  perturbation을 단계적으로 적용한다.
+
+### SAM full resume schema 강화
+
+- Camera resume PASS가 mesh/numeric 개수만 검사하던 경로를 강화해 target provenance required field와
+  모든 compact NPZ의 MHR required field set을 전수 검사한다.
+- 오래된 mesh-only/부분 numeric output은 full runner에서 즉시 `INCOMPLETE`가 되어 retry 대상이며,
+  consolidation에서 뒤늦게 반복 실패하지 않는다. Schema mismatch 회귀 test 포함 전체 40개 PASS다.
+- Fit3D metric은 root joint 자체가 nonfinite인 frame을 제외하도록 보강했으며 전체 41개 test PASS다.
+
+### Persistent handoff와 sequence-complete GPU streaming
+
+- Sapiens2를 중단하지 않고 8-frame Mode B numeric smoke를 동시에 실행했다. mesh/numeric/PTS와
+  MHR required field가 모두 PASS했고 combined peak는 48,525 MiB였다.
+- 5B 종료까지 기다리면 deadline에 end-to-end 완결 sequence가 늘지 않으므로, 이미 보고한
+  sequence-complete 계획대로 pose-ready sequence를 Phase 7→Mode B→prior→body fit으로 즉시 보내는
+  resumable supervisor로 전환했다. 정상 Sapiens PID와 output은 유지했다.
+- 첫 full `barbellrow_0000/cam1` Mode B는 590/590 frame, primary target 1명,
+  mesh/numeric/provenance 전 completion check PASS. concurrent wall 970.94초,
+  0.6077 frame/s, combined peak 61,821 MiB, mean GPU 96.76%, mean power 339.60 W였다.
+- public `HANDOFF.md`에는 path-neutral operational checkpoint와 frozen decision/resume gate를,
+  `AGENTS.md`에는 10-step startup protocol을 기록했다. exact private command/PID/progress는
+  ignored `.runtime/handoff_state.json`에 30초마다 `*.tmp`→atomic rename으로 보존한다.
+- checkpoint에는 completed/in-progress/remaining, last completed camera, crop/frame counts,
+  config hash, checkpoint identity, source/camera/timing version, Git HEAD/diff hash, active/resume command,
+  GPU와 downstream counts가 들어간다. detached monitor PID 575526과 multi-cycle timestamp 전진을 확인했다.
+- supervisor resume는 PASS/REVIEW row만 durable complete로 불러오고 incomplete row를 retry한다.
+  handoff/resume regression을 포함한 전체 44개 unit test PASS다.
+- 완료 camera마다 별도 `run_provenance.json`을 atomic materialize한다. Sapiens 15개와 SAM 1개
+  기존 PASS output에 inference 재실행 없이 sidecar를 생성했으며 model/checkpoint identity,
+  batch/chunk/mode, source/selection digest, camera/timing version, tool commit/SHA와 exact resume
+  command를 기록했다. Live monitor가 새 completion을 30초마다 추가 materialize한다.
+- partial chunk까지 포함하는 live throughput/ETA를 handoff state에 추가했다. 20:50 KST 기준
+  pose 11,424/65,430, recent-chunk 0.22583 crop/s, Sapiens ETA는 2026-08-14 15:14 KST다.
+  단독 projection보다 약 2.23시간 늦지만 Mode B end-to-end sequence를 deadline 전에 확보한다.
+- `barbellrow_0000/cam2`도 590/590 completion PASS. cam1+cam2 aggregate는 1,180 frame,
+  1,950.22초, 0.6051 frame/s이고 두 camera combined peak는 모두 61,821 MiB다.
+- pose/SAM inference provenance sidecar를 consolidated SAM prior와 final private export dependency로
+  전파하도록 확장했다. Export는 sidecar 누락 sequence를 complete로 인정하지 않는다.
+- deadline 순간의 실제 완료 상태가 이후 generation으로 덮이지 않도록 CPU-only sentinel PID 607755를
+  시작했다. 2026-08-14 13:00 KST에 별도 build ID로 export하며 manifest가 이미 있으면 duplicate하지
+  않는다. Export exit 2도 expected incomplete snapshot이면 manifest/status를 보존하고 generation은 계속한다.
+
+### First end-to-end sequence와 private export smoke
+
+- `barbellrow_0000` Mode B 3 camera를 모두 완료했다. 각 590 frame이며 elapsed는
+  970.94/979.27/1,010.60초, aggregate는 1,770 frame/2,960.81초 = 0.59781 frame/s다.
+- camera별 mesh/numeric/PTS/provenance count가 exact이고 nonfinite/missing 0, combined peak
+  61,821 MiB, mean GPU utilization 약 96.2%, mean power 약 339 W였다.
+- consolidated SAM prior는 output/accepted 1,770/1,770과 inference provenance dependency를 통과했다.
+- sequence body fit은 590 timestamp × 26 joint, coverage/alignment 1.0, prior-only 0,
+  median bone-length CV 0.01738, finite/NaN contract PASS다.
+- 사전 동결 displacement REVIEW 경계 0.05 대비 p95 0.05167이고 camera REVIEW도 전파되어
+  `REVIEW_BODY_FIT_QUALITY`로 보존했다. FAIL은 없다.
+- Mode C assessor는 84개 reference frame을 `REVIEW_MODE_C_CANDIDATE`로 기록했다. Missing/nonfinite와
+  alignment outlier는 0이고 주로 sequence boundary temporal outlier라, Sapiens2+Mode B critical path를
+  중단하지 않고 Mode C 실행/채택 0으로 Mode B를 유지했다.
+- complete sequence 하나만 사용한 private export smoke는 REVIEW 1/FAIL 0/INCOMPLETE 0,
+  34 files, payload 28,960,929 bytes, 누락·size·SHA-256 mismatch 0, `freeze_eligible=true`였다.
+- 2026-08-11 21:10 KST에는 Sapiens2 16/78 camera, 11,677/65,430 crop까지 완료했다.
+  recent 0.22073 crop/s projection은 2026-08-14 16:49 KST로 deadline보다 약 3.82시간 늦다.
+  `squat_0001/cam1` Mode B를 다음 streaming input으로 시작했고 기존 두 job은 중단하지 않았다.
+
+### Second end-to-end sequence — squat_0001
+
+- `squat_0001` Mode B cam1/cam2/cam3 각 1,267 frame을 모두 first attempt에서 완료했다.
+  Elapsed는 2,023.09/2,033.27/2,024.20초, aggregate 3,801 frame/6,080.57초 =
+  0.62511 frame/s다. 세 camera combined peak는 70,359 MiB이고 OOM은 없었다.
+- Mesh/numeric/PTS/provenance count와 required schema가 3,801/3,801 exact, nonfinite/missing/temp 0이다.
+  Cam2/cam3 occlusion-risk 545/689를 frame provenance로 보존했다.
+- Consolidated prior accepted/output 3,801/3,801, camera PASS 3/3이다.
+- Body fit은 1,267×26, coverage/alignment 1.0, prior-only 0, median bone CV 0.02327,
+  finite/NaN PASS다. Displacement p95 0.07936과 camera uncertainty로
+  `REVIEW_BODY_FIT_QUALITY`; FAIL은 없다.
+- Mode C candidate는 0이고 `PASS_MODE_B_FROZEN`; Mode C 실행/채택 0이다.
+- 두 full sequence cumulative SAM은 5,571 frame/9,041.38초 = 0.61617 frame/s다.
+- 같은 구간 Sapiens2는 `pushup_0004` 3-view를 PASS로 완료해 durable 18/78 camera가 됐고,
+  `pushup_0002/cam1` first chunk까지 current partial 포함 12,951/65,430 crop이다.
+  Recent 0.20622 crop/s projection은 Sapiens 종료 2026-08-14 21:27 KST다.
+- Supervisor는 `pushup_0001`의 Phase 7 recovery provenance를 재확인한 뒤 Mode B `cam1`을
+  즉시 시작했다. 정상 Sapiens와 deadline/handoff monitor는 중단하지 않았다.
+
 ## 2026-08-09 — 초기 synchronization / derivative 구축 기록 이관
 
 ### 수행
@@ -285,3 +1373,323 @@ Phase 6 전체 실행은 보류한다.
 
 이후 dataset-construction 변경의 canonical source는 이 public repository다. 각 Phase는
 acceptance gate 후 문서화, 안전 검사, commit/push까지 완료해야 한다.
+
+## 2026-08-09 — Phase 5.1 pushup_0003 Camera Recovery 완료
+
+### 원인 분석과 동일성 control
+
+- Phase 5 Stage 1은 cost 10,498.589521에서 정식 수렴했다.
+- Stage 2는 cost를 1,672.515861까지 낮췄지만 `max_nfev=300`에서 종료됐다.
+- 300-control은 Phase 5의 initial camera, 모든 track/observation array,
+  `points_initial`/`points_stage1`, Stage 1 result와 Stage 2 cost를 exact 재현했다.
+- 24 sample 모두 GOOD이고 특정 sample reject는 없었다. cam2 residual이 가장 높지만 camera
+  explosion 없이 tail step이 작아져, 원인은 발산이 아닌 evaluation budget 부족으로 판단했다.
+
+### 실행
+
+```bash
+python tools/background_bundle_adjust.py \
+  --dataset-root <PRIVATE_DATASET_ROOT> \
+  --vggt-root <PRIVATE_VGGT_ROOT> \
+  --output-root outputs/local/background_ba/recovery_runs/nfev_600 \
+  --sequence pushup_0003 \
+  --max-nfev 300 \
+  --stage2-max-nfev 600 \
+  --optimizer-verbose 2
+```
+
+Stage 1은 기존 300 budget을 유지했고 Stage 2 budget만 600으로 확장했다. 새로운 matcher,
+threshold, heuristic, loss, weighting 또는 observation 변경은 없다.
+
+### 결과와 Visual QA
+
+- Stage 2 `xtol` 수렴: actual nfev 322, final cost 1,657.953684
+- median 4.954229→2.558895 px, p90 8.037446→5.053964 px,
+  p95 9.295044→7.055627 px
+- final 21 tracks / 183 observations, sample GOOD 24 / DOWNWEIGHT 0 / REJECT 0
+- cam2/cam3 robust-init rotation change 2.538° / 1.859°,
+  center scene fraction 0.003830 / 0.003494
+- Open3D top/side 검사: plausible rig/orientation, mirror·180° flip·explosion 없음
+- sparse support 때문에 `RECOVERED_REVIEW`; VGGT fallback 미사용
+
+### Dataset gate와 무결성
+
+- 최종 PASS 11 / REVIEW 15 / FAIL 0
+- Stage 1/2 26/26 수렴, per-sequence validation 26/26 PASS
+- camera geometry freeze 승인; REVIEW uncertainty는 downstream에 전달
+- 외부 private workspace의 raw 78, synchronized 130-file tree, working JPEG 65,595,
+  VGGT 689-file numeric tree와 Background BA 1,057-file tree fingerprint가 전/후 동일
+- Sapiens2, triangulation, SAM-Body4D, SMPL/human fitting, pseudo-label 수행 없음
+- viewer relative debug path가 external dataset root로 해석될 수 있던 경로를 canonical project
+  root로 수정했고, 진단 중 생성된 두 debug file은 식별 후 제거하여 external tree를 원상 복구했다.
+
+## 2026-08-09 — Phase 6-0 Sapiens2-5B Pose Environment 완료
+
+### 공식 구현과 detector 결정
+
+- official `facebookresearch/sapiens2` commit
+  `7e5bae88456ac418ff0e58e74106c9fe192055d4`를 별도 external source로 clone했다.
+- official checkpoint `facebook/sapiens2-pose-5b`의
+  `sapiens2_5b_pose.safetensors`만 primary pose weight로 사용했다.
+- model card의 RTMDet 문구와 달리 현재 official `docs/POSE.md`, demo shell과
+  `vis_pose.py`는 `facebook/detr-resnet-101-dc5`를 사용한다. 실제 실행 code를 우선했다.
+- top-down crop 1024×768, Sociopticon 308 points, UDP heatmap decode와 flip-test를 확인했다.
+
+### 환경과 checkpoint
+
+```bash
+conda create -y -n sapiens2 python=3.12 pip
+conda run -n sapiens2 python -m pip install \
+  torch==2.7.1 torchvision==0.22.1 \
+  --index-url https://download.pytorch.org/whl/cu118
+conda run -n sapiens2 python -m pip install -e <SAPIENS2_REPO>
+```
+
+- Python 3.12.13, PyTorch 2.7.1+cu118, torchvision 0.22.1+cu118
+- transformers 5.14.1, safetensors 0.8.0, OpenCV 5.0.0.93
+- A100-SXM4-80GB, driver 535.183.06, compute capability 8.0, BF16 지원 확인
+- pose checkpoint 20,480,899,148 bytes; SHA-256
+  `b4848da8691c72e14d3ff71319f077363107129bf4128019eb39d072129b2a52`
+- detector snapshot revision `96317ca979e231bd960cb3cac31328e0165a3e94`
+
+### Smoke 실행과 결과
+
+```bash
+conda run -n sapiens2 python tools/sapiens2_pose_smoke.py \
+  --image <PRIVATE_REPRESENTATIVE_FRAME> \
+  --sapiens2-root <SAPIENS2_REPO> \
+  --checkpoint-root <CHECKPOINT_ROOT> \
+  --warmup 1 --repeats 3 \
+  --output-json outputs/local/sapiens2/smoke.json
+```
+
+- representative barbell-row frame에서 person 1명 detection 성공
+- pose model GPU load 성공, FP32 model load 약 58.46 s
+- 308 keypoint coordinates와 308 confidence 출력, 모두 finite
+- confidence ≥0.3 point 100%가 원본 frame 내부, original pixel `(x,y)` 복원 정상
+- official 308 flip mapping involution과 body left/right name pair 정상
+- end-to-end detector + two-pass flip-test latency median 4.517 s/image
+- peak CUDA allocated 19.986 GiB, reserved 20.961 GiB
+- visual skeleton의 body/hand/foot 배치와 좌우 ordering plausible
+
+첫 smoke checker는 구형 COCO ankle index pair를 가정해 계산 후 FAIL을 표시했다. 모델 출력 문제가
+아니었으며 official 308 metainfo의 name 기반 pair 검사로 수정한 뒤 동일 inference가 PASS했다.
+Detector safetensors load의 네 BatchNorm counter warning은 detection이 정상이라 compatibility note로
+유지한다.
+
+### 결정
+
+5B는 OOM/instability 없이 동작하므로 primary offline teacher로 확정했다. 1B comparison은 수행하지
+않았다. 단일 job 단순 외삽 약 82.3 GPU-hours는 offline 목적에서 허용 가능하며, Phase 6-1에서
+official 2 jobs/GPU의 실제 throughput과 multi-exercise robustness를 먼저 측정한다. 전체 26 sequence
+inference, triangulation, SAM-Body4D, MHR, SMPL과 pseudo-label generation은 수행하지 않았다.
+
+## 2026-08-11 — Phase 6-1A Primary Target Selection Gate 완료
+
+### 구현과 회귀 검증
+
+- official DETR all-person candidate는 삭제하지 않고 private ragged metadata에 보존
+- multi-frame initialization, track duration, IoU, normalized center, scale/aspect, score를 결합
+- forward/backward tracking 합의와 cross-view target visibility QA 추가
+- detector가 prone target을 상·하체 complementary box로 분할하는 fragmentation을 감지해
+  `TARGET_AMBIGUOUS`로 abstain; frame 0이 마지막 frame과 wraparound 연결되던 boundary 수정
+- target selector unit test 5개와 Python compile PASS
+
+### 4-sequence pilot와 Visual QA
+
+- 12 camera, 9,732 frame, official DETR person candidate 19,596
+- target-only eligible crop 9,725, crop reduction 50.3725%
+- `TARGET_AMBIGUOUS` 7, `NO_TARGET` 0, obvious identity switch 0
+- ambiguity는 `pushup_0001/cam1` duplicate 1 + fragmentation 6이며 pose crop을 출력하지 않음
+- private overlay에서 background crossing/overlap, mirror 후보, lying/prone pose, bbox size reversal,
+  candidate order 변화 확인; background person systematic mis-selection 0
+- private coordinate/overlay/frame은 ignored `outputs/`에만 보존
+
+### Target-only Sapiens2 benchmark
+
+- batch 1/2/4/8/12/16 모두 PASS 및 batch 1/all-person target baseline equivalence PASS
+- raw fastest batch 16: 0.231951 crop/s, reserved 37.426 GiB
+- 99% plateau 최소 batch 4 권장: 0.230449 crop/s, reserved 23.801 GiB,
+  pose GPU utilization mean 97.309%, mean power 348.408 W
+- 65,595 frame target-only stage projection 79.09 GPU-hours, all-person 157.38 GPU-hours 대비
+  약 78.30 GPU-hours 감소
+
+### 결정
+
+Target-selection gate는 `GO_FULL_DATASET`이다. 그러나 사용자에게 결과를 보고하고 명시적 승인을
+받기 전까지 전체 65,595-frame inference는 시작하지 않는다.
+
+## 2026-08-11 — SAM Body Runtime Feasibility Preflight
+
+### Official interface와 pilot 선정
+
+- SAM-Body4D revision `21af1020979ef32ddf6be3597ef59a68bad2f1bf`
+- SAM 3D Body revision `b5c765a0d89d789985e186d396315e7590887b94`
+- mode A base, mode B completion off, mode C completion on 비교 계획 동결
+- control `squat_0001/cam1`, severe-occlusion `latpulldown_0002/cam2` 선정
+- severe clip 1,136 frame detection/selector preflight PASS: 평균 2.121 candidates/frame,
+  occlusion risk 959, identity switch/ambiguity 0; private representative overlay 확인
+
+### Checkpoint gate와 결정
+
+Primary-target adapter 기준 필요한 6개 payload set은 local에 없고 총 24,037,668,123 bytes
+(22.387 GiB)다. SAM 3와 SAM 3D Body는 gated access가 필요하다. 사용자 조건에 따라
+download/model/path/license를 먼저 보고하며 명시적 승인 전 checkpoint 다운로드와 SAM inference를
+수행하지 않는다. Provisional deadline verdict는 `DEADLINE_AT_RISK`; local A/B/C 실측 전 final
+verdict는 보류한다.
+
+### Primary-target adapter와 6-run preflight
+
+- Mode A는 official SAM 3D Body `bboxes=` API에 frame당 accepted bbox 0/1개를 전달
+- Mode B/C는 official SAM-Body4D class를 사용하되 SAM 3 initial object를 accepted bbox 1개로 seed
+- upstream all-human initialization용 ViTDet는 호출하지 않아 checkpoint 2.576 GiB도 불필요
+- ambiguous first frame, multiple bbox slot, invalid bbox를 강제 실행하지 않는 schema/gate 추가
+- control 1,267 frame × A/B/C와 severe 1,136 frame × A/B/C preflight 모두 target seed 1 확인
+- control target-valid 1,267/1,267, severe 1,136/1,136; severe occlusion-risk 959 보존
+- model 실행은 여섯 경우 모두 승인 전 의도한 `BLOCKED_CHECKPOINT`; download 0 bytes
+- SAM adapter/selector synthetic test 11개, Python compile, CLI smoke PASS
+- 여섯 mode CSV를 요구하는 runtime summarizer 추가; refiner C/B ratio, control/severe 증가,
+  best/expected/worst를 분리하고 expected prevalence 입력이 없으면 숫자 산출 금지
+- credential 값을 출력하지 않은 HF auth 확인은 PASS했지만 SAM 3/SAM 3D Body gated access는
+  `--dry-run`에서 denied; MoGe-2, Depth Anything V2, 두 official Diffusion-VAS repo는 dry-run PASS
+- official setup code 기준 Diffusion-VAS repo ID와 SAM 3D Body `model_config.yaml` requirement를 교정
+
+## 2026-08-11 — SAM Body checkpoint와 A/B/C pilot 완료
+
+### Access, download와 integrity
+
+- 사용자 gated access 승인 후 SAM 3/SAM 3D Body를 포함한 6개 official source의 access dry-run PASS
+- required checkpoint tree 28 files, 24,037,668,123 bytes(22.387 GiB) 다운로드 완료
+- 모든 payload의 file existence, byte size, SHA-256을 전수 재검증: 누락/불일치/예상 밖 파일 0
+- checkpoint/cache/credential은 ignored external storage에만 유지하고 공개 CSV에는 상대 경로,
+  크기와 digest만 기록
+- 별도 Python 3.12 / PyTorch 2.7.1 CUDA 환경에서 official load, headless EGL과 CUDA smoke PASS
+- official loader가 string path를 요구하는 실제 runtime incompatibility를 primary-target runner에서 교정
+
+### Primary-target A/B/C 6-run
+
+- control `squat_0001/cam1`: 1,267 frame, 약 42초, occlusion risk 0
+- severe `latpulldown_0002/cam2`: 1,136 frame, 약 38초, occlusion risk 959
+- 모든 mode에서 accepted primary target 1명만 처리하고 background detection에는 body inference 미수행
+- control A/B/C total 1,047.20/1,162.70/2,306.22초,
+  end-to-end 0.8265/0.9177/1.8202 sec/frame
+- severe A/B/C total 945.05/1,045.43/2,074.61초,
+  end-to-end 0.8319/0.9203/1.8262 sec/frame
+- peak VRAM A/B/C 최대 7,367/33,988/44,175 MiB; GPU/power telemetry도 0.2초 간격 보존
+- Mode C/B execution ratio control 1.9946, severe 1.9964; severe/control ratio는 모든 mode 약 1.00
+
+### Output sanity와 결정
+
+- Mode A numeric 2,403개, Mode B/C mesh와 render 각각 2,403개 생성, 누락 0
+- 시작/중간/끝 numeric finite, PLY 18,439 vertices/36,874 faces finite, JPEG decode와 private visual QA PASS
+- Mode C refiner는 control/severe에서 1,287/1,154회 호출됐지만 content completion은 모두 0회
+- B/C 대표 mesh 차이는 최대 0.303 mm로 현재 severe clip에서 refiner의 material improvement가
+  확인되지 않아 full 기본 후보는 Mode B, Mode C policy는 `REVIEW_SAM_REFINER_POLICY`
+- 65,595-frame SAM projection 16.35/20.80/32.63시간, Sapiens2 target-only를 합친 한 GPU 순차
+  projection 95.43/99.88/111.71시간
+- 2026-08-15 00:00 UTC freeze는 `NO_GO`; end-of-day도 QC/재시도 여유가 작아
+  `DEADLINE_AT_RISK`
+- 전체 Sapiens2/SAM inference는 실행하지 않았으며 별도 사용자 승인 전 `HOLD`
+
+## 2026-08-13 — Target-complete SAM recovery와 monitoring control-plane 정리
+
+### `barbellrow_0003` root cause와 무재추론 복구
+
+- Supervisor의 두 실패는 CUDA/OOM/schema/identity 문제가 아니라 SAM completion gate가 selector
+  abstention tail에도 source-frame 수만큼 mesh/numeric payload를 요구한 것이 원인이었다.
+- 세 camera의 target-valid/output-valid는 731/735, 700/702, 684/688이다. 모든 accepted target에는
+  numeric/mesh가 있고, tracker가 abstention 구간으로 2–4 frame을 전파한 뒤 종료했다.
+- Completion contract를 accepted-target coverage, provenance timeline-bound output, exact mesh/numeric
+  frame identity, primary object root/schema로 정렬했다. Abstention output은 optional이며 downstream
+  `accepted_prior = output_valid & target_valid` 때문에 존재해도 채택하지 않는다.
+- Runner 재호출은 0.5초에 세 camera 모두 `resume_skipped=true` PASS했고 GPU child/recomputation은 0이었다.
+  Prior consolidation은 output-valid 2,125/accepted 2,115, intentional abstention 156을 보존했다.
+- Body fit은 757×26, final valid fraction 0.92262, alignment 0.91590, prior-only joint 7,
+  displacement p95 0.04835, FAIL 0의 `REVIEW_BODY_FIT_QUALITY`다. Mode C는 자동 실행하지 않고
+  selective candidate 150 frame만 기록했고 quality는 REVIEW다.
+- Inference provenance/handoff progress와 prior consolidation도 같은 target-complete contract를 사용한다.
+  관련 commits는 `6e08988`, `0667c70`, `fdee353`이다.
+
+### NaN warning과 검증
+
+- Abstention으로 모든 view가 NaN인 body consensus에서 발생하던 `All-NaN slice` warning을, 유효 view가
+  있는 frame/joint에서만 median을 계산하고 unsupported joint는 기존 의미대로 NaN으로 보존하도록
+  수정했다. Threshold, acceptance, Mode C candidate 결정은 바꾸지 않았다 (`80d9d80`).
+- 전체 170 unit tests, Python compile, publication-safety 129-file audit가 PASS했다.
+
+### Supervisor watchdog identity adoption
+
+- Session 복구 때 supervisor의 `--wait-sapiens-pid`가 바뀌어 live/resume argv는 exact-match하지만 old
+  watchdog의 pinned SHA만 stale했다. Generic auto-repin은 허용하지 않고, exactly one live supervisor가
+  validated persisted resume command와 일치할 때만 동작하는 `--adopt-live-command --once`를 추가했다
+  (`15701f9`).
+- Live supervisor PID 2980339, PPID 1, child 0, lifetime lock held, restart 0/3과 watchdog PID 2981054의
+  exact argv/cwd/child 0/lock을 확인했다. Supervisor/GPU job은 signal하지 않고 old CPU watchdog만 종료,
+  explicit adoption 후 flag 없는 normal argv로 PID 197832를 detached 기동했다. New watchdog은 PPID 1,
+  RUNNING, attention false, exact live/resume SHA, restart 0/3이다.
+
+### Durable monitoring/freeze state
+
+- Old handoff monitor가 target-complete code 전 버전을 load하고 있어 exact identity/child/lock/restart
+  budget을 확인한 뒤 monitor만 종료했다. 수동 launch 없이 monitoring watchdog의 bounded recovery가
+  current code를 load했고 SAM durable progress는 63/78 camera, 47,940/65,595 source frame, 21/26
+  sequence로 교정됐다.
+- `barbellrow_0003` SAM provenance sidecar 3개를 atomic materialize하고 prior에 전파했다. Export validator의
+  read-only current-source 검사에서 REVIEW, reasons 0, reference 757로 freeze-ready임을 확인했다.
+  Quality follower의 이전 missing-sidecar result는 정해진 retry cache가 만료된 뒤 자동 갱신됐으며 process를
+  재시작하거나 state CSV를 수동 수정하지 않았다.
+- 2026-08-13 22:03 KST snapshot은 Sapiens 64/78 camera와 49,633/65,430 crop, quality 21/26,
+  GPU 100%, 36,375/81,920 MiB, OOM/retry/stall 0이다. Last verified immutable checkpoint는
+  follower는 `exercise3d-predeadline-auto-021-32a51bf7c071` 21-sequence checkpoint를 게시했다.
+  696 files/766,963,670 bytes, REVIEW 21/FAIL·INCOMPLETE 0, manifest contract/integrity/freeze eligibility가
+  모두 PASS다. Deadline forecast는 24/26, first late `deadlift_0002`다.
+- Monitor는 supervisor의 historical failure row보다 terminal quality PASS/REVIEW를 더 강한 evidence로
+  취급한다 (`b8d7a01`). 171 tests와 publication safety가 PASS했다. Old quiet dashboard PID 2065337만
+  exact-identity controlled replace해 current-code PID 208462(PPID 1)를 기동했고 monitoring watchdog이
+  singleton/exact argv/restart 0/3으로 관찰한다. Current attention은 deadline ETA/coverage WARNING뿐이다.
+
+## 2026-08-14 — 24/26 durable transfer checkpoint
+
+### Gate와 immutable checkpoint
+
+- 10:00:39 KST에 predeadline follower가
+  `exercise3d-predeadline-auto-024-322b3273896e`를 final directory로 atomic publish했다.
+- Dataset manifest contract v2, declared/verified 795 files와 928,955,092 payload bytes,
+  exact 24-sequence membership, FAIL/INCOMPLETE 0, `integrity_verified=true`,
+  `freeze_eligible=true`를 모두 확인했다. Payload를 다시 hash하지 않고 follower의 기존 전수
+  verification을 재사용했다.
+- Freeze-ready sequence는 기존 23개와 `deadlift_0003`; 남은 `deadlift_0002`, `squat_0003`은
+  completed로 위장하지 않았다. Transfer snapshot 시 `deadlift_0002`는 Sapiens cam1 1,237 crop만
+  finalized됐고 cam2/3, SAM 3-view, triangulation, body fit, quality가 미완료였다.
+  `squat_0003`은 모든 downstream stage가 미시작이었다.
+
+### Transfer snapshot과 안전성
+
+- `tools/prepare_transfer_snapshot.py`가 24-sequence gate 전에는 atomic checkpoint state만 30초마다
+  읽고, gate 후 한 번만 finalized regular-file metadata를 `scandir/lstat`했다. GPU work,
+  compression, payload hashing, inference signal/restart/suspend는 수행하지 않았다.
+- Atomic output은 `.runtime/transfer_manifest.json`, `.runtime/TRANSFER_MANIFEST.md`,
+  `.runtime/transfer_snapshot_state.json`. Git에 private/runtime payload를 추가하지 않는다.
+- Critical inventory는 14,928,815,784 bytes (13.904 GiB), 40,572 files; resume intermediate는
+  59,604,393,093 bytes (55.511 GiB), 409,602 files; 합계 74,533,208,877 bytes
+  (69.414 GiB), 450,174 files. Optional source/checkpoint/repository는 74,263,789,313 bytes
+  (69.164 GiB), 69,553 files다. 모든 scan error는 0이다.
+- `.tmp`, `.partial`, `.part`, lock, hidden in-progress, `.rsync-partial`, symlink를 transfer/inventory에서
+  제외한다. Finalized atomic path와 durable partial state는 보존하며 이후 생성 파일은 마지막
+  incremental sync가 회수한다.
+- Windows WSL 명령은 multiple remote source + `--relative`, `--partial`, `--delay-updates`,
+  `.rsync-partial`, `--bwlimit=30000`, remote `ionice -c2 -n7 nice -n 19`를 사용한다.
+  `--delete`는 사용하지 않는다. Container에서 외부 SSH endpoint를 판별하지 못해 username/host/port는
+  명시적 placeholder로 남겼다.
+- 최초 manifest 검증에서 generated command의 후속 source line 앞에 불필요한 `+`가 붙는 formatting
+  결함을 발견했다. Join separator를 수정하고 해당 regression assertion을 추가한 뒤 manifest를 다시
+  atomic 생성했다. Dataset/checkpoint/runtime에는 영향이 없다.
+
+### Generation continuation
+
+- Snapshot 시 Sapiens PID 2979192는 73/78 camera, 59,134/65,430 crop에서
+  `deadlift_0002/cam2`를 계속 처리했다. Autonomous supervisor PID 2980339는 살아 있고,
+  SAM Mode B durable 72/78 camera, 58,062/65,595 frame 뒤 다음 pose-ready camera를 기다렸다.
+- Quality follower PID 2981075, predeadline checkpoint follower PID 2981156, 각 watchdog,
+  deadline sentinel PID 2171153와 monitoring plane도 계속 실행했다. Transfer 준비로 signal/restart된
+  process는 0이며, 13:00 KST deadline snapshot도 기존 sentinel에 맡긴다.

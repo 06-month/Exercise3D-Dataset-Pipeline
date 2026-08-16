@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "fitting_defaults": {
+    "max_time_gap_seconds": 0.05,
+    "minimum_alignment_joints": 8,
+    "geometry_weight": 8.0,
+    "sam_weight_per_view": 0.25,
+    "temporal_weight": 0.25
+  },
+  "review_if_any": {
+    "final_valid_joint_fraction_below": 0.95,
+    "alignment_success_fraction_below": 0.90,
+    "observation_displacement_p95_normalized_above": 0.05,
+    "prior_only_joint_fraction_above": 0.02,
+    "median_bone_length_cv_above": 0.10,
+    "camera_status_not_pass": true
+  },
+  "fail_if_any": {
+    "final_valid_joint_fraction_below": 0.80,
+    "observation_displacement_p95_normalized_above": 0.20,
+    "invalid_anthropometric_reference": true,
+    "schema_or_finite_contract_failure": true
+  },
+  "notes": [
+    "All displacement and bone criteria are sequence-scale normalized.",
+    "REVIEW is retained in the private export and is never promoted to PASS.",
+    "These thresholds are frozen before full Mode B/body-fit results are available."
+  ]
+}
