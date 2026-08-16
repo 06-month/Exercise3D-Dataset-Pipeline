@@ -94,3 +94,9 @@ logs/
 .DS_Store
 .idea/
 .vscode/
+
+# Agent handoff / operating notes (local only)
+AGENTS.md
+HANDOFF.md
+CLAUDE.md
+.claude/
