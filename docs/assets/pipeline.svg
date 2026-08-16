@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 456" width="1280" height="456" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1280" height="456" rx="18" fill="#ffffff"/>
+
+  <!-- panels -->
+  <rect x="24" y="24" width="288" height="400" rx="14" fill="#f8fafc" stroke="#e2e8f0"/>
+  <rect x="336" y="24" width="288" height="400" rx="14" fill="#f8fafc" stroke="#e2e8f0"/>
+  <rect x="648" y="24" width="288" height="400" rx="14" fill="#f8fafc" stroke="#e2e8f0"/>
+  <rect x="960" y="24" width="288" height="400" rx="14" fill="#f8fafc" stroke="#e2e8f0"/>
+
+  <!-- panel headers -->
+  <text x="48" y="66" font-size="13" font-weight="700" letter-spacing="1.6" fill="#475569">INPUT</text>
+  <rect x="48" y="78" width="60" height="3" rx="1.5" fill="#64748b"/>
+  <text x="360" y="66" font-size="13" font-weight="700" letter-spacing="1.6" fill="#475569">CAMERA GEOMETRY</text>
+  <rect x="360" y="78" width="60" height="3" rx="1.5" fill="#2563eb"/>
+  <text x="672" y="66" font-size="13" font-weight="700" letter-spacing="1.6" fill="#475569">HUMAN MOTION</text>
+  <rect x="672" y="78" width="60" height="3" rx="1.5" fill="#e07b39"/>
+  <text x="984" y="66" font-size="13" font-weight="700" letter-spacing="1.6" fill="#475569">LABELS &amp; FREEZE</text>
+  <rect x="984" y="78" width="60" height="3" rx="1.5" fill="#16a34a"/>
+
+  <!-- column 1: input -->
+  <g>
+    <rect x="48" y="195" width="240" height="60" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+    <text x="68" y="220" font-size="15" font-weight="600" fill="#0f172a">3-view exercise video</text>
+    <text x="68" y="240" font-size="12" fill="#64748b">26 sequences · 78 views</text>
+
+    <rect x="48" y="269" width="240" height="60" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+    <text x="68" y="294" font-size="15" font-weight="600" fill="#0f172a">Audio sync + PTS</text>
+    <text x="68" y="314" font-size="12" fill="#64748b">median 11.99 ms offset</text>
+  </g>
+
+  <!-- column 2: camera geometry -->
+  <g>
+    <rect x="360" y="158" width="240" height="60" rx="10" fill="#ffffff" stroke="#bfdbfe" stroke-width="1.5"/>
+    <text x="380" y="183" font-size="15" font-weight="600" fill="#0f172a">Stability audit</text>
+    <text x="380" y="203" font-size="12" fill="#64748b">78/78 fixed-camera OK</text>
+
+    <rect x="360" y="232" width="240" height="60" rx="10" fill="#ffffff" stroke="#bfdbfe" stroke-width="1.5"/>
+    <text x="380" y="257" font-size="15" font-weight="600" fill="#0f172a">VGGT-Ω initialization</text>
+    <text x="380" y="277" font-size="12" fill="#64748b">camera / depth prior</text>
+
+    <rect x="360" y="306" width="240" height="60" rx="10" fill="#ffffff" stroke="#bfdbfe" stroke-width="1.5"/>
+    <text x="380" y="331" font-size="15" font-weight="600" fill="#0f172a">Background BA</text>
+    <text x="380" y="351" font-size="12" fill="#64748b">one pose per physical camera</text>
+  </g>
+
+  <!-- column 3: human motion -->
+  <g>
+    <rect x="672" y="121" width="240" height="60" rx="10" fill="#ffffff" stroke="#f5d0b0" stroke-width="1.5"/>
+    <text x="692" y="146" font-size="15" font-weight="600" fill="#0f172a">Sapiens2 2D pose</text>
+    <text x="692" y="166" font-size="12" fill="#64748b">308 keypoints, target-only</text>
+
+    <rect x="672" y="195" width="240" height="60" rx="10" fill="#ffffff" stroke="#f5d0b0" stroke-width="1.5"/>
+    <text x="692" y="220" font-size="15" font-weight="600" fill="#0f172a">PTS-aware triangulation</text>
+    <text x="692" y="240" font-size="12" fill="#64748b">3D joints + uncertainty</text>
+
+    <rect x="672" y="269" width="240" height="60" rx="10" fill="#ffffff" stroke="#f5d0b0" stroke-width="1.5"/>
+    <text x="692" y="294" font-size="15" font-weight="600" fill="#0f172a">SAM-Body4D (MHR)</text>
+    <text x="692" y="314" font-size="12" fill="#64748b">temporal body prior</text>
+
+    <rect x="672" y="343" width="240" height="60" rx="10" fill="#ffffff" stroke="#f5d0b0" stroke-width="1.5"/>
+    <text x="692" y="368" font-size="15" font-weight="600" fill="#0f172a">Sequence body fit</text>
+    <text x="692" y="388" font-size="12" fill="#64748b">geometry-dominant staged fit</text>
+  </g>
+
+  <!-- column 4: labels & freeze -->
+  <g>
+    <rect x="984" y="158" width="240" height="60" rx="10" fill="#ffffff" stroke="#bbf7d0" stroke-width="1.5"/>
+    <text x="1004" y="183" font-size="15" font-weight="600" fill="#0f172a">Quality control</text>
+    <text x="1004" y="203" font-size="12" fill="#64748b">PASS / REVIEW / FAIL</text>
+
+    <rect x="984" y="232" width="240" height="60" rx="10" fill="#ffffff" stroke="#bbf7d0" stroke-width="1.5"/>
+    <text x="1004" y="257" font-size="15" font-weight="600" fill="#0f172a">Fit3D validation</text>
+    <text x="1004" y="277" font-size="12" fill="#64748b">MPJPE / N-MPJPE / PA-MPJPE</text>
+
+    <rect x="984" y="306" width="240" height="60" rx="10" fill="#ffffff" stroke="#bbf7d0" stroke-width="1.5"/>
+    <text x="1004" y="331" font-size="15" font-weight="600" fill="#0f172a">Dataset freeze</text>
+    <text x="1004" y="351" font-size="12" fill="#64748b">SHA-256 manifest</text>
+  </g>
+
+  <!-- flow arrows -->
+  <line x1="314" y1="262" x2="332" y2="262" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="626" y1="262" x2="644" y2="262" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="938" y1="262" x2="956" y2="262" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- footer note -->
+  <text x="24" y="448" font-size="11.5" fill="#94a3b8">Raw RGB is never overwritten · every stage carries provenance and uncertainty forward</text>
+</svg>
