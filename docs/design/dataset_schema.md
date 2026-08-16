@@ -118,4 +118,4 @@ sequence identity를 임의 추론하지 않고 cross-sequence shape fusion도 �
 sequence median left/right femur length의 평균이며 body shape parameter와 의미를 혼동하지 않는다.
 
 Logical per-timestamp machine-readable contract는
-[`examples/final_record.schema.json`](../../examples/final_record.schema.json)에 있다.
+[`examples/final_record.schema.json`](../examples/final_record.schema.json)에 있다.

@@ -45,8 +45,8 @@ CRITICAL_RELATIVE_PATHS = (
     "outputs/runtime",
     ".runtime",
     "HANDOFF.md",
-    "plan.md",
-    "process.md",
+    "docs/plan.md",
+    "docs/process.md",
 )
 RESUME_RELATIVE_PATHS = (
     "outputs/sapiens2_target_only_full",

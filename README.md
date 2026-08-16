@@ -113,7 +113,7 @@ GIF는 6초 발췌본이고, MP4는 전체 sequence(15 fps)입니다. `pushup_00
 - 다음 단계: A100급 GPU가 확보되면 동일 설정으로 두 sequence의 남은 stage만 resume
 
 `24/26`은 deadline 시점의 정직한 스냅샷입니다. 완료된 output은 checksum과 schema가 일치하면
-재계산하지 않습니다. Phase별 상태표와 실행 노트는 [docs/status_notes.md](docs/status_notes.md)에
+재계산하지 않습니다. Phase별 상태표와 실행 노트는 [docs/status.md](docs/status.md)에
 있습니다.
 
 ---
@@ -164,19 +164,28 @@ Phase 0–5 환경과 분리합니다 ([Phase 6 문서](docs/phases/phase_6_sapi
 ```text
 Exercise3D-Dataset-Pipeline/
 ├── README.md            # 이 문서
-├── plan.md              # phase별 acceptance gate
-├── process.md           # 시간순 실행 기록
+├── requirements.txt
 ├── configs/             # freeze된 수치 default와 환경 정의
 ├── docs/
-│   ├── assets/          # 공개 showcase render, 다이어그램
+│   ├── status.md        # phase 상태 요약
+│   ├── plan.md          # phase별 acceptance gate
+│   ├── process.md       # 시간순 실행 기록
+│   ├── tools.md         # tool 목록
+│   ├── operations.md    # 장시간 generation 운영 규칙
+│   ├── showcase.md      # 공개 preview 정책
 │   ├── design/          # schema, 좌표 규약, privacy policy, 재현성
 │   ├── phases/          # phase 0-13 상세 문서
-│   └── qa/              # visual QA checklist, troubleshooting
-├── scripts/             # synchronization / dataset build
-├── tools/               # phase별 실행 tool
+│   ├── qa/              # visual QA checklist, troubleshooting
+│   ├── examples/        # synthetic schema / layout example
+│   └── assets/          # showcase render, 파이프라인 다이어그램
+├── tools/               # 모든 실행 스크립트 (단계별 분류는 docs/tools.md)
+├── tests/               # tool 단위 테스트
 ├── metadata/results/    # 비식별 집계 결과
-└── outputs/example/     # synthetic schema example
+└── .github/             # CI workflow, CONTRIBUTING
 ```
+
+`outputs/`는 Git에서 제외된 로컬 작업 디렉터리입니다. 모든 tool은 `--output-dir` 또는
+`--output-root`로 이 아래를 가리켜야 합니다.
 
 ---
 
@@ -184,14 +193,17 @@ Exercise3D-Dataset-Pipeline/
 
 | 문서 | 내용 |
 |---|---|
-| [docs/status_notes.md](docs/status_notes.md) | Phase 0–13 상태표와 실행 노트 |
+| [docs/status.md](docs/status.md) | Phase 0–13 상태표, 알려진 이슈, resume 계획 |
+| [docs/plan.md](docs/plan.md) | Phase별 acceptance gate |
+| [docs/process.md](docs/process.md) | 시간순 실행 기록 |
 | [docs/showcase.md](docs/showcase.md) | mesh-only preview 생성 방법과 공개 경계 |
 | [docs/design/dataset_schema.md](docs/design/dataset_schema.md) | 최종 dataset schema |
 | [docs/design/coordinate_conventions.md](docs/design/coordinate_conventions.md) | 좌표계 규약 |
 | [docs/design/privacy_and_data_policy.md](docs/design/privacy_and_data_policy.md) | 개인정보·데이터 정책 |
 | [docs/design/reproducibility.md](docs/design/reproducibility.md) | 재현성 요구사항 |
 | [docs/tools.md](docs/tools.md) | tool별 역할과 source mutation 여부 |
-| [docs/runtime_operations.md](docs/runtime_operations.md) | 장시간 자율 generation 운영 |
+| [docs/operations.md](docs/operations.md) | 장시간 자율 generation 운영 규칙 |
+| [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) | 작업 순서와 commit 규칙 |
 
 ---
 
