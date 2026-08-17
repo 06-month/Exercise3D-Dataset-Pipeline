@@ -18,6 +18,14 @@
 > mesh-only preview만 공개합니다. 원본 영상, 얼굴 pixel, 개인정보, checkpoint, 대용량 geometry
 > payload는 포함하지 않습니다.
 
+## 무엇을 위한 데이터셋인가
+
+이 파이프라인이 만드는 데이터셋은 **[BPT](https://github.com/06-month/BPT)** — 한밭대학교 캡스톤
+디자인 프로젝트인 실시간 웨이트 트레이닝 자세 분석 앱 — 에서 수행할 pose 모델 **fine-tuning용으로
+직접 제작**한 자체 데이터셋입니다. 공개 데이터셋을 그대로 쓰지 않고, BPT가 지원하는 다섯 운동
+(스쿼트, 벤치프레스, 데드리프트, 바벨로우, 푸시업)에 랫풀다운을 더해 직접 3-view로 촬영하고
+3D pseudo-label까지 만들었습니다. 이 저장소는 그 제작 파이프라인과 검증 절차를 공개합니다.
+
 ---
 
 ## Preview
@@ -83,6 +91,7 @@ GIF는 6초 발췌본이고, MP4는 전체 sequence(15 fps)입니다. `pushup_00
 | **Label** | camera pose, 3D joint, MHR body parameter, frame/sequence quality vector |
 | **동기화 정확도** | PTS offset median 11.99 ms / p95 25.28 ms / max 31.38 ms |
 | **현재 상태** | **24/26 sequence end-to-end 완료** (REVIEW 24 / FAIL 0) |
+| **다운스트림** | [BPT](https://github.com/06-month/BPT) 자세 분석 앱의 pose 모델 fine-tuning |
 
 ---
 
