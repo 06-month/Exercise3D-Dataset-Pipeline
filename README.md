@@ -14,17 +14,13 @@
 
 </div>
 
+자세 분석 앱 [BPT](https://github.com/06-month/BPT)의 pose 모델 fine-tuning에 쓸 데이터셋을 직접
+만들기 위해 구축한 파이프라인입니다. 고정된 3대의 카메라로 촬영한 운동 영상에서 camera geometry,
+3D joint, body parameter와 품질 라벨까지 생성합니다.
+
 > **이 저장소는 데이터셋을 배포하지 않습니다.** 파이프라인 코드, 검증 방법, 비식별 집계 결과와
 > mesh-only preview만 공개합니다. 원본 영상, 얼굴 pixel, 개인정보, checkpoint, 대용량 geometry
 > payload는 포함하지 않습니다.
-
-## 무엇을 위한 데이터셋인가
-
-이 파이프라인이 만드는 데이터셋은 **[BPT](https://github.com/06-month/BPT)** — 한밭대학교 캡스톤
-디자인 프로젝트인 실시간 웨이트 트레이닝 자세 분석 앱 — 에서 수행할 pose 모델 **fine-tuning용으로
-직접 제작**한 자체 데이터셋입니다. 공개 데이터셋을 그대로 쓰지 않고, BPT가 지원하는 다섯 운동
-(스쿼트, 벤치프레스, 데드리프트, 바벨로우, 푸시업)에 랫풀다운을 더해 직접 3-view로 촬영하고
-3D pseudo-label까지 만들었습니다. 이 저장소는 그 제작 파이프라인과 검증 절차를 공개합니다.
 
 ---
 
